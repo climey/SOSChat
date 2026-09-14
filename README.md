@@ -21,17 +21,35 @@ Sem credenciais do WhatsApp o sistema roda em **modo simulado**: envios só apar
 ## Deploy no Railway
 
 1. Crie um projeto no Railway e adicione um serviço **PostgreSQL**. Ele injeta `DATABASE_URL` automaticamente.
-2. Adicione um serviço a partir deste repositório. O `railway.json` já define `npm run migrate && npm start` como comando de início e `/health` como healthcheck.
+2. Adicione um serviço a partir deste repositório. O `railway.json` já define `npm run migrate && npm run seed && npm start` como comando de início e `/health` como healthcheck.
 3. Variáveis de ambiente do serviço:
    - `NODE_ENV=production`
    - `JWT_SECRET` (string longa e aleatória, ex.: `openssl rand -hex 32`)
    - `APP_URL` (URL pública gerada pelo Railway)
    - `PGSSL=true` apenas se a `DATABASE_URL` apontar para o proxy público. Com a URL interna (`postgres.railway.internal`), deixe `false`.
-   - `WA_PHONE_NUMBER_ID`, `WA_ACCESS_TOKEN`, `WA_APP_SECRET`, `WA_VERIFY_TOKEN` (ver abaixo)
-   - `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD`, depois rode `npm run seed` uma vez pelo shell do Railway (`railway run npm run seed`).
+   - `WA_PROVIDER=baileys` para login por QR code, ou as credenciais da Cloud API (ver abaixo)
+   - `SEED_ADMIN_NAME`, `SEED_ADMIN_EMAIL` e `SEED_ADMIN_PASSWORD` (mínimo 6 caracteres). O seed roda a cada deploy e só cria o admin se ele ainda não existir.
 4. Gere um domínio público em *Settings → Networking*.
 
-## Conectando o WhatsApp (Cloud API da Meta)
+## Conectando o WhatsApp
+
+O sistema suporta dois provedores, escolhidos pela variável `WA_PROVIDER`:
+
+| Provedor | Como conecta | Prós | Contras |
+|---|---|---|---|
+| `baileys` (recomendado para começar) | QR code, como o WhatsApp Web | Funciona em minutos com qualquer número, sem aprovação da Meta | Não oficial: viola os termos do WhatsApp e há risco de banimento, principalmente em envios em massa |
+| `cloud` (padrão) | WhatsApp Business Cloud API da Meta | Oficial, estável, sem risco de ban | Exige app na Meta, número dedicado e templates fora da janela de 24h |
+
+### Opção A: QR code (Baileys)
+
+1. Defina `WA_PROVIDER=baileys` no ambiente e reinicie.
+2. Entre como admin em **Configurações → Integração WhatsApp**. O QR code aparece em poucos segundos.
+3. No celular do número de atendimento: **WhatsApp → Dispositivos conectados → Conectar dispositivo** e leia o QR.
+4. A sessão fica gravada na tabela `wa_auth` do Postgres e sobrevive a reinícios e redeploys. Use **Desconectar número** para trocar de número.
+
+Mensagens enviadas pelo celular também aparecem na inbox (como "Celular"). Mídias recebidas são baixadas e guardadas na tabela `media_files` (limite de 25 MB por arquivo).
+
+### Opção B: API oficial (Cloud API da Meta)
 
 1. Em [developers.facebook.com](https://developers.facebook.com) crie um app do tipo **Business** e adicione o produto **WhatsApp**.
 2. Em *WhatsApp → API Setup* copie o **Phone number ID** (`WA_PHONE_NUMBER_ID`). Gere um **token permanente** por um usuário de sistema no Business Manager com permissão `whatsapp_business_messaging` (`WA_ACCESS_TOKEN`).
@@ -52,7 +70,9 @@ src/
   realtime.js          eventos em tempo real para a inbox
   middleware/auth.js   JWT em cookie httpOnly, papéis admin/agent
   services/
-    whatsapp.js        cliente da Cloud API (envio, leitura, mídia, assinatura)
+    whatsapp.js        fachada que escolhe o provedor (WA_PROVIDER)
+    wa-cloud.js        provedor oficial: Cloud API da Meta (envio, leitura, mídia, assinatura)
+    wa-baileys.js      provedor QR code: WhatsApp Web via Baileys, sessão no Postgres
     inbound.js         processa webhooks: contatos, conversas, mensagens, status
     conversations.js   consultas de conversas com contato, responsável e tags
   routes/
@@ -63,6 +83,7 @@ src/
     reports.js         resumo, volume, por atendente, por tag
     webhook.js         GET verificação e POST mensagens da Meta
     media.js           proxy autenticado de mídias do WhatsApp
+    whatsapp.js        status da conexão, QR code, reconectar, desconectar
     dev.js             simulador de mensagens (só fora de produção)
 migrations/            SQL versionado, aplicado por scripts/migrate.js
 public/                login, inbox, relatórios e configurações
@@ -87,6 +108,7 @@ Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` 
 ## Roadmap
 
 - [x] **Etapa 1 (MVP):** inbox compartilhada em tempo real, tags, responsável, finalizar/reabrir, relatórios, webhook oficial, mídia recebida
+- [x] **Etapa 1.5:** login por QR code (Baileys) como provedor alternativo, com sessão no Postgres
 - [ ] **Etapa 2:** envio de mídia e templates (janela de 24h), notas internas, respostas rápidas
 - [ ] **Etapa 3:** integração com a plataforma de consultas (detectar placa/chassi na mensagem e mostrar dados do veículo no painel lateral)
 - [ ] **Etapa 4:** filas/departamentos, horário de atendimento com mensagem automática, distribuição automática

@@ -45,7 +45,7 @@ app.use(
   })
 );
 
-app.get('/health', (_req, res) => res.json({ ok: true, whatsapp: whatsapp.isConfigured() ? 'configured' : 'mock', dev: config.enableDevSimulator }));
+app.get('/health', (_req, res) => res.json({ ok: true, whatsapp: whatsapp.getStatus(), dev: config.enableDevSimulator }));
 
 // Webhook da Meta (sem auth de usuário; validado por assinatura)
 app.use('/webhook', require('./routes/webhook'));
@@ -58,6 +58,7 @@ app.use('/api/tags', require('./routes/tags'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/media', require('./routes/media'));
+app.use('/api/whatsapp', require('./routes/whatsapp'));
 if (config.enableDevSimulator) {
   app.use('/api/dev', require('./routes/dev'));
   console.log('[dev] simulador de mensagens habilitado em POST /api/dev/simulate-inbound');
@@ -81,9 +82,10 @@ app.use((err, req, res, _next) => {
 
 async function start() {
   await db.query('SELECT 1');
+  whatsapp.start().catch((err) => console.error('[whatsapp] falha ao iniciar provedor', err));
   server.listen(config.port, () => {
     console.log(`SOS Chat rodando em ${config.appUrl} (${config.isProd ? 'produção' : 'desenvolvimento'})`);
-    console.log(`WhatsApp: ${whatsapp.isConfigured() ? 'Cloud API configurada' : 'modo simulado (sem credenciais)'}`);
+    console.log(`WhatsApp: provedor ${whatsapp.provider}${whatsapp.provider === 'cloud' ? (whatsapp.isConfigured() ? ' (Cloud API configurada)' : ' (modo simulado, sem credenciais)') : ' (QR code em Configurações)'}`);
   });
 }
 
@@ -94,5 +96,7 @@ start().catch((err) => {
 
 process.on('SIGTERM', () => {
   console.log('Encerrando...');
+  whatsapp.stop();
   server.close(() => db.pool.end().then(() => process.exit(0)));
+  setTimeout(() => process.exit(0), 5000).unref();
 });

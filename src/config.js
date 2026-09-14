@@ -19,6 +19,8 @@ module.exports = {
   pgSsl: process.env.PGSSL === 'true',
   jwtSecret: required('JWT_SECRET') || 'dev-secret-nao-usar-em-producao',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '12h',
+  // 'baileys' = WhatsApp Web via QR code (não oficial); 'cloud' = API oficial da Meta
+  waProvider: process.env.WA_PROVIDER === 'baileys' ? 'baileys' : 'cloud',
   whatsapp: {
     phoneNumberId: process.env.WA_PHONE_NUMBER_ID || '',
     accessToken: process.env.WA_ACCESS_TOKEN || '',

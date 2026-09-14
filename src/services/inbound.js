@@ -106,6 +106,61 @@ async function handleInboundMessage(msg, contactInfo = {}) {
   return result;
 }
 
+/**
+ * Registra uma mensagem enviada pelo próprio número fora do sistema (ex.: pelo celular).
+ * Ignorada se já existe (eco de um envio feito pela inbox).
+ */
+async function handleOutboundEcho(waId, msg) {
+  const content = extractContent(msg);
+  const sentAt = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date();
+
+  const result = await db.withTransaction(async (client) => {
+    const exists = await client.query('SELECT 1 FROM messages WHERE wa_message_id = $1', [msg.id]);
+    if (exists.rowCount) return null;
+
+    const { rows: contactRows } = await client.query(
+      `INSERT INTO contacts (wa_id) VALUES ($1) ON CONFLICT (wa_id) DO UPDATE SET wa_id = EXCLUDED.wa_id RETURNING id`,
+      [waId]
+    );
+    const contactId = contactRows[0].id;
+    let { rows: convRows } = await client.query(
+      `SELECT id FROM conversations WHERE contact_id = $1 AND status = 'open' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [contactId]
+    );
+    let conversationId = convRows[0]?.id;
+    if (!conversationId) {
+      const ins = await client.query(
+        `INSERT INTO conversations (contact_id, status, last_message_at) VALUES ($1, 'open', $2) RETURNING id`,
+        [contactId, sentAt]
+      );
+      conversationId = ins.rows[0].id;
+    }
+    const { rows: msgRows } = await client.query(
+      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at)
+       VALUES ($1, 'out', $2, $3, $4, $5, $6, 'sent', $7)
+       ON CONFLICT (wa_message_id) DO NOTHING RETURNING *`,
+      [conversationId, msg.id, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt]
+    );
+    if (!msgRows.length) return null;
+    await client.query(
+      `UPDATE conversations
+          SET last_message_at = GREATEST(last_message_at, $2::timestamptz),
+              last_message_preview = $3,
+              first_response_at = COALESCE(first_response_at, $2::timestamptz)
+        WHERE id = $1`,
+      [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]
+    );
+    const conversation = await conversations.getById(conversationId, client);
+    return { message: { ...msgRows[0], sender_name: 'Celular' }, conversation };
+  });
+
+  if (result) {
+    realtime.broadcast('message:new', result);
+    realtime.broadcast('conversation:updated', result.conversation);
+  }
+  return result;
+}
+
 /** Atualiza status de entrega (sent → delivered → read / failed) de mensagens enviadas. */
 async function handleStatus(st) {
   if (!st.id || !STATUS_RANK.hasOwnProperty(st.status)) return;
@@ -146,4 +201,4 @@ async function processWebhook(payload) {
   }
 }
 
-module.exports = { processWebhook, handleInboundMessage, handleStatus, extractContent };
+module.exports = { processWebhook, handleInboundMessage, handleOutboundEcho, handleStatus, extractContent };

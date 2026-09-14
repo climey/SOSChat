@@ -114,16 +114,75 @@
     } catch (err) { toast(err.message, true); }
   });
 
-  // ---------- Integração ----------
+  // ---------- Integração WhatsApp ----------
+  const WA_LABELS = {
+    connected: ['open', 'Conectado'],
+    qr: ['resolved', 'Aguardando leitura do QR code'],
+    connecting: ['resolved', 'Conectando…'],
+    reconnecting: ['resolved', 'Reconectando…'],
+    disconnected: ['resolved', 'Desconectado'],
+    off: ['resolved', 'Desligado'],
+    mock: ['resolved', 'Modo simulado'],
+  };
+  let waTimer = null;
+
   async function loadIntegration() {
+    let st;
     try {
-      const h = await api('GET', '/health');
-      $('wa-status').textContent = h.whatsapp === 'configured'
-        ? 'WhatsApp Cloud API configurada. Mensagens enviadas vão para o número oficial.'
-        : 'Modo simulado: credenciais do WhatsApp não configuradas. Envios são apenas registrados no log.';
-      $('webhook-url').textContent = `${location.origin}/webhook/whatsapp`;
-    } catch { $('wa-status').textContent = 'Não foi possível verificar.'; }
+      st = await api('GET', '/api/whatsapp/status');
+    } catch {
+      $('wa-status').textContent = 'Não foi possível verificar.';
+      return;
+    }
+
+    const [cls, label] = WA_LABELS[st.status] || ['resolved', st.status];
+    $('wa-status').innerHTML = `<span class="status-pill ${cls}">${esc(label)}</span>` +
+      (st.me ? ` <span class="small muted">número ${esc(st.me)}</span>` : '') +
+      (st.lastError ? `<div class="small" style="color:#ff6b6b;margin-top:6px">${esc(st.lastError)}</div>` : '');
+
+    if (st.provider === 'cloud') {
+      $('wa-help').innerHTML = st.status === 'connected'
+        ? 'WhatsApp Business Cloud API (oficial) configurada.'
+        : `Provedor oficial (Cloud API) sem credenciais: envios só aparecem no log. Para usar QR code, defina <code>WA_PROVIDER=baileys</code>. Webhook: <code>${esc(location.origin)}/webhook/whatsapp</code>`;
+      $('wa-actions').hidden = true;
+      $('wa-qr-box').hidden = true;
+      return;
+    }
+
+    $('wa-help').textContent = st.status === 'connected'
+      ? 'Sessão do WhatsApp Web ativa. Mensagens recebidas neste número aparecem na caixa de entrada.'
+      : 'Escaneie o QR code com o celular do número de atendimento. A sessão fica salva e sobrevive a reinícios.';
+    $('wa-actions').hidden = me.role !== 'admin';
+
+    if (st.status === 'qr' && me.role === 'admin') {
+      try {
+        const { qr } = await api('GET', '/api/whatsapp/qr');
+        $('wa-qr').src = qr;
+        $('wa-qr-box').hidden = false;
+      } catch { /* o QR pode ter expirado entre as chamadas */ }
+    } else {
+      $('wa-qr-box').hidden = true;
+    }
+
+    clearTimeout(waTimer);
+    if (st.status !== 'connected') waTimer = setTimeout(loadIntegration, 3000);
   }
+
+  $('wa-reconnect').addEventListener('click', async () => {
+    try {
+      await api('POST', '/api/whatsapp/reconnect');
+      toast('Reconectando…');
+      setTimeout(loadIntegration, 1500);
+    } catch (err) { toast(err.message, true); }
+  });
+  $('wa-logout').addEventListener('click', async () => {
+    if (!confirm('Desconectar o número? Será preciso ler o QR code de novo.')) return;
+    try {
+      await api('POST', '/api/whatsapp/logout');
+      toast('Sessão encerrada');
+      setTimeout(loadIntegration, 1500);
+    } catch (err) { toast(err.message, true); }
+  });
 
   async function init() {
     me = await SOS.loadMe();

@@ -11,14 +11,17 @@ router.use(requireAuth);
 router.get('/:mediaId', async (req, res, next) => {
   try {
     const mediaId = String(req.params.mediaId);
+    if (!/^[\w.-]+$/.test(mediaId)) return res.status(400).json({ error: 'ID inválido' });
     const { rows } = await db.query('SELECT media_mime FROM messages WHERE media_id = $1 LIMIT 1', [mediaId]);
     if (!rows.length) return res.status(404).json({ error: 'Mídia não encontrada' });
-    const { stream, mimeType, size } = await whatsapp.fetchMedia(mediaId);
-    res.setHeader('Content-Type', mimeType);
+    const media = await whatsapp.fetchMedia(mediaId);
+    res.setHeader('Content-Type', media.mimeType);
     res.setHeader('Content-Disposition', 'inline');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    if (size) res.setHeader('Content-Length', size);
-    Readable.fromWeb(stream).pipe(res);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    if (media.size) res.setHeader('Content-Length', media.size);
+    if (media.buffer) return res.end(media.buffer);
+    Readable.fromWeb(media.stream).pipe(res);
   } catch (err) {
     next(err);
   }

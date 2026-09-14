@@ -129,8 +129,8 @@ router.post('/:id/read', async (req, res, next) => {
         ORDER BY created_at DESC LIMIT 1`,
       [id]
     );
-    if (rows[0]?.wa_message_id) whatsapp.markAsRead(rows[0].wa_message_id); // fire-and-forget
     const conv = await conversations.getById(id);
+    if (rows[0]?.wa_message_id && conv) whatsapp.markAsRead(rows[0].wa_message_id, conv.wa_id); // fire-and-forget
     realtime.broadcast('conversation:updated', conv);
     res.json({ conversation: conv });
   } catch (err) {
