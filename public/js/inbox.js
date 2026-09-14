@@ -150,7 +150,7 @@
       const showBody = !(m.media_id && (m.type === 'image' || m.type === 'sticker') && /^\[/.test(m.body || ''));
       return `${sep}<div class="msg ${m.direction}" data-id="${m.id}">
         ${m.direction === 'out' && m.sender_name ? `<div class="sender">${esc(m.sender_name)}</div>` : ''}
-        ${mediaHtml(m)}${showBody ? esc(m.body) : ''}
+        ${mediaHtml(m)}${showBody ? `<div class="body">${esc(m.body)}</div>` : ''}
         <div class="foot"><span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</div>
       </div>`;
     }).join('');
