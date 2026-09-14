@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relatórios · SOS Chat</title>
+  <link rel="icon" href="/img/logo.svg">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="/img/logo.svg" alt="">
+      <div class="brand-name">SOS Chat<small>SOS Buscas Online</small></div>
+    </div>
+    <nav class="nav">
+      <a href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        <span>Caixa de entrada</span>
+      </a>
+      <a href="/reports.html" class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Relatórios</span>
+      </a>
+      <a href="/settings.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Configurações</span>
+      </a>
+    </nav>
+    <div class="sidebar-user">
+      <div class="avatar sm" id="me-avatar"></div>
+      <div class="info"><div class="name" id="me-name"></div><div class="role" id="me-role"></div></div>
+      <button class="btn btn-ghost btn-icon" id="logout" title="Sair">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page">
+      <div class="page-header">
+        <div><h1>Relatórios</h1><p>Desempenho do atendimento no período</p></div>
+        <form class="filters-row" id="filters">
+          <div class="field"><label class="label">De</label><input class="input" type="date" id="from"></div>
+          <div class="field"><label class="label">Até</label><input class="input" type="date" id="to"></div>
+          <div class="field"><label class="label">Agrupar</label>
+            <select class="select" id="group"><option value="day">Por dia</option><option value="week">Por semana</option><option value="month">Por mês</option></select>
+          </div>
+          <button class="btn btn-primary" type="submit">Aplicar</button>
+        </form>
+      </div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>Conversas iniciadas</h3>
+          <div class="chart" id="chart-conv"></div>
+        </div>
+        <div class="card">
+          <h3>Mensagens recebidas e enviadas</h3>
+          <div class="chart-legend"><span><i style="background:#339af0"></i>Recebidas</span><span><i style="background:#E03131"></i>Enviadas</span></div>
+          <div class="chart" id="chart-msg"></div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3>Por atendente</h3>
+          <div style="overflow-x:auto"><table class="table" id="agents-table"></table></div>
+        </div>
+        <div class="card">
+          <h3>Por tag</h3>
+          <table class="table" id="tags-table"></table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Volume por período</h3>
+        <div style="overflow-x:auto"><table class="table" id="volume-table"></table></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/reports.js"></script>
+</body>
+</html>

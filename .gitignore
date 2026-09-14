@@ -1,0 +1,8 @@
+node_modules/
+.env
+*.log
+.DS_Store
+
+# Restos de uma inicialização anterior (pode apagar a pasta SOSChat/ e o arquivo chat e remover estas linhas)
+/SOSChat/
+/chat

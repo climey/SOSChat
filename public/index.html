@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caixa de entrada · SOS Chat</title>
+  <link rel="icon" href="/img/logo.svg">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="/img/logo.svg" alt="">
+      <div class="brand-name">SOS Chat<small>SOS Buscas Online</small></div>
+    </div>
+    <nav class="nav">
+      <a href="/" class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+        <span>Caixa de entrada</span>
+      </a>
+      <a href="/reports.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Relatórios</span>
+      </a>
+      <a href="/settings.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Configurações</span>
+      </a>
+    </nav>
+    <div class="sidebar-user">
+      <div class="avatar sm" id="me-avatar"></div>
+      <div class="info"><div class="name" id="me-name"></div><div class="role" id="me-role"></div></div>
+      <button class="btn btn-ghost btn-icon" id="logout" title="Sair">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <section class="conv-list">
+      <div class="conv-list-header">
+        <h2>Conversas <span class="badge" id="open-count" hidden>0</span>
+          <button class="btn btn-sm btn-ghost" id="btn-simulate" hidden title="Simular mensagem recebida (dev)" style="margin-left:auto">+ Simular</button>
+        </h2>
+        <div class="filters" id="status-filters">
+          <button class="chip active" data-status="open">Abertas</button>
+          <button class="chip" data-status="resolved">Finalizadas</button>
+          <button class="chip" data-status="all">Todas</button>
+        </div>
+        <div class="filters" id="assigned-filters" style="margin-top:6px">
+          <button class="chip active" data-assigned="all">Todos</button>
+          <button class="chip" data-assigned="me">Minhas</button>
+          <button class="chip" data-assigned="unassigned">Sem responsável</button>
+        </div>
+        <div class="filters" style="margin-top:6px">
+          <select class="select" id="tag-filter" style="width:100%"><option value="">Todas as tags</option></select>
+        </div>
+        <input class="input search" id="search" type="search" placeholder="Buscar por nome ou telefone…">
+      </div>
+      <div class="conv-items" id="conv-items"></div>
+    </section>
+
+    <section class="chat" id="chat">
+      <div class="empty" id="chat-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <div>Selecione uma conversa para começar o atendimento</div>
+      </div>
+      <div id="chat-panel" hidden style="display:flex;flex-direction:column;height:100%">
+        <div class="chat-header">
+          <div class="avatar" id="chat-avatar"></div>
+          <div><div class="title" id="chat-title"></div><div class="sub" id="chat-sub"></div></div>
+          <div class="actions">
+            <button class="btn btn-sm" id="btn-details" title="Detalhes">Detalhes</button>
+            <button class="btn btn-sm btn-primary" id="btn-resolve">Finalizar</button>
+          </div>
+        </div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <form class="chat-compose" id="compose">
+          <textarea class="textarea" id="compose-text" rows="1" placeholder="Escreva uma mensagem… (Enter envia, Shift+Enter quebra linha)"></textarea>
+          <button class="btn btn-primary" type="submit" id="compose-send">Enviar</button>
+        </form>
+      </div>
+    </section>
+
+    <aside class="details" id="details" hidden>
+      <h4>Contato</h4>
+      <div class="contact">
+        <div class="avatar" id="d-avatar"></div>
+        <div><div class="name" id="d-name"></div><div class="phone" id="d-phone"></div></div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <input class="input" id="d-name-input" placeholder="Nome do contato">
+      </div>
+      <h4>Status</h4>
+      <div id="d-status"></div>
+      <div class="small muted" id="d-times" style="margin-top:6px"></div>
+      <h4>Responsável</h4>
+      <select class="select" id="d-assignee"><option value="">Sem responsável</option></select>
+      <h4>Tags</h4>
+      <div class="tag-picker" id="d-tags"></div>
+    </aside>
+  </main>
+</div>
+
+<div class="modal-bg" id="sim-modal" hidden>
+  <form class="modal" id="sim-form">
+    <h3>Simular mensagem recebida</h3>
+    <div class="field"><label class="label">Telefone (só números)</label><input class="input" id="sim-from" value="5511999990001"></div>
+    <div class="field"><label class="label">Nome do cliente</label><input class="input" id="sim-name" value="Cliente Teste"></div>
+    <div class="field"><label class="label">Mensagem</label><input class="input" id="sim-text" value="Olá, quero consultar a placa ABC1D23"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="sim-cancel">Cancelar</button>
+      <button type="submit" class="btn btn-primary">Enviar</button>
+    </div>
+  </form>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/inbox.js"></script>
+</body>
+</html>

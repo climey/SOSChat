@@ -1,0 +1,335 @@
+/* Caixa de entrada compartilhada */
+(function () {
+  const { api, esc, initials, formatPhone, fmtTime, fmtClock, fmtDay, fmtDuration, toast } = SOS;
+
+  const state = {
+    me: null,
+    tags: [],
+    users: [],
+    conversations: [],
+    currentId: null,
+    messages: [],
+    filters: { status: 'open', assigned: 'all', tag: '', q: '' },
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    items: $('conv-items'), openCount: $('open-count'), search: $('search'), tagFilter: $('tag-filter'),
+    chatEmpty: $('chat-empty'), chatPanel: $('chat-panel'), chatAvatar: $('chat-avatar'),
+    chatTitle: $('chat-title'), chatSub: $('chat-sub'), messages: $('chat-messages'),
+    compose: $('compose'), composeText: $('compose-text'), composeSend: $('compose-send'),
+    btnResolve: $('btn-resolve'), btnDetails: $('btn-details'), details: $('details'),
+    dAvatar: $('d-avatar'), dName: $('d-name'), dPhone: $('d-phone'), dNameInput: $('d-name-input'),
+    dStatus: $('d-status'), dTimes: $('d-times'), dAssignee: $('d-assignee'), dTags: $('d-tags'),
+  };
+
+  const contactName = (c) => c.contact_name || c.profile_name || formatPhone(c.wa_id);
+  const current = () => state.conversations.find((c) => c.id === state.currentId) || state.currentConv || null;
+
+  // ---------- Lista de conversas ----------
+  let listTimer;
+  function scheduleReload() {
+    clearTimeout(listTimer);
+    listTimer = setTimeout(loadConversations, 150);
+  }
+
+  async function loadConversations() {
+    const f = state.filters;
+    const qs = new URLSearchParams({ status: f.status, assigned: f.assigned });
+    if (f.tag) qs.set('tag', f.tag);
+    if (f.q) qs.set('q', f.q);
+    const { conversations } = await api('GET', `/api/conversations?${qs}`);
+    state.conversations = conversations;
+    renderList();
+  }
+
+  function renderList() {
+    const list = state.conversations;
+    if (!list.length) {
+      els.items.innerHTML = '<div class="empty"><div>Nenhuma conversa encontrada</div></div>';
+    } else {
+      els.items.innerHTML = list.map((c) => `
+        <div class="conv-item ${c.id === state.currentId ? 'active' : ''} ${c.unread_count > 0 ? 'unread' : ''}" data-id="${c.id}">
+          <div class="avatar">${esc(initials(contactName(c)))}</div>
+          <div class="body">
+            <div class="top">
+              <span class="name">${esc(contactName(c))}</span>
+              <span class="time">${esc(fmtTime(c.last_message_at))}</span>
+            </div>
+            <div class="preview">${esc(c.last_message_preview || '')}</div>
+            <div class="meta">
+              ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
+              ${c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : ''}
+              ${c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')}
+              <span class="assignee">${c.assigned_user_name ? esc(c.assigned_user_name) : 'Sem responsável'}</span>
+            </div>
+          </div>
+        </div>`).join('');
+    }
+    const unread = list.filter((c) => c.status === 'open').reduce((n, c) => n + (c.unread_count > 0 ? 1 : 0), 0);
+    els.openCount.hidden = unread === 0;
+    els.openCount.textContent = unread;
+  }
+
+  els.items.addEventListener('click', (e) => {
+    const item = e.target.closest('.conv-item');
+    if (item) openConversation(Number(item.dataset.id));
+  });
+
+  // Filtros
+  document.querySelectorAll('#status-filters .chip').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('#status-filters .chip').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active');
+    state.filters.status = b.dataset.status;
+    loadConversations();
+  }));
+  document.querySelectorAll('#assigned-filters .chip').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('#assigned-filters .chip').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active');
+    state.filters.assigned = b.dataset.assigned;
+    loadConversations();
+  }));
+  els.tagFilter.addEventListener('change', () => { state.filters.tag = els.tagFilter.value; loadConversations(); });
+  let searchTimer;
+  els.search.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { state.filters.q = els.search.value.trim(); loadConversations(); }, 250);
+  });
+
+  // ---------- Conversa aberta ----------
+  async function openConversation(id) {
+    state.currentId = id;
+    const [{ conversation }, { messages }] = await Promise.all([
+      api('GET', `/api/conversations/${id}`),
+      api('GET', `/api/conversations/${id}/messages`),
+    ]);
+    state.currentConv = conversation;
+    state.messages = messages;
+    upsertConversation(conversation);
+    renderChat();
+    renderMessages(true);
+    renderDetails();
+    els.composeText.focus();
+    if (conversation.unread_count > 0) api('POST', `/api/conversations/${id}/read`).catch(() => {});
+  }
+
+  function renderChat() {
+    const c = current();
+    if (!c) return;
+    els.chatEmpty.hidden = true;
+    els.chatPanel.hidden = false;
+    els.chatAvatar.textContent = initials(contactName(c));
+    els.chatTitle.textContent = contactName(c);
+    els.chatSub.textContent = `${formatPhone(c.wa_id)} · ${c.assigned_user_name ? 'Responsável: ' + c.assigned_user_name : 'Sem responsável'}`;
+    els.btnResolve.textContent = c.status === 'resolved' ? 'Reabrir' : 'Finalizar';
+    els.btnResolve.classList.toggle('btn-primary', c.status !== 'resolved');
+  }
+
+  function statusIcon(m) {
+    if (m.direction !== 'out') return '';
+    const map = { pending: ['◌', ''], sent: ['✓', ''], delivered: ['✓✓', ''], read: ['✓✓', 'read'], failed: ['⚠ falhou', 'failed'] };
+    const [txt, cls] = map[m.status] || ['', ''];
+    return `<span class="st ${cls}" title="${esc(m.error || m.status)}">${txt}</span>`;
+  }
+
+  function mediaHtml(m) {
+    if (!m.media_id) return '';
+    if (m.type === 'image' || m.type === 'sticker') {
+      return `<img class="media-img" src="/api/media/${esc(m.media_id)}" alt="imagem" loading="lazy">`;
+    }
+    const label = { audio: 'Ouvir áudio', video: 'Ver vídeo', document: 'Baixar documento' }[m.type] || 'Abrir mídia';
+    return `<div class="media"><a href="/api/media/${esc(m.media_id)}" target="_blank" rel="noopener">📎 ${label}</a></div>`;
+  }
+
+  function renderMessages(scroll) {
+    let lastDay = null;
+    els.messages.innerHTML = state.messages.map((m) => {
+      const day = fmtDay(m.created_at);
+      const sep = day !== lastDay ? `<div class="day-sep">${esc(day)}</div>` : '';
+      lastDay = day;
+      const showBody = !(m.media_id && (m.type === 'image' || m.type === 'sticker') && /^\[/.test(m.body || ''));
+      return `${sep}<div class="msg ${m.direction}" data-id="${m.id}">
+        ${m.direction === 'out' && m.sender_name ? `<div class="sender">${esc(m.sender_name)}</div>` : ''}
+        ${mediaHtml(m)}${showBody ? esc(m.body) : ''}
+        <div class="foot"><span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</div>
+      </div>`;
+    }).join('');
+    if (scroll) els.messages.scrollTop = els.messages.scrollHeight;
+  }
+
+  // Envio
+  els.compose.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = els.composeText.value.trim();
+    const id = state.currentId;
+    if (!body || !id) return;
+    els.composeSend.disabled = true;
+    els.composeText.value = '';
+    autosize();
+    try {
+      await api('POST', `/api/conversations/${id}/messages`, { body });
+    } catch (err) {
+      toast(err.message, true);
+      els.composeText.value = body;
+    } finally {
+      els.composeSend.disabled = false;
+      els.composeText.focus();
+    }
+  });
+  els.composeText.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); els.compose.requestSubmit(); }
+  });
+  function autosize() {
+    els.composeText.style.height = 'auto';
+    els.composeText.style.height = Math.min(els.composeText.scrollHeight, 160) + 'px';
+  }
+  els.composeText.addEventListener('input', autosize);
+
+  // Finalizar / reabrir
+  els.btnResolve.addEventListener('click', async () => {
+    const c = current();
+    if (!c) return;
+    try {
+      await api('PATCH', `/api/conversations/${c.id}`, { status: c.status === 'resolved' ? 'open' : 'resolved' });
+      toast(c.status === 'resolved' ? 'Conversa reaberta' : 'Conversa finalizada');
+    } catch (err) { toast(err.message, true); }
+  });
+  els.btnDetails.addEventListener('click', () => els.details.classList.toggle('open'));
+
+  // ---------- Painel de detalhes ----------
+  function renderDetails() {
+    const c = current();
+    if (!c) { els.details.hidden = true; return; }
+    els.details.hidden = false;
+    els.dAvatar.textContent = initials(contactName(c));
+    els.dName.textContent = contactName(c);
+    els.dPhone.textContent = formatPhone(c.wa_id) + (c.profile_name ? ` · perfil: ${c.profile_name}` : '');
+    if (document.activeElement !== els.dNameInput) els.dNameInput.value = c.contact_name || '';
+    els.dStatus.innerHTML = `<span class="status-pill ${c.status}">${c.status === 'open' ? 'Aberta' : 'Finalizada'}</span>`;
+    const times = [`Iniciada ${new Date(c.created_at).toLocaleString('pt-BR')}`];
+    if (c.first_response_at) times.push(`1ª resposta em ${fmtDuration((new Date(c.first_response_at) - new Date(c.created_at)) / 1000)}`);
+    if (c.resolved_at) times.push(`Resolvida em ${fmtDuration((new Date(c.resolved_at) - new Date(c.created_at)) / 1000)}`);
+    els.dTimes.innerHTML = times.map(esc).join('<br>');
+    els.dAssignee.value = c.assigned_user_id || '';
+    const selected = new Set(c.tags.map((t) => t.id));
+    els.dTags.innerHTML = state.tags.map((t) => `
+      <span class="tag selectable ${selected.has(t.id) ? 'on' : ''}" data-id="${t.id}" style="--tag-color:${esc(t.color)}">
+        <i class="dot" style="background:${esc(t.color)}"></i>${esc(t.name)}
+      </span>`).join('');
+  }
+
+  els.dTags.addEventListener('click', async (e) => {
+    const el = e.target.closest('.tag.selectable');
+    const c = current();
+    if (!el || !c) return;
+    const id = Number(el.dataset.id);
+    const ids = new Set(c.tags.map((t) => t.id));
+    ids.has(id) ? ids.delete(id) : ids.add(id);
+    try { await api('PUT', `/api/conversations/${c.id}/tags`, { tag_ids: [...ids] }); }
+    catch (err) { toast(err.message, true); }
+  });
+  els.dAssignee.addEventListener('change', async () => {
+    const c = current();
+    if (!c) return;
+    try { await api('PATCH', `/api/conversations/${c.id}`, { assigned_user_id: els.dAssignee.value ? Number(els.dAssignee.value) : null }); }
+    catch (err) { toast(err.message, true); }
+  });
+  els.dNameInput.addEventListener('change', async () => {
+    const c = current();
+    if (!c) return;
+    try { await api('PATCH', `/api/conversations/${c.id}/contact`, { name: els.dNameInput.value }); toast('Nome salvo'); }
+    catch (err) { toast(err.message, true); }
+  });
+
+  // ---------- Tempo real ----------
+  function matchesFilters(c) {
+    const f = state.filters;
+    if (f.status !== 'all' && c.status !== f.status) return false;
+    if (f.assigned === 'me' && c.assigned_user_id !== state.me.id) return false;
+    if (f.assigned === 'unassigned' && c.assigned_user_id) return false;
+    if (f.tag && !c.tags.some((t) => String(t.id) === String(f.tag))) return false;
+    if (f.q) {
+      const q = f.q.toLowerCase();
+      if (![c.wa_id, c.contact_name, c.profile_name].some((v) => (v || '').toLowerCase().includes(q))) return false;
+    }
+    return true;
+  }
+
+  function upsertConversation(conv) {
+    const idx = state.conversations.findIndex((c) => c.id === conv.id);
+    if (matchesFilters(conv)) {
+      if (idx >= 0) state.conversations[idx] = conv; else state.conversations.push(conv);
+      state.conversations.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
+    } else if (idx >= 0) {
+      state.conversations.splice(idx, 1);
+    }
+    if (conv.id === state.currentId) state.currentConv = conv;
+    renderList();
+  }
+
+  function connectSocket() {
+    const socket = io({ withCredentials: true });
+    socket.on('conversation:updated', (conv) => {
+      upsertConversation(conv);
+      if (conv.id === state.currentId) { renderChat(); renderDetails(); }
+    });
+    socket.on('message:new', ({ message, conversation }) => {
+      upsertConversation(conversation);
+      if (message.conversation_id === state.currentId) {
+        if (!state.messages.some((m) => m.id === message.id)) {
+          state.messages.push(message);
+          const nearBottom = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight < 120;
+          renderMessages(nearBottom || message.direction === 'out');
+        }
+        if (message.direction === 'in' && document.hasFocus()) api('POST', `/api/conversations/${state.currentId}/read`).catch(() => {});
+      } else if (message.direction === 'in') {
+        notify(conversation, message);
+      }
+    });
+    socket.on('message:status', ({ id, status, error }) => {
+      const m = state.messages.find((x) => x.id === id);
+      if (m) { m.status = status; m.error = error; renderMessages(false); }
+    });
+    socket.on('connect_error', () => toast('Conexão em tempo real perdida, tentando reconectar…', true));
+  }
+
+  function notify(conv, message) {
+    if (!('Notification' in window) || Notification.permission !== 'granted' || document.hasFocus()) return;
+    const n = new Notification(contactName(conv), { body: message.body || 'Nova mensagem', icon: '/img/logo.svg' });
+    n.onclick = () => { window.focus(); openConversation(conv.id); n.close(); };
+  }
+
+  // ---------- Simulador (dev) ----------
+  async function setupSimulator() {
+    try {
+      const h = await api('GET', '/health');
+      if (!h.dev) return;
+      $('btn-simulate').hidden = false;
+      $('btn-simulate').addEventListener('click', () => { $('sim-modal').hidden = false; });
+      $('sim-cancel').addEventListener('click', () => { $('sim-modal').hidden = true; });
+      $('sim-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+          await api('POST', '/api/dev/simulate-inbound', { from: $('sim-from').value, name: $('sim-name').value, text: $('sim-text').value });
+          $('sim-modal').hidden = true;
+        } catch (err) { toast(err.message, true); }
+      });
+    } catch { /* ignora */ }
+  }
+
+  // ---------- Init ----------
+  async function init() {
+    state.me = await SOS.loadMe();
+    const [{ tags }, { users }] = await Promise.all([api('GET', '/api/tags'), api('GET', '/api/users')]);
+    state.tags = tags;
+    state.users = users;
+    els.tagFilter.innerHTML = '<option value="">Todas as tags</option>' + tags.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+    els.dAssignee.innerHTML = '<option value="">Sem responsável</option>' + users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
+    await loadConversations();
+    connectSocket();
+    setupSimulator();
+    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  }
+
+  init().catch((err) => toast(err.message, true));
+})();
