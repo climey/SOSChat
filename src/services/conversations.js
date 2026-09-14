@@ -4,10 +4,12 @@ const CONVERSATION_SELECT = `
   SELECT c.id, c.status, c.assigned_user_id, c.unread_count, c.last_message_at,
          c.last_message_preview, c.first_response_at, c.resolved_at, c.created_at,
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name,
-         u.name AS assigned_user_name
+         u.name AS assigned_user_name,
+         c.account_id, wa.name AS account_name, wa.phone AS account_phone
     FROM conversations c
     JOIN contacts ct ON ct.id = c.contact_id
     LEFT JOIN users u ON u.id = c.assigned_user_id
+    LEFT JOIN wa_accounts wa ON wa.id = c.account_id
 `;
 
 /** Anexa o array `tags` a cada conversa (uma query para o lote inteiro). */
@@ -51,6 +53,7 @@ async function list(filters = {}) {
   if (filters.status && filters.status !== 'all') add('c.status = ?', filters.status);
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
+  if (filters.accountId) add('c.account_id = ?', filters.accountId);
   if (filters.tagId) {
     params.push(filters.tagId);
     // (conversation_id, tag_id) é chave primária, então o JOIN não duplica linhas

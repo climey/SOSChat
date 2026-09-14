@@ -1,23 +1,38 @@
 /*
  * Fachada do WhatsApp. Escolhe o provedor pela variável WA_PROVIDER:
- *   - baileys: WhatsApp Web via QR code (não oficial, sem aprovação da Meta)
- *   - cloud:   WhatsApp Business Cloud API (oficial)
+ *   - baileys: WhatsApp Web via QR code (não oficial), vários números
+ *   - cloud:   WhatsApp Business Cloud API (oficial), um número
+ *
+ * Todas as funções recebem accountId (ignorado pelo provedor cloud).
  */
 const config = require('../config');
 
-const provider = config.waProvider === 'baileys' ? require('./wa-baileys') : require('./wa-cloud');
+const isBaileys = config.waProvider === 'baileys';
+const provider = isBaileys ? require('./wa-baileys') : require('./wa-cloud');
+
+function getStatus() {
+  if (isBaileys) return provider.getStatus();
+  const st = provider.getStatus();
+  return { provider: 'cloud', accounts: [{ id: null, name: 'Cloud API (Meta)', phone: st.me, status: st.status, hasQr: false, lastError: null }] };
+}
 
 module.exports = {
   provider: config.waProvider,
+  multiAccount: isBaileys,
   isConfigured: () => provider.isConfigured(),
-  sendText: (to, body) => provider.sendText(to, body),
-  markAsRead: (waMessageId, waId) => provider.markAsRead(waMessageId, waId),
+  getStatus,
+  pickAccount: () => (isBaileys ? provider.pickAccount() : null),
+  sendText: (accountId, to, body) => (isBaileys ? provider.sendText(accountId, to, body) : provider.sendText(to, body)),
+  markAsRead: (accountId, waMessageId, waId) => (isBaileys ? provider.markAsRead(accountId, waMessageId, waId) : provider.markAsRead(waMessageId)),
   fetchMedia: (mediaId) => provider.fetchMedia(mediaId),
   verifySignature: (rawBody, header) => provider.verifySignature(rawBody, header),
-  getStatus: () => provider.getStatus(),
   start: () => (provider.start ? provider.start() : Promise.resolve()),
   stop: () => (provider.stop ? provider.stop() : undefined),
-  logout: () => (provider.logout ? provider.logout() : Promise.resolve()),
-  reconnect: () => (provider.reconnect ? provider.reconnect() : Promise.resolve()),
-  getQr: () => (provider.getQr ? provider.getQr() : null),
+  // Gestão de contas (só baileys)
+  addAccount: (name) => provider.addAccount(name),
+  renameAccount: (id, name) => provider.renameAccount(id, name),
+  removeAccount: (id) => provider.removeAccount(id),
+  logout: (id) => provider.logout(id),
+  reconnect: (id) => provider.reconnect(id),
+  getQr: (id) => provider.getQr(id),
 };

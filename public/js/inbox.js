@@ -9,7 +9,7 @@
     conversations: [],
     currentId: null,
     messages: [],
-    filters: { status: 'open', assigned: 'all', tag: '', q: '' },
+    filters: { status: 'open', assigned: 'all', tag: '', account: '', q: '' },
   };
 
   const $ = (id) => document.getElementById(id);
@@ -37,6 +37,7 @@
     const f = state.filters;
     const qs = new URLSearchParams({ status: f.status, assigned: f.assigned });
     if (f.tag) qs.set('tag', f.tag);
+    if (f.account) qs.set('account', f.account);
     if (f.q) qs.set('q', f.q);
     const { conversations } = await api('GET', `/api/conversations?${qs}`);
     state.conversations = conversations;
@@ -60,6 +61,7 @@
             <div class="meta">
               ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
               ${c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : ''}
+              ${c.account_name && state.multiAccount ? `<span class="via">via ${esc(c.account_name)}</span>` : ''}
               ${c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')}
               <span class="assignee">${c.assigned_user_name ? esc(c.assigned_user_name) : 'Sem responsável'}</span>
             </div>
@@ -90,6 +92,7 @@
     loadConversations();
   }));
   els.tagFilter.addEventListener('change', () => { state.filters.tag = els.tagFilter.value; loadConversations(); });
+  $('account-filter').addEventListener('change', () => { state.filters.account = $('account-filter').value; loadConversations(); });
   let searchTimer;
   els.search.addEventListener('input', () => {
     clearTimeout(searchTimer);
@@ -120,7 +123,8 @@
     els.chatPanel.hidden = false;
     els.chatAvatar.textContent = initials(contactName(c));
     els.chatTitle.textContent = contactName(c);
-    els.chatSub.textContent = `${formatPhone(c.wa_id)} · ${c.assigned_user_name ? 'Responsável: ' + c.assigned_user_name : 'Sem responsável'}`;
+    els.chatSub.textContent = `${formatPhone(c.wa_id)} · ${c.assigned_user_name ? 'Responsável: ' + c.assigned_user_name : 'Sem responsável'}`
+      + (c.account_name && state.multiAccount ? ` · via ${c.account_name}` : '');
     els.btnResolve.textContent = c.status === 'resolved' ? 'Reabrir' : 'Finalizar';
     els.btnResolve.classList.toggle('btn-primary', c.status !== 'resolved');
   }
@@ -248,6 +252,7 @@
     if (f.assigned === 'me' && c.assigned_user_id !== state.me.id) return false;
     if (f.assigned === 'unassigned' && c.assigned_user_id) return false;
     if (f.tag && !c.tags.some((t) => String(t.id) === String(f.tag))) return false;
+    if (f.account && String(c.account_id) !== String(f.account)) return false;
     if (f.q) {
       const q = f.q.toLowerCase();
       if (![c.wa_id, c.contact_name, c.profile_name].some((v) => (v || '').toLowerCase().includes(q))) return false;
@@ -325,6 +330,15 @@
     state.users = users;
     els.tagFilter.innerHTML = '<option value="">Todas as tags</option>' + tags.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
     els.dAssignee.innerHTML = '<option value="">Sem responsável</option>' + users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
+    try {
+      const wa = await api('GET', '/api/whatsapp/status');
+      state.multiAccount = wa.provider === 'baileys';
+      if (state.multiAccount && wa.accounts.length > 1) {
+        $('account-filter').innerHTML = '<option value="">Todos os números</option>' +
+          wa.accounts.map((a) => `<option value="${a.id}">${esc(a.name)}${a.phone ? ' · ' + esc(a.phone) : ''}</option>`).join('');
+        $('account-filter-wrap').hidden = false;
+      }
+    } catch { /* sem status, segue sem filtro */ }
     await loadConversations();
     connectSocket();
     setupSimulator();

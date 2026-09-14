@@ -23,6 +23,7 @@ router.get('/', async (req, res, next) => {
       assigned: ['me', 'unassigned', 'all'].includes(req.query.assigned) ? req.query.assigned : 'all',
       userId: req.user.id,
       tagId: parseId(req.query.tag),
+      accountId: parseId(req.query.account),
       q: String(req.query.q || '').trim().slice(0, 100) || null,
       limit: req.query.limit,
       offset: req.query.offset,
@@ -74,6 +75,14 @@ router.post('/:id/messages', async (req, res, next) => {
     const conv = await conversations.getById(id);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
 
+    // Conversa antiga sem número associado: usa o primeiro número conectado
+    let accountId = conv.account_id;
+    if (whatsapp.multiAccount && !accountId) {
+      accountId = whatsapp.pickAccount();
+      if (!accountId) return res.status(502).json({ error: 'Nenhum número de WhatsApp conectado. Escaneie o QR code em Configurações.' });
+      await db.query('UPDATE conversations SET account_id = $2 WHERE id = $1', [id, accountId]);
+    }
+
     // Grava como pendente, envia, depois atualiza com o ID do WhatsApp
     const { rows } = await db.query(
       `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id)
@@ -83,7 +92,7 @@ router.post('/:id/messages', async (req, res, next) => {
     let message = rows[0];
 
     try {
-      const waId = await whatsapp.sendText(conv.wa_id, body);
+      const waId = await whatsapp.sendText(accountId, conv.wa_id, body);
       const upd = await db.query(
         `UPDATE messages SET wa_message_id = $2, status = 'sent' WHERE id = $1 RETURNING *`,
         [message.id, waId]
@@ -130,7 +139,7 @@ router.post('/:id/read', async (req, res, next) => {
       [id]
     );
     const conv = await conversations.getById(id);
-    if (rows[0]?.wa_message_id && conv) whatsapp.markAsRead(rows[0].wa_message_id, conv.wa_id); // fire-and-forget
+    if (rows[0]?.wa_message_id && conv) whatsapp.markAsRead(conv.account_id, rows[0].wa_message_id, conv.wa_id).catch(() => {}); // fire-and-forget
     realtime.broadcast('conversation:updated', conv);
     res.json({ conversation: conv });
   } catch (err) {

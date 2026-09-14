@@ -42,7 +42,7 @@ function extractContent(msg) {
 }
 
 /** Processa uma mensagem recebida: cria/atualiza contato, conversa e mensagem. Idempotente. */
-async function handleInboundMessage(msg, contactInfo = {}) {
+async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
   const waId = msg.from;
   if (!waId) return null;
   const content = extractContent(msg);
@@ -58,11 +58,11 @@ async function handleInboundMessage(msg, contactInfo = {}) {
     );
     const contactId = contactRows[0].id;
 
-    // Conversa aberta existente (lock para evitar duplicidade em webhooks concorrentes)
+    // Conversa aberta existente deste contato neste número (lock para evitar duplicidade em webhooks concorrentes)
     let { rows: convRows } = await client.query(
-      `SELECT id FROM conversations WHERE contact_id = $1 AND status = 'open'
+      `SELECT id FROM conversations WHERE contact_id = $1 AND status = 'open' AND account_id IS NOT DISTINCT FROM $2
        ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
-      [contactId]
+      [contactId, accountId]
     );
     let conversationId;
     let isNew = false;
@@ -70,8 +70,8 @@ async function handleInboundMessage(msg, contactInfo = {}) {
       conversationId = convRows[0].id;
     } else {
       const ins = await client.query(
-        `INSERT INTO conversations (contact_id, status, last_message_at) VALUES ($1, 'open', $2) RETURNING id`,
-        [contactId, sentAt]
+        `INSERT INTO conversations (contact_id, status, last_message_at, account_id) VALUES ($1, 'open', $2, $3) RETURNING id`,
+        [contactId, sentAt, accountId]
       );
       conversationId = ins.rows[0].id;
       isNew = true;
@@ -110,7 +110,7 @@ async function handleInboundMessage(msg, contactInfo = {}) {
  * Registra uma mensagem enviada pelo próprio número fora do sistema (ex.: pelo celular).
  * Ignorada se já existe (eco de um envio feito pela inbox).
  */
-async function handleOutboundEcho(waId, msg) {
+async function handleOutboundEcho(waId, msg, accountId = null) {
   const content = extractContent(msg);
   const sentAt = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date();
 
@@ -124,14 +124,15 @@ async function handleOutboundEcho(waId, msg) {
     );
     const contactId = contactRows[0].id;
     let { rows: convRows } = await client.query(
-      `SELECT id FROM conversations WHERE contact_id = $1 AND status = 'open' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
-      [contactId]
+      `SELECT id FROM conversations WHERE contact_id = $1 AND status = 'open' AND account_id IS NOT DISTINCT FROM $2
+       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [contactId, accountId]
     );
     let conversationId = convRows[0]?.id;
     if (!conversationId) {
       const ins = await client.query(
-        `INSERT INTO conversations (contact_id, status, last_message_at) VALUES ($1, 'open', $2) RETURNING id`,
-        [contactId, sentAt]
+        `INSERT INTO conversations (contact_id, status, last_message_at, account_id) VALUES ($1, 'open', $2, $3) RETURNING id`,
+        [contactId, sentAt, accountId]
       );
       conversationId = ins.rows[0].id;
     }

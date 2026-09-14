@@ -68,21 +68,13 @@
       </div>
 
       <div class="card" style="margin-top:20px" id="wa-card">
-        <h3>Integração WhatsApp</h3>
-        <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
-          <div style="flex:1;min-width:260px">
-            <div id="wa-status" style="margin-bottom:10px"></div>
-            <p class="small muted" id="wa-help"></p>
-            <div id="wa-actions" style="display:flex;gap:8px;flex-wrap:wrap" data-admin-only>
-              <button class="btn btn-sm" id="wa-reconnect">Reconectar</button>
-              <button class="btn btn-sm btn-ghost" id="wa-logout">Desconectar número</button>
-            </div>
-          </div>
-          <div id="wa-qr-box" hidden style="text-align:center">
-            <img id="wa-qr" alt="QR code do WhatsApp" style="width:240px;height:240px;border-radius:10px;background:#fff;padding:6px">
-            <div class="small muted" style="margin-top:6px">No celular: WhatsApp → Dispositivos conectados → Conectar dispositivo</div>
-          </div>
-        </div>
+        <h3>Números de WhatsApp</h3>
+        <p class="small muted" id="wa-help"></p>
+        <form class="inline-form" id="wa-add-form" data-admin-only>
+          <input class="input" id="wa-add-name" placeholder="Nome do número (ex.: Vendas, Suporte)" maxlength="60" required>
+          <button class="btn btn-primary" type="submit">Adicionar número</button>
+        </form>
+        <div id="wa-accounts" class="wa-accounts"></div>
       </div>
     </div>
   </main>

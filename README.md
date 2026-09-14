@@ -43,9 +43,11 @@ O sistema suporta dois provedores, escolhidos pela variável `WA_PROVIDER`:
 ### Opção A: QR code (Baileys)
 
 1. Defina `WA_PROVIDER=baileys` no ambiente e reinicie.
-2. Entre como admin em **Configurações → Integração WhatsApp**. O QR code aparece em poucos segundos.
-3. No celular do número de atendimento: **WhatsApp → Dispositivos conectados → Conectar dispositivo** e leia o QR.
-4. A sessão fica gravada na tabela `wa_auth` do Postgres e sobrevive a reinícios e redeploys. Use **Desconectar número** para trocar de número.
+2. Entre como admin em **Configurações → Números de WhatsApp**. A conta "Principal" já existe; clique em **Adicionar número** para cadastrar outros (ex.: Vendas, Suporte). Cada um gera seu próprio QR code.
+3. No celular de cada número: **WhatsApp → Dispositivos conectados → Conectar dispositivo** e leia o QR correspondente.
+4. As sessões ficam gravadas na tabela `wa_auth` do Postgres (uma por conta) e sobrevivem a reinícios e redeploys. **Desconectar** encerra a sessão para trocar o celular; **Remover** apaga a conta (as conversas ficam no histórico, sem número associado).
+
+Todos os atendentes veem as conversas de todos os números em uma única caixa de entrada, com o marcador "via <nome do número>" e um filtro por número. A resposta sai automaticamente pelo número por onde o cliente falou. O mesmo cliente falando com dois números gera duas conversas separadas.
 
 Mensagens enviadas pelo celular também aparecem na inbox (como "Celular"). Mídias recebidas são baixadas e guardadas na tabela `media_files` (limite de 25 MB por arquivo).
 
@@ -83,7 +85,7 @@ src/
     reports.js         resumo, volume, por atendente, por tag
     webhook.js         GET verificação e POST mensagens da Meta
     media.js           proxy autenticado de mídias do WhatsApp
-    whatsapp.js        status da conexão, QR code, reconectar, desconectar
+    whatsapp.js        contas de WhatsApp: status, QR code, adicionar, renomear, reconectar, desconectar, remover
     dev.js             simulador de mensagens (só fora de produção)
 migrations/            SQL versionado, aplicado por scripts/migrate.js
 public/                login, inbox, relatórios e configurações
@@ -109,7 +111,8 @@ Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` 
 
 - [x] **Etapa 1 (MVP):** inbox compartilhada em tempo real, tags, responsável, finalizar/reabrir, relatórios, webhook oficial, mídia recebida
 - [x] **Etapa 1.5:** login por QR code (Baileys) como provedor alternativo, com sessão no Postgres
+- [x] **Etapa 1.6:** vários números de WhatsApp na mesma inbox (modelo Umbler Talk), conversa amarrada ao número
 - [ ] **Etapa 2:** envio de mídia e templates (janela de 24h), notas internas, respostas rápidas
 - [ ] **Etapa 3:** integração com a plataforma de consultas (detectar placa/chassi na mensagem e mostrar dados do veículo no painel lateral)
 - [ ] **Etapa 4:** filas/departamentos, horário de atendimento com mensagem automática, distribuição automática
-- [ ] **Etapa 5:** múltiplos números, exportação de relatórios em CSV, auditoria
+- [ ] **Etapa 5:** relatórios por número, exportação em CSV, auditoria

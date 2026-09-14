@@ -1,4 +1,7 @@
-/* Provedor não oficial: WhatsApp Web via Baileys (login por QR code). Sessão persistida no Postgres. */
+/*
+ * Provedor não oficial: WhatsApp Web via Baileys (login por QR code).
+ * Gerencia várias contas (números) ao mesmo tempo; a sessão de cada uma fica no Postgres (wa_auth).
+ */
 const pino = require('pino');
 const baileys = require('@whiskeysockets/baileys');
 const db = require('../db');
@@ -14,32 +17,21 @@ const logger = pino({ level: process.env.WA_LOG_LEVEL || 'error' });
 const MEDIA_MAX_BYTES = 25 * 1024 * 1024;
 const ECHO_DELAY_MS = 1500; // espera a rota de envio gravar o wa_message_id antes de tratar o eco fromMe
 
-const state = { status: 'off', qr: null, me: null, lastError: null, since: null };
-let sock = null;
-let auth = null;
-let starting = false;
-let stopRequested = false;
+const sessions = new Map(); // accountId -> Session
+let cachedVersion = null;
 let inbound = null; // carregado sob demanda para evitar dependência circular
+const getInbound = () => (inbound = inbound || require('./inbound'));
 
-function setStatus(status, extra = {}) {
-  Object.assign(state, { status, since: new Date().toISOString() }, extra);
-  realtime.broadcast('whatsapp:status', getStatus());
-}
-
-function getStatus() {
-  return { provider: 'baileys', status: state.status, me: state.me, hasQr: Boolean(state.qr), lastError: state.lastError, since: state.since };
-}
-
-// ---------- Auth state no Postgres ----------
-async function useDbAuthState() {
+// ---------- Auth state por conta, no Postgres ----------
+async function useDbAuthState(accountId) {
   const read = async (key) => {
-    const { rows } = await db.query('SELECT value FROM wa_auth WHERE key = $1', [key]);
+    const { rows } = await db.query('SELECT value FROM wa_auth WHERE account_id = $1 AND key = $2', [accountId, key]);
     return rows[0] ? JSON.parse(rows[0].value, BufferJSON.reviver) : null;
   };
   const write = (client, key, value) => client.query(
-    `INSERT INTO wa_auth (key, value, updated_at) VALUES ($1, $2, NOW())
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [key, JSON.stringify(value, BufferJSON.replacer)]
+    `INSERT INTO wa_auth (account_id, key, value, updated_at) VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (account_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    [accountId, key, JSON.stringify(value, BufferJSON.replacer)]
   );
   const creds = (await read('creds')) || initAuthCreds();
   return {
@@ -48,7 +40,9 @@ async function useDbAuthState() {
       keys: {
         get: async (type, ids) => {
           const keys = ids.map((id) => `${type}-${id}`);
-          const { rows } = await db.query('SELECT key, value FROM wa_auth WHERE key = ANY($1::text[])', [keys]);
+          const { rows } = await db.query(
+            'SELECT key, value FROM wa_auth WHERE account_id = $1 AND key = ANY($2::text[])', [accountId, keys]
+          );
           const found = new Map(rows.map((r) => [r.key, JSON.parse(r.value, BufferJSON.reviver)]));
           const data = {};
           for (const id of ids) {
@@ -65,7 +59,7 @@ async function useDbAuthState() {
                 const value = data[category][id];
                 const key = `${category}-${id}`;
                 if (value) await write(client, key, value);
-                else await client.query('DELETE FROM wa_auth WHERE key = $1', [key]);
+                else await client.query('DELETE FROM wa_auth WHERE account_id = $1 AND key = $2', [accountId, key]);
               }
             }
           });
@@ -73,7 +67,7 @@ async function useDbAuthState() {
       },
     },
     saveCreds: () => write(db, 'creds', creds),
-    clear: () => db.query('DELETE FROM wa_auth'),
+    clear: () => db.query('DELETE FROM wa_auth WHERE account_id = $1', [accountId]),
   };
 }
 
@@ -141,24 +135,7 @@ function toCloudMessage(m) {
 }
 
 const MEDIA_TYPES = new Set(['image', 'video', 'audio', 'sticker', 'document']);
-
-async function storeMedia(m, cloudMsg) {
-  if (!MEDIA_TYPES.has(cloudMsg.type)) return;
-  const meta = cloudMsg[cloudMsg.type];
-  try {
-    const buffer = await downloadMediaMessage(m, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage });
-    if (buffer.length > MEDIA_MAX_BYTES) {
-      logger.warn({ id: m.key.id }, 'mídia acima do limite, não armazenada');
-      return;
-    }
-    await db.query(
-      `INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
-      [meta.id, meta.mime_type || 'application/octet-stream', buffer.length, buffer]
-    );
-  } catch (err) {
-    console.warn('[baileys] falha ao baixar mídia', m.key.id, err.message);
-  }
-}
+const STATUS_MAP = { 2: 'sent', 3: 'delivered', 4: 'read', 5: 'read', 0: 'failed' };
 
 function acceptChat(key) {
   const jid = key.remoteJid || '';
@@ -166,165 +143,287 @@ function acceptChat(key) {
   return true;
 }
 
-async function onMessagesUpsert({ messages, type }) {
-  if (type !== 'notify') return; // 'append' = histórico / ecos de envios via API
-  inbound = inbound || require('./inbound');
-  for (const m of messages) {
-    try {
-      if (!m.message || !acceptChat(m.key)) continue;
-      const waId = fromKey(m.key);
-      if (!waId) continue;
-      const cloudMsg = toCloudMessage(m);
-      if (!cloudMsg) continue;
+// ---------- Sessão de uma conta ----------
+class Session {
+  constructor(account) {
+    this.account = account; // { id, name, phone }
+    this.state = { status: 'off', qr: null, me: account.phone || null, lastError: null, since: null };
+    this.sock = null;
+    this.auth = null;
+    this.starting = false;
+    this.stopped = false;
+    this.timer = null;
+  }
 
-      if (m.key.fromMe) {
-        // Mensagem enviada pelo celular (ou eco de envio pela API): registra como saída
-        await new Promise((r) => setTimeout(r, ECHO_DELAY_MS));
-        await inbound.handleOutboundEcho(waId, cloudMsg);
-        continue;
-      }
-      await storeMedia(m, cloudMsg);
-      await inbound.handleInboundMessage({ ...cloudMsg, from: waId }, m.pushName ? { profile: { name: m.pushName } } : {});
+  status() {
+    return {
+      id: this.account.id, name: this.account.name, phone: this.state.me,
+      status: this.state.status, hasQr: Boolean(this.state.qr), lastError: this.state.lastError, since: this.state.since,
+    };
+  }
+
+  setStatus(status, extra = {}) {
+    Object.assign(this.state, { status, since: new Date().toISOString() }, extra);
+    realtime.broadcast('whatsapp:status', this.status());
+  }
+
+  schedule(fn, ms) {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => { if (!this.stopped) fn(); }, ms);
+  }
+
+  async connect() {
+    if (this.starting || this.stopped) return;
+    this.starting = true;
+    try {
+      this.setStatus('connecting', { qr: null, lastError: null });
+      this.auth = this.auth || (await useDbAuthState(this.account.id));
+      cachedVersion = cachedVersion || (await fetchLatestBaileysVersion().catch(() => ({ version: undefined }))).version;
+
+      const s = makeWASocket({
+        version: cachedVersion,
+        auth: { creds: this.auth.state.creds, keys: makeCacheableSignalKeyStore(this.auth.state.keys, logger) },
+        logger,
+        browser: Browsers.ubuntu('SOS Chat'),
+        markOnlineOnConnect: false, // mantém as notificações no celular
+        syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false,
+        generateHighQualityLinkPreview: false,
+      });
+      this.sock = s;
+
+      s.ev.on('creds.update', () => this.auth?.saveCreds().catch((err) => console.error(`[baileys:${this.account.id}] falha ao salvar credenciais`, err)));
+      s.ev.on('messages.upsert', (ev) => { if (this.sock === s) this.onMessagesUpsert(ev); });
+      s.ev.on('messages.update', (ev) => { if (this.sock === s) this.onMessagesUpdate(ev); });
+      s.ev.on('connection.update', (update) => { if (this.sock === s) this.onConnectionUpdate(s, update); });
     } catch (err) {
-      console.error('[baileys] erro ao processar mensagem', m.key?.id, err);
+      console.error(`[baileys:${this.account.id}] falha ao iniciar`, err);
+      this.setStatus('disconnected', { lastError: err.message });
+      this.schedule(() => this.connect(), 10000);
+    } finally {
+      this.starting = false;
     }
   }
-}
 
-const STATUS_MAP = { 2: 'sent', 3: 'delivered', 4: 'read', 5: 'read', 0: 'failed' };
-
-async function onMessagesUpdate(updates) {
-  inbound = inbound || require('./inbound');
-  for (const { key, update } of updates) {
-    const status = STATUS_MAP[update?.status];
-    if (!key?.fromMe || !status) continue;
-    try {
-      await inbound.handleStatus({ id: key.id, status });
-    } catch (err) {
-      console.error('[baileys] erro ao atualizar status', key.id, err);
+  async onConnectionUpdate(s, { connection, lastDisconnect, qr }) {
+    const tag = `[baileys:${this.account.id}]`;
+    if (qr) this.setStatus('qr', { qr });
+    if (connection === 'open') {
+      this.state.qr = null;
+      this.state.me = s.user?.id ? jidNormalizedUser(s.user.id).split('@')[0] : null;
+      this.setStatus('connected', { lastError: null });
+      console.log(`${tag} conectado como ${this.state.me} (${this.account.name})`);
+      if (this.state.me) {
+        db.query('UPDATE wa_accounts SET phone = $2 WHERE id = $1', [this.account.id, this.state.me]).catch(() => {});
+      }
+    }
+    if (connection === 'close') {
+      const code = lastDisconnect?.error?.output?.statusCode;
+      const reason = DisconnectReason[code] || String(code || 'desconhecido');
+      console.warn(`${tag} conexão fechada (${reason})`);
+      this.sock = null;
+      if (this.stopped) { this.setStatus('off', { qr: null }); return; }
+      if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession || code === DisconnectReason.forbidden) {
+        await this.auth?.clear().catch(() => {});
+        this.auth = null;
+        this.state.me = null;
+        this.setStatus('disconnected', { qr: null, lastError: `Sessão encerrada (${reason}). Escaneie o QR code novamente.` });
+        this.schedule(() => this.connect(), 2000); // gera um novo QR
+        return;
+      }
+      // Outro processo assumiu a sessão (ex.: container antigo e novo durante um deploy). Espera antes de disputar.
+      const replaced = code === DisconnectReason.connectionReplaced;
+      const delay = replaced ? 30000 : code === DisconnectReason.restartRequired ? 500 : 3000;
+      this.setStatus('reconnecting', { qr: null, lastError: replaced ? 'Sessão aberta em outro processo, tentando de novo em 30s' : reason });
+      this.schedule(() => this.connect(), delay);
     }
   }
-}
 
-// ---------- Conexão ----------
-async function connect() {
-  if (starting) return;
-  starting = true;
-  stopRequested = false;
-  try {
-    setStatus('connecting', { qr: null, lastError: null });
-    auth = auth || (await useDbAuthState());
-    const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
+  async storeMedia(m, cloudMsg) {
+    if (!MEDIA_TYPES.has(cloudMsg.type)) return;
+    const meta = cloudMsg[cloudMsg.type];
+    try {
+      const buffer = await downloadMediaMessage(m, 'buffer', {}, { logger, reuploadRequest: this.sock?.updateMediaMessage });
+      if (buffer.length > MEDIA_MAX_BYTES) return;
+      await db.query(
+        `INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+        [meta.id, meta.mime_type || 'application/octet-stream', buffer.length, buffer]
+      );
+    } catch (err) {
+      console.warn(`[baileys:${this.account.id}] falha ao baixar mídia`, m.key.id, err.message);
+    }
+  }
 
-    const s = makeWASocket({
-      version,
-      auth: { creds: auth.state.creds, keys: makeCacheableSignalKeyStore(auth.state.keys, logger) },
-      logger,
-      browser: Browsers.ubuntu('SOS Chat'),
-      markOnlineOnConnect: false, // mantém as notificações no celular
-      syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false,
-      generateHighQualityLinkPreview: false,
-    });
-    sock = s;
-
-    s.ev.on('creds.update', () => auth?.saveCreds().catch((err) => console.error('[baileys] falha ao salvar credenciais', err)));
-    s.ev.on('messages.upsert', (ev) => { if (sock === s) onMessagesUpsert(ev); });
-    s.ev.on('messages.update', (ev) => { if (sock === s) onMessagesUpdate(ev); });
-    s.ev.on('connection.update', async (update) => {
-      if (sock !== s) return; // evento de um socket já substituído (reconnect/logout manual)
-      const { connection, lastDisconnect, qr } = update;
-      if (qr) setStatus('qr', { qr });
-      if (connection === 'open') {
-        state.qr = null;
-        state.me = s.user?.id ? jidNormalizedUser(s.user.id).split('@')[0] : null;
-        setStatus('connected', { lastError: null });
-        console.log(`[baileys] conectado como ${state.me}`);
-      }
-      if (connection === 'close') {
-        const code = lastDisconnect?.error?.output?.statusCode;
-        const reason = DisconnectReason[code] || String(code || 'desconhecido');
-        console.warn(`[baileys] conexão fechada (${reason})`);
-        sock = null;
-        if (stopRequested) { setStatus('off', { qr: null }); return; }
-        if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession || code === DisconnectReason.forbidden) {
-          await auth.clear().catch(() => {});
-          auth = null;
-          state.me = null;
-          setStatus('disconnected', { qr: null, lastError: `Sessão encerrada (${reason}). Escaneie o QR code novamente.` });
-          setTimeout(() => connect(), 2000); // gera um novo QR
-          return;
+  async onMessagesUpsert({ messages, type }) {
+    if (type !== 'notify') return; // 'append' = histórico / ecos de envios via API
+    for (const m of messages) {
+      try {
+        if (!m.message || !acceptChat(m.key)) continue;
+        const waId = fromKey(m.key);
+        if (!waId) continue;
+        const cloudMsg = toCloudMessage(m);
+        if (!cloudMsg) continue;
+        if (m.key.fromMe) {
+          await new Promise((r) => setTimeout(r, ECHO_DELAY_MS));
+          await getInbound().handleOutboundEcho(waId, cloudMsg, this.account.id);
+          continue;
         }
-        // Outro processo assumiu a sessão (ex.: container antigo e novo durante um deploy). Espera antes de disputar.
-        const delay = code === DisconnectReason.connectionReplaced ? 30000 : code === DisconnectReason.restartRequired ? 500 : 3000;
-        setStatus('reconnecting', { qr: null, lastError: code === DisconnectReason.connectionReplaced ? 'Sessão aberta em outro processo, tentando de novo em 30s' : reason });
-        setTimeout(() => connect(), delay);
+        await this.storeMedia(m, cloudMsg);
+        await getInbound().handleInboundMessage(
+          { ...cloudMsg, from: waId },
+          m.pushName ? { profile: { name: m.pushName } } : {},
+          this.account.id
+        );
+      } catch (err) {
+        console.error(`[baileys:${this.account.id}] erro ao processar mensagem`, m.key?.id, err);
       }
-    });
-  } catch (err) {
-    console.error('[baileys] falha ao iniciar', err);
-    setStatus('disconnected', { lastError: err.message });
-    setTimeout(() => connect(), 10000);
-  } finally {
-    starting = false;
+    }
   }
+
+  async onMessagesUpdate(updates) {
+    for (const { key, update } of updates) {
+      const status = STATUS_MAP[update?.status];
+      if (!key?.fromMe || !status) continue;
+      try {
+        await getInbound().handleStatus({ id: key.id, status });
+      } catch (err) {
+        console.error(`[baileys:${this.account.id}] erro ao atualizar status`, key.id, err);
+      }
+    }
+  }
+
+  isConnected() {
+    return Boolean(this.sock) && this.state.status === 'connected';
+  }
+
+  async sendText(to, body) {
+    if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado. Escaneie o QR code em Configurações.`);
+    const sent = await this.sock.sendMessage(toJid(to), { text: body });
+    return sent?.key?.id || null;
+  }
+
+  async markAsRead(waMessageId, waId) {
+    if (!this.isConnected() || !waMessageId || !waId || waMessageId.startsWith('sim-')) return;
+    try {
+      await this.sock.readMessages([{ remoteJid: toJid(waId), id: waMessageId, fromMe: false }]);
+    } catch (err) {
+      console.warn(`[baileys:${this.account.id}] falha ao marcar como lida:`, err.message);
+    }
+  }
+
+  /** Encerra a sessão no WhatsApp, limpa as credenciais e gera um novo QR. */
+  async logout() {
+    const old = this.sock;
+    this.sock = null;
+    try { if (old) await old.logout(); } catch { /* já desconectado */ }
+    if (this.auth) await this.auth.clear().catch(() => {});
+    else await db.query('DELETE FROM wa_auth WHERE account_id = $1', [this.account.id]);
+    this.auth = null;
+    this.state.me = null;
+    this.setStatus('disconnected', { qr: null, lastError: null });
+    await this.connect();
+  }
+
+  async reconnect() {
+    const old = this.sock;
+    this.sock = null;
+    try { old?.end(new Error('reconexão manual')); } catch { /* ignora */ }
+    await this.connect();
+  }
+
+  /** Desliga sem limpar a sessão. */
+  stop() {
+    this.stopped = true;
+    clearTimeout(this.timer);
+    const old = this.sock;
+    this.sock = null;
+    try { old?.end(new Error('encerrando')); } catch { /* ignora */ }
+    this.setStatus('off', { qr: null });
+  }
+}
+
+// ---------- Gerenciador de contas ----------
+async function loadAccounts() {
+  const { rows } = await db.query('SELECT id, name, phone, active FROM wa_accounts WHERE active = TRUE ORDER BY id');
+  return rows;
 }
 
 async function start() {
-  await connect();
+  const accounts = await loadAccounts();
+  for (const account of accounts) {
+    if (!sessions.has(account.id)) {
+      const session = new Session(account);
+      sessions.set(account.id, session);
+      session.connect().catch((err) => console.error(`[baileys:${account.id}] erro ao conectar`, err));
+    }
+  }
+  console.log(`[baileys] ${accounts.length} número(s) configurado(s)`);
 }
 
-/** Encerra a sessão no WhatsApp, limpa as credenciais e gera um novo QR. */
-async function logout() {
-  const old = sock;
-  sock = null; // eventos do socket antigo passam a ser ignorados
-  try { if (old) await old.logout(); } catch { /* já desconectado */ }
-  if (auth) await auth.clear().catch(() => {});
-  else await db.query('DELETE FROM wa_auth');
-  auth = null;
-  state.me = null;
-  setStatus('disconnected', { qr: null, lastError: null });
-  await connect();
-}
-
-async function reconnect() {
-  const old = sock;
-  sock = null;
-  try { old?.end(new Error('reconexão manual')); } catch { /* ignora */ }
-  await connect();
-}
-
-/** Desliga sem limpar a sessão (usado no encerramento do processo). */
 function stop() {
-  stopRequested = true;
-  const old = sock;
-  sock = null;
-  try { old?.end(new Error('encerrando')); } catch { /* ignora */ }
-  setStatus('off', { qr: null });
+  for (const s of sessions.values()) s.stop();
 }
 
-function getQr() {
-  return state.qr;
+function getSession(accountId) {
+  const s = sessions.get(Number(accountId));
+  if (!s) throw new Error('Número não encontrado');
+  return s;
+}
+
+/** Primeira conta conectada (usada para conversas antigas sem número associado). */
+function pickAccount() {
+  for (const s of sessions.values()) if (s.isConnected()) return s.account.id;
+  return null;
+}
+
+async function addAccount(name) {
+  const { rows } = await db.query('INSERT INTO wa_accounts (name) VALUES ($1) RETURNING id, name, phone, active', [name]);
+  const session = new Session(rows[0]);
+  sessions.set(rows[0].id, session);
+  session.connect().catch((err) => console.error(`[baileys:${rows[0].id}] erro ao conectar`, err));
+  return session.status();
+}
+
+async function renameAccount(accountId, name) {
+  const s = getSession(accountId);
+  await db.query('UPDATE wa_accounts SET name = $2 WHERE id = $1', [accountId, name]);
+  s.account.name = name;
+  s.setStatus(s.state.status);
+  return s.status();
+}
+
+async function removeAccount(accountId) {
+  const s = getSession(accountId);
+  s.stopped = true;
+  clearTimeout(s.timer);
+  const old = s.sock;
+  s.sock = null;
+  try { if (old) await old.logout(); } catch { /* ignora */ }
+  sessions.delete(s.account.id);
+  await db.query('DELETE FROM wa_accounts WHERE id = $1', [s.account.id]); // wa_auth cai em cascata; conversas ficam com account_id NULL
+  realtime.broadcast('whatsapp:status', { id: s.account.id, removed: true });
+}
+
+function getStatus() {
+  return { provider: 'baileys', accounts: [...sessions.values()].map((s) => s.status()) };
+}
+
+function getQr(accountId) {
+  return getSession(accountId).state.qr;
 }
 
 // ---------- Interface do provedor ----------
 function isConfigured() {
-  return state.status === 'connected';
+  return pickAccount() !== null;
 }
 
-async function sendText(to, body) {
-  if (!sock || state.status !== 'connected') throw new Error('WhatsApp desconectado. Escaneie o QR code em Configurações.');
-  const sent = await sock.sendMessage(toJid(to), { text: body });
-  return sent?.key?.id || null;
+function sendText(accountId, to, body) {
+  return getSession(accountId).sendText(to, body);
 }
 
-async function markAsRead(waMessageId, waId) {
-  if (!sock || state.status !== 'connected' || !waMessageId || !waId || waMessageId.startsWith('sim-')) return;
-  try {
-    await sock.readMessages([{ remoteJid: toJid(waId), id: waMessageId, fromMe: false }]);
-  } catch (err) {
-    console.warn('[baileys] falha ao marcar como lida:', err.message);
-  }
+function markAsRead(accountId, waMessageId, waId) {
+  if (!accountId) return Promise.resolve();
+  return getSession(accountId).markAsRead(waMessageId, waId);
 }
 
 async function fetchMedia(mediaId) {
@@ -337,4 +436,10 @@ function verifySignature() {
   return false; // webhook da Meta não se aplica a este provedor
 }
 
-module.exports = { start, stop, logout, reconnect, getQr, getStatus, isConfigured, sendText, markAsRead, fetchMedia, verifySignature };
+module.exports = {
+  start, stop, getStatus, getQr, pickAccount,
+  addAccount, renameAccount, removeAccount,
+  logout: (accountId) => getSession(accountId).logout(),
+  reconnect: (accountId) => getSession(accountId).reconnect(),
+  isConfigured, sendText, markAsRead, fetchMedia, verifySignature,
+};

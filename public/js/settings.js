@@ -125,62 +125,95 @@
     mock: ['resolved', 'Modo simulado'],
   };
   let waTimer = null;
+  let waAccounts = [];
+
+  function accountCard(a, isAdmin, multi) {
+    const [cls, label] = WA_LABELS[a.status] || ['resolved', a.status];
+    return `
+      <div class="wa-account" data-id="${a.id ?? ''}">
+        <div class="info">
+          <div class="title">${esc(a.name)} <span class="status-pill ${cls}">${esc(label)}</span></div>
+          <div class="phone">${a.phone ? esc(a.phone) : 'Número aparece após conectar'}</div>
+          ${a.lastError ? `<div class="err">${esc(a.lastError)}</div>` : ''}
+          ${isAdmin && multi ? `<div class="actions">
+            <button class="btn btn-sm" data-act="rename">Renomear</button>
+            <button class="btn btn-sm" data-act="reconnect">Reconectar</button>
+            <button class="btn btn-sm btn-ghost" data-act="logout">Desconectar</button>
+            <button class="btn btn-sm btn-ghost" data-act="remove">Remover</button>
+          </div>` : ''}
+        </div>
+        ${a.hasQr && isAdmin ? `<div class="qr"><img data-qr="${a.id}" alt="QR code"><div class="hint">Celular: WhatsApp → Dispositivos conectados → Conectar dispositivo</div></div>` : ''}
+      </div>`;
+  }
 
   async function loadIntegration() {
     let st;
     try {
       st = await api('GET', '/api/whatsapp/status');
     } catch {
-      $('wa-status').textContent = 'Não foi possível verificar.';
+      $('wa-help').textContent = 'Não foi possível verificar o status.';
       return;
     }
+    const isAdmin = me.role === 'admin';
+    const multi = st.provider === 'baileys';
+    waAccounts = st.accounts || [];
 
-    const [cls, label] = WA_LABELS[st.status] || ['resolved', st.status];
-    $('wa-status').innerHTML = `<span class="status-pill ${cls}">${esc(label)}</span>` +
-      (st.me ? ` <span class="small muted">número ${esc(st.me)}</span>` : '') +
-      (st.lastError ? `<div class="small" style="color:#ff6b6b;margin-top:6px">${esc(st.lastError)}</div>` : '');
+    $('wa-help').innerHTML = multi
+      ? 'Cada número tem sua própria sessão. Todos os atendentes veem as conversas de todos os números, e a resposta sai pelo número por onde o cliente falou.'
+      : `Provedor oficial (Cloud API da Meta). Para usar vários números por QR code, defina <code>WA_PROVIDER=baileys</code>. Webhook: <code>${esc(location.origin)}/webhook/whatsapp</code>`;
+    $('wa-add-form').hidden = !(isAdmin && multi);
 
-    if (st.provider === 'cloud') {
-      $('wa-help').innerHTML = st.status === 'connected'
-        ? 'WhatsApp Business Cloud API (oficial) configurada.'
-        : `Provedor oficial (Cloud API) sem credenciais: envios só aparecem no log. Para usar QR code, defina <code>WA_PROVIDER=baileys</code>. Webhook: <code>${esc(location.origin)}/webhook/whatsapp</code>`;
-      $('wa-actions').hidden = true;
-      $('wa-qr-box').hidden = true;
-      return;
-    }
+    $('wa-accounts').innerHTML = waAccounts.length
+      ? waAccounts.map((a) => accountCard(a, isAdmin, multi)).join('')
+      : '<div class="muted small">Nenhum número cadastrado. Adicione um acima para gerar o QR code.</div>';
 
-    $('wa-help').textContent = st.status === 'connected'
-      ? 'Sessão do WhatsApp Web ativa. Mensagens recebidas neste número aparecem na caixa de entrada.'
-      : 'Escaneie o QR code com o celular do número de atendimento. A sessão fica salva e sobrevive a reinícios.';
-    $('wa-actions').hidden = me.role !== 'admin';
-
-    if (st.status === 'qr' && me.role === 'admin') {
+    // Carrega as imagens de QR dos números aguardando leitura
+    await Promise.all([...document.querySelectorAll('img[data-qr]')].map(async (img) => {
       try {
-        const { qr } = await api('GET', '/api/whatsapp/qr');
-        $('wa-qr').src = qr;
-        $('wa-qr-box').hidden = false;
-      } catch { /* o QR pode ter expirado entre as chamadas */ }
-    } else {
-      $('wa-qr-box').hidden = true;
-    }
+        const { qr } = await api('GET', `/api/whatsapp/accounts/${img.dataset.qr}/qr`);
+        img.src = qr;
+      } catch { img.closest('.qr')?.remove(); }
+    }));
 
     clearTimeout(waTimer);
-    if (st.status !== 'connected') waTimer = setTimeout(loadIntegration, 3000);
+    if (multi && waAccounts.some((a) => a.status !== 'connected')) waTimer = setTimeout(loadIntegration, 3000);
   }
 
-  $('wa-reconnect').addEventListener('click', async () => {
+  $('wa-add-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
     try {
-      await api('POST', '/api/whatsapp/reconnect');
-      toast('Reconectando…');
-      setTimeout(loadIntegration, 1500);
+      await api('POST', '/api/whatsapp/accounts', { name: $('wa-add-name').value });
+      $('wa-add-name').value = '';
+      toast('Número adicionado, gerando QR code…');
+      setTimeout(loadIntegration, 800);
     } catch (err) { toast(err.message, true); }
   });
-  $('wa-logout').addEventListener('click', async () => {
-    if (!confirm('Desconectar o número? Será preciso ler o QR code de novo.')) return;
+
+  $('wa-accounts').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const card = btn.closest('.wa-account');
+    const id = card.dataset.id;
+    const acc = waAccounts.find((a) => String(a.id) === id);
     try {
-      await api('POST', '/api/whatsapp/logout');
-      toast('Sessão encerrada');
-      setTimeout(loadIntegration, 1500);
+      if (btn.dataset.act === 'rename') {
+        const name = prompt('Nome do número:', acc?.name || '');
+        if (name === null || !name.trim()) return;
+        await api('PATCH', `/api/whatsapp/accounts/${id}`, { name });
+        toast('Renomeado');
+      } else if (btn.dataset.act === 'reconnect') {
+        await api('POST', `/api/whatsapp/accounts/${id}/reconnect`);
+        toast('Reconectando…');
+      } else if (btn.dataset.act === 'logout') {
+        if (!confirm(`Desconectar "${acc?.name}"? Será preciso ler o QR code de novo.`)) return;
+        await api('POST', `/api/whatsapp/accounts/${id}/logout`);
+        toast('Sessão encerrada');
+      } else if (btn.dataset.act === 'remove') {
+        if (!confirm(`Remover "${acc?.name}"? As conversas ficam no histórico, mas sem número associado.`)) return;
+        await api('DELETE', `/api/whatsapp/accounts/${id}`);
+        toast('Número removido');
+      }
+      setTimeout(loadIntegration, 1000);
     } catch (err) { toast(err.message, true); }
   });
 

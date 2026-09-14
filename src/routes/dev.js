@@ -1,5 +1,6 @@
 const express = require('express');
 const inbound = require('../services/inbound');
+const whatsapp = require('../services/whatsapp');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
@@ -22,7 +23,8 @@ router.post('/simulate-inbound', async (req, res, next) => {
       type: 'text',
       text: { body: text },
     };
-    const result = await inbound.handleInboundMessage(msg, name ? { profile: { name } } : {});
+    const accountId = Number(req.body?.account_id) || whatsapp.pickAccount() || null;
+    const result = await inbound.handleInboundMessage(msg, name ? { profile: { name } } : {}, accountId);
     res.status(201).json(result);
   } catch (err) {
     next(err);
