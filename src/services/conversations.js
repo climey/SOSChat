@@ -107,10 +107,10 @@ async function list(filters = {}) {
   const offset = Math.max(Number(filters.offset) || 0, 0);
   params.push(limit, offset);
 
-  // Esperando: quem espera há mais tempo primeiro. Entrada: quem está esperando resposta sobe; depois a mais recente.
+  // Esperando: quem espera há mais tempo primeiro. Entrada e demais: fixadas, depois a atividade mais recente.
   const order = filters.status === 'waiting'
     ? 'COALESCE(cp.pinned, FALSE) DESC, c.last_message_at ASC'
-    : `COALESCE(cp.pinned, FALSE) DESC, (c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out') DESC, c.last_message_at DESC`;
+    : 'COALESCE(cp.pinned, FALSE) DESC, c.last_message_at DESC';
   const sql = `${selectSql(1)} ${joins}
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY ${order}

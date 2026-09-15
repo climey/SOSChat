@@ -1282,7 +1282,71 @@
     d.setHours(key === 'tomorrow14' ? 14 : 9, 0, 0, 0);
     return d;
   }
-  function setWhen(d) { $('sched-when').value = toLocalInput(d); updateRelative(); }
+  // ---- Seletor de data e hora (calendário próprio) ----
+  const dtp = { view: new Date(), sel: new Date() };
+  const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const WEEKDAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  function dtpLabel(d) {
+    return `${WEEKDAYS[d.getDay()]}, ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} às ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+  function dtpRender() {
+    const v = dtp.view, s = dtp.sel, today = new Date();
+    $('dtp-month').textContent = `${MONTHS[v.getMonth()]} ${v.getFullYear()}`;
+    const first = new Date(v.getFullYear(), v.getMonth(), 1);
+    const start = new Date(first); start.setDate(1 - first.getDay());
+    let html = WEEKDAYS.map((w) => `<div class="wd">${w[0].toUpperCase()}</div>`).join('');
+    const todayKey = today.toDateString();
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      const other = d.getMonth() !== v.getMonth();
+      const past = d < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const cls = [other ? 'other' : '', d.toDateString() === todayKey ? 'today' : '', d.toDateString() === s.toDateString() ? 'sel' : '', past ? 'past' : ''].filter(Boolean).join(' ');
+      html += `<button type="button" class="${cls}" data-day="${d.getFullYear()}-${d.getMonth()}-${d.getDate()}" ${past ? 'disabled' : ''}>${d.getDate()}</button>`;
+    }
+    $('dtp-grid').innerHTML = html;
+    $('dtp-hours').innerHTML = Array.from({ length: 24 }, (_, h) => `<button type="button" data-h="${h}" class="${h === s.getHours() ? 'sel' : ''}">${pad2(h)}</button>`).join('');
+    $('dtp-minutes').innerHTML = Array.from({ length: 12 }, (_, i) => i * 5).map((m) => `<button type="button" data-m="${m}" class="${m === Math.floor(s.getMinutes() / 5) * 5 ? 'sel' : ''}">${pad2(m)}</button>`).join('');
+    $('dtp-chosen').textContent = `${pad2(s.getHours())}:${pad2(s.getMinutes())}`;
+    $('dtp-label').textContent = dtpLabel(s);
+    $('dtp-hours').querySelector('.sel')?.scrollIntoView({ block: 'center' });
+    $('dtp-minutes').querySelector('.sel')?.scrollIntoView({ block: 'center' });
+  }
+  function dtpCommit() {
+    $('sched-when').value = toLocalInput(dtp.sel);
+    $('dtp-label').textContent = dtpLabel(dtp.sel);
+    updateRelative();
+  }
+  function setWhen(d) {
+    dtp.sel = new Date(d);
+    dtp.sel.setSeconds(0, 0);
+    dtp.view = new Date(dtp.sel.getFullYear(), dtp.sel.getMonth(), 1);
+    dtpCommit();
+    if (!$('dtp-pop').hidden) dtpRender();
+  }
+  $('dtp-open').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const pop = $('dtp-pop');
+    if (!pop.hidden) { pop.hidden = true; return; }
+    dtp.view = new Date(dtp.sel.getFullYear(), dtp.sel.getMonth(), 1);
+    pop.hidden = false;
+    dtpRender();
+  });
+  $('dtp-prev').addEventListener('click', () => { dtp.view = new Date(dtp.view.getFullYear(), dtp.view.getMonth() - 1, 1); dtpRender(); });
+  $('dtp-next').addEventListener('click', () => { dtp.view = new Date(dtp.view.getFullYear(), dtp.view.getMonth() + 1, 1); dtpRender(); });
+  $('dtp-grid').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-day]');
+    if (!b || b.disabled) return;
+    const [y, m, d] = b.dataset.day.split('-').map(Number);
+    dtp.sel = new Date(y, m, d, dtp.sel.getHours(), dtp.sel.getMinutes());
+    dtp.view = new Date(y, m, 1);
+    dtpRender(); dtpCommit();
+  });
+  $('dtp-hours').addEventListener('click', (e) => { const b = e.target.closest('button[data-h]'); if (!b) return; dtp.sel.setHours(Number(b.dataset.h)); dtpRender(); dtpCommit(); });
+  $('dtp-minutes').addEventListener('click', (e) => { const b = e.target.closest('button[data-m]'); if (!b) return; dtp.sel.setMinutes(Number(b.dataset.m)); dtpRender(); dtpCommit(); });
+  $('dtp-today').addEventListener('click', () => { const n = new Date(); dtp.sel = new Date(n.getFullYear(), n.getMonth(), n.getDate(), dtp.sel.getHours(), dtp.sel.getMinutes()); dtp.view = new Date(n.getFullYear(), n.getMonth(), 1); dtpRender(); dtpCommit(); });
+  $('dtp-tomorrow').addEventListener('click', () => { const n = new Date(); n.setDate(n.getDate() + 1); dtp.sel = new Date(n.getFullYear(), n.getMonth(), n.getDate(), dtp.sel.getHours(), dtp.sel.getMinutes()); dtp.view = new Date(n.getFullYear(), n.getMonth(), 1); dtpRender(); dtpCommit(); });
+  $('dtp-done').addEventListener('click', () => { $('dtp-pop').hidden = true; });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#sched-dtp')) $('dtp-pop').hidden = true; });
   function updateRelative() {
     const d = new Date($('sched-when').value);
     $('sched-relative').textContent = Number.isNaN(d.getTime()) ? '' : `${relTime(d)} · ${fmtWhen(d)}`;
@@ -1374,7 +1438,7 @@
   $('schedule-drawer').addEventListener('click', (e) => { if (e.target === $('schedule-drawer')) closeSchedule(); });
   $('schedule-tabs').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) setSchedTab(b.dataset.tab); });
   $('sched-presets').addEventListener('click', (e) => { const b = e.target.closest('button[data-preset]'); if (b) setWhen(presetDate(b.dataset.preset)); });
-  $('sched-when').addEventListener('input', updateRelative);
+
   $('sched-kind').addEventListener('click', (e) => { const b = e.target.closest('button[data-kind]'); if (b) setSchedKind(b.dataset.kind); });
   $('sched-cancel-edit').addEventListener('click', resetSchedForm);
   $('schedule-form').addEventListener('submit', async (e) => {
@@ -1576,10 +1640,9 @@
     const idx = state.conversations.findIndex((c) => c.id === conv.id);
     if (matchesFilters(conv)) {
       if (idx >= 0) state.conversations[idx] = conv; else state.conversations.push(conv);
-      const needs = (c) => (c.status === 'open' && c.last_message_direction !== 'out' ? 1 : 0);
       state.conversations.sort((a, b) => state.filters.status === 'waiting'
         ? (b.pinned - a.pinned) || (new Date(a.last_message_at) - new Date(b.last_message_at)) // esperando: quem espera há mais tempo primeiro
-        : (b.pinned - a.pinned) || (needs(b) - needs(a)) || (new Date(b.last_message_at) - new Date(a.last_message_at)));
+        : (b.pinned - a.pinned) || (new Date(b.last_message_at) - new Date(a.last_message_at))); // entrada: atividade mais recente primeiro
     } else if (idx >= 0) {
       state.conversations.splice(idx, 1);
     }
