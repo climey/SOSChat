@@ -54,7 +54,7 @@ router.get('/', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const conv = id && (await conversations.getById(id));
+    const conv = id && (await conversations.getById(id, db, req.user.id));
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
     whatsapp.refreshAvatar(conv.account_id, conv.wa_id).catch(() => {}); // atualiza a foto do contato em segundo plano
     res.json({ conversation: conv });
@@ -199,8 +199,11 @@ router.patch('/:id', async (req, res, next) => {
     const sets = [];
     const params = [id];
 
-    for (const [name, value] of [['pinned', pinned], ['muted', muted], ['hidden', hidden]]) {
-      if (value !== undefined) { params.push(Boolean(value)); sets.push(`${name} = $${params.length}`); }
+    // Preferências pessoais: só afetam a tela de quem marcou
+    if (pinned !== undefined || muted !== undefined || hidden !== undefined) {
+      const exists = await db.query('SELECT 1 FROM conversations WHERE id = $1', [id]);
+      if (!exists.rowCount) return res.status(404).json({ error: 'Conversa não encontrada' });
+      await conversations.setPrefs(id, req.user.id, { pinned, muted, hidden });
     }
     // "Marcar como não lida": garante ao menos 1 não lida; "marcar como lida": zera
     if (unread === true) sets.push('unread_count = GREATEST(unread_count, 1)');
@@ -230,14 +233,17 @@ router.patch('/:id', async (req, res, next) => {
       params.push(uid);
       sets.push(`assigned_user_id = $${params.length}`);
     }
-    if (!sets.length) return res.status(400).json({ error: 'Nada para atualizar' });
+    const prefsOnly = !sets.length && (pinned !== undefined || muted !== undefined || hidden !== undefined);
+    if (!sets.length && !prefsOnly) return res.status(400).json({ error: 'Nada para atualizar' });
 
-    const r = await db.query(`UPDATE conversations SET ${sets.join(', ')} WHERE id = $1`, params);
-    if (!r.rowCount) return res.status(404).json({ error: 'Conversa não encontrada' });
-    if (status === 'resolved') schedules.cancelFor(id, 'resolve').catch(() => {});
-    const conv = await conversations.getById(id);
-    realtime.broadcast('conversation:updated', conv);
-    res.json({ conversation: conv });
+    if (sets.length) {
+      const r = await db.query(`UPDATE conversations SET ${sets.join(', ')} WHERE id = $1`, params);
+      if (!r.rowCount) return res.status(404).json({ error: 'Conversa não encontrada' });
+      if (status === 'resolved') schedules.cancelFor(id, 'resolve').catch(() => {});
+      realtime.broadcast('conversation:updated', await conversations.getById(id));
+    }
+    // Resposta com as preferências de quem pediu (a transmissão acima vai sem elas; cada tela aplica as suas)
+    res.json({ conversation: await conversations.getById(id, db, req.user.id) });
   } catch (err) {
     next(err);
   }

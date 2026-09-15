@@ -12,6 +12,7 @@
     messages: [],
     filters: { status: 'inbox', assigned: 'all', tag: '', account: '', q: '', hidden: 'none' },
     accounts: new Map(), // id -> status do número (só provedor baileys)
+    prefs: new Map(), // conversa id -> { pinned, muted, hidden } deste atendente
     multiAccount: false,
     composeMode: 'message', // message | note
     search: { open: false, q: '', hits: [], idx: -1 },
@@ -82,8 +83,19 @@
     if (f.q) qs.set('q', f.q);
     if (f.hidden !== 'none') qs.set('hidden', f.hidden);
     const { conversations } = await api('GET', `/api/conversations?${qs}`);
+    conversations.forEach(rememberPrefs);
     state.conversations = conversations;
     renderList();
+  }
+
+  // Fixar, silenciar e ocultar são preferências pessoais: as atualizações em tempo real chegam sem elas,
+  // então a tela guarda as suas e aplica por cima.
+  function rememberPrefs(c) {
+    state.prefs.set(c.id, { pinned: Boolean(c.pinned), muted: Boolean(c.muted), hidden: Boolean(c.hidden) });
+  }
+  function applyPrefs(c) {
+    const p = state.prefs.get(c.id);
+    return p ? { ...c, ...p } : c;
   }
 
   function tickHtml(c) {
@@ -186,8 +198,8 @@
       'sep',
       c.status === 'resolved' ? ['reopen', MI.check, 'Reabrir conversa'] : ['resolve', MI.check, 'Finalizar conversa'],
       c.status === 'open' ? (c.last_message_direction === 'out' ? ['inbox', MI.wait, 'Voltar para Entrada'] : ['waiting', MI.wait, 'Marcar como esperando']) : null,
-      ['pin', MI.pin, c.pinned ? 'Desafixar conversa' : 'Fixar conversa'],
-      ['hide', MI.hide, c.hidden ? 'Mostrar conversa' : 'Ocultar conversa'],
+      ['pin', MI.pin, c.pinned ? 'Desafixar (só para você)' : 'Fixar (só para você)'],
+      ['hide', MI.hide, c.hidden ? 'Mostrar conversa' : 'Ocultar (só para você)'],
       'sep',
       ['block', MI.block, c.contact_blocked ? 'Desbloquear contato' : 'Bloquear contato', 'danger'],
       state.me.role === 'admin' ? ['delete', MI.hide, 'Excluir conversa', 'danger'] : null,
@@ -220,19 +232,21 @@
     closeConvMenu();
     if (!b || !c) return;
     const patch = (body) => api('PATCH', `/api/conversations/${c.id}`, body);
+    // Preferência pessoal: o servidor não transmite para os outros, então a tela se atualiza com a resposta
+    const pref = async (body) => { const { conversation } = await patch(body); rememberPrefs(conversation); upsertConversation(conversation); if (conversation.id === state.currentId) renderChat(); };
     try {
       switch (b.dataset.act) {
         case 'leave': await patch({ assigned_user_id: null }); toast('Você saiu da conversa'); break;
         case 'take': await patch({ assigned_user_id: state.me.id }); toast('Conversa assumida'); break;
         case 'tag': await openConversation(c.id); setDetailsOpen(true); els.dTags.scrollIntoView({ block: 'center' }); break;
-        case 'mute': await patch({ muted: !c.muted }); toast(c.muted ? 'Notificações ativadas' : 'Notificações silenciadas'); break;
+        case 'mute': await pref({ muted: !c.muted }); toast(c.muted ? 'Notificações ativadas para você' : 'Notificações silenciadas só para você'); break;
         case 'unread': await patch({ unread: !(c.unread_count > 0) }); break;
         case 'resolve': await patch({ status: 'resolved' }); toast('Conversa finalizada'); break;
         case 'reopen': await patch({ status: 'open' }); toast('Conversa reaberta'); break;
         case 'waiting': await patch({ waiting: true }); toast('Movida para Esperando'); break;
         case 'inbox': await patch({ waiting: false }); toast('Movida para Entrada'); break;
-        case 'pin': await patch({ pinned: !c.pinned }); break;
-        case 'hide': await patch({ hidden: !c.hidden }); toast(c.hidden ? 'Conversa visível de novo' : 'Conversa oculta. Use "Mostrar ocultas" nos filtros para ver.'); break;
+        case 'pin': await pref({ pinned: !c.pinned }); break;
+        case 'hide': await pref({ hidden: !c.hidden }); toast(c.hidden ? 'Conversa visível de novo' : 'Oculta só na sua lista. Use "Mostrar ocultas" nos filtros para ver.'); break;
         case 'block':
           if (!c.contact_blocked && !confirm(`Bloquear ${contactName(c)} no WhatsApp? Ele não conseguirá mais enviar mensagens para este número.`)) return;
           await api('PATCH', `/api/conversations/${c.id}/contact`, { blocked: !c.contact_blocked });
@@ -287,6 +301,7 @@
       api('GET', `/api/conversations/${id}`),
       api('GET', `/api/conversations/${id}/messages`),
     ]);
+    rememberPrefs(conversation);
     state.currentConv = conversation;
     state.messages = messages;
     if (state.search.open) closeSearch();
@@ -1038,7 +1053,8 @@
     return true;
   }
 
-  function upsertConversation(conv) {
+  function upsertConversation(raw) {
+    const conv = applyPrefs(raw);
     const idx = state.conversations.findIndex((c) => c.id === conv.id);
     if (matchesFilters(conv)) {
       if (idx >= 0) state.conversations[idx] = conv; else state.conversations.push(conv);
@@ -1066,7 +1082,7 @@
         }
         if (message.direction === 'in' && document.hasFocus()) api('POST', `/api/conversations/${state.currentId}/read`).catch(() => {});
       } else if (message.direction === 'in') {
-        notify(conversation, message);
+        notify(applyPrefs(conversation), message);
       }
     });
     socket.on('message:status', ({ id, status, error }) => {

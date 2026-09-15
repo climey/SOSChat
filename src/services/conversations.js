@@ -1,9 +1,17 @@
 const db = require('../db');
 
-const CONVERSATION_SELECT = `
+/**
+ * SELECT base. `userParam` é o índice do parâmetro com o id do atendente ($1, $2...), para trazer as
+ * preferências pessoais (fixada, silenciada, oculta); sem ele, vêm como false.
+ */
+function selectSql(userParam) {
+  const prefsJoin = userParam
+    ? `LEFT JOIN conversation_prefs cp ON cp.conversation_id = c.id AND cp.user_id = $${userParam}`
+    : `LEFT JOIN conversation_prefs cp ON FALSE`;
+  return `
   SELECT c.id, c.status, c.assigned_user_id, c.unread_count, c.last_message_at,
          c.last_message_preview, c.last_message_direction, c.first_response_at, c.resolved_at, c.created_at,
-         c.pinned, c.muted, c.hidden,
+         COALESCE(cp.pinned, FALSE) AS pinned, COALESCE(cp.muted, FALSE) AS muted, COALESCE(cp.hidden, FALSE) AS hidden,
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id, ct.blocked AS contact_blocked,
          u.name AS assigned_user_name,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone,
@@ -14,7 +22,9 @@ const CONVERSATION_SELECT = `
     LEFT JOIN wa_accounts wa ON wa.id = c.account_id
     LEFT JOIN (SELECT conversation_id, COUNT(*)::int AS n FROM scheduled_messages WHERE status = 'pending' GROUP BY conversation_id) sc
            ON sc.conversation_id = c.id
+    ${prefsJoin}
 `;
+}
 
 /** Anexa o array `tags` a cada conversa (uma query para o lote inteiro). */
 async function attachTags(rows, client) {
@@ -34,11 +44,27 @@ async function attachTags(rows, client) {
   return rows;
 }
 
-async function getById(id, client = db) {
-  const { rows } = await client.query(`${CONVERSATION_SELECT} WHERE c.id = $1`, [id]);
+/** userId opcional: traz as preferências pessoais desse atendente. */
+async function getById(id, client = db, userId = null) {
+  const { rows } = userId
+    ? await client.query(`${selectSql(2)} WHERE c.id = $1`, [id, userId])
+    : await client.query(`${selectSql(null)} WHERE c.id = $1`, [id]);
   if (!rows.length) return null;
   await attachTags(rows, client);
   return rows[0];
+}
+
+/** Grava preferências pessoais (fixar, silenciar, ocultar) do atendente para a conversa. */
+async function setPrefs(conversationId, userId, prefs) {
+  const cols = ['pinned', 'muted', 'hidden'].filter((k) => prefs[k] !== undefined);
+  if (!cols.length) return;
+  const values = cols.map((k) => Boolean(prefs[k]));
+  await db.query(
+    `INSERT INTO conversation_prefs (conversation_id, user_id, ${cols.join(', ')})
+     VALUES ($1, $2, ${cols.map((_, i) => `$${i + 3}`).join(', ')})
+     ON CONFLICT (conversation_id, user_id) DO UPDATE SET ${cols.map((k, i) => `${k} = $${i + 3}`).join(', ')}, updated_at = NOW()`,
+    [conversationId, userId, ...values]
+  );
 }
 
 /**
@@ -47,7 +73,7 @@ async function getById(id, client = db) {
  */
 async function list(filters = {}) {
   const where = [];
-  const params = [];
+  const params = [filters.userId || null]; // $1 = atendente (preferências pessoais)
   let joins = '';
   const add = (sql, value) => {
     params.push(value);
@@ -61,8 +87,8 @@ async function list(filters = {}) {
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
   if (filters.accountId) add('c.account_id = ?', filters.accountId);
-  if (filters.hidden === 'only') where.push('c.hidden = TRUE');
-  else if (filters.hidden !== 'all') where.push('c.hidden = FALSE');
+  if (filters.hidden === 'only') where.push('COALESCE(cp.hidden, FALSE) = TRUE');
+  else if (filters.hidden !== 'all') where.push('COALESCE(cp.hidden, FALSE) = FALSE');
   if (filters.tagId) {
     params.push(filters.tagId);
     // (conversation_id, tag_id) é chave primária, então o JOIN não duplica linhas
@@ -78,9 +104,9 @@ async function list(filters = {}) {
   const offset = Math.max(Number(filters.offset) || 0, 0);
   params.push(limit, offset);
 
-  const sql = `${CONVERSATION_SELECT} ${joins}
+  const sql = `${selectSql(1)} ${joins}
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY c.pinned DESC, c.last_message_at DESC
+    ORDER BY COALESCE(cp.pinned, FALSE) DESC, c.last_message_at DESC
     LIMIT $${params.length - 1} OFFSET $${params.length}`;
   const { rows } = await db.query(sql, params);
   return attachTags(rows, db);
@@ -114,4 +140,4 @@ async function deleteByAccount(accountId) {
   return rowCount;
 }
 
-module.exports = { getById, list, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };
+module.exports = { getById, list, setPrefs, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };
