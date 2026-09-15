@@ -581,15 +581,21 @@
     catch (err) { toast(err.message, true); }
   }
 
-  // ---------- Emojis ----------
-  const EMOJI = {
-    '😀': ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓', '🧐', '😕', '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '💀', '💩', '🤡', '👻', '👽', '🤖'],
-    '👍': ['👍', '👎', '👌', '🤌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '☝️', '👋', '🤚', '🖐️', '✋', '🖖', '👏', '🙌', '🤝', '🙏', '💪', '🫶', '✍️', '💅', '🤳', '👀', '👁️', '🧠', '🦷', '👂', '👃'],
-    '❤️': ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💯', '💢', '💥', '💫', '💦', '💨', '🔥', '⭐', '🌟', '✨', '⚡', '☀️', '🌈', '🎉', '🎊', '🎁', '🏆', '🥇', '🎯', '💰', '💸', '💳', '🧾', '📄', '📎', '📌', '📍', '🔍', '🔒', '🔑', '🚗', '🚙', '🏍️', '🚚', '🛻', '🚘', '🛞', '⛽'],
-    '✅': ['✅', '❌', '⚠️', '❗', '❓', '‼️', '⭕', '🚫', '⏰', '⏳', '⌛', '📅', '📆', '🕐', '☑️', '✔️', '➡️', '⬅️', '⬆️', '⬇️', '🔁', '🔔', '🔕', '📢', '💬', '💭', '📞', '📱', '💻', '📧', '📨', '🆗', '🆕', '🆓', '🔞', '🅿️'],
-  };
+  // ---------- Emojis (seletor no estilo do WhatsApp) ----------
+  const EMOJI_CATS = (window.EMOJI_DATA?.categories || []).map((c) => ({ ...c, list: c.emojis.split(/\s+/).filter(Boolean) }));
+  const EMOJI_KW = window.EMOJI_DATA?.keywords || {};
   const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  const RECENT_MAX = 27;
   let emojiTarget = null; // null = compositor; número = reação na mensagem
+  let emojiScrollHandler = null;
+
+  function recentEmojis() {
+    try { return JSON.parse(localStorage.getItem('sos.emoji.recent') || '[]'); } catch { return []; }
+  }
+  function rememberEmoji(e) {
+    const list = [e, ...recentEmojis().filter((x) => x !== e)].slice(0, RECENT_MAX);
+    try { localStorage.setItem('sos.emoji.recent', JSON.stringify(list)); } catch { /* ignora */ }
+  }
   function insertAtCaret(text) {
     const t = els.composeText;
     const s = t.selectionStart ?? t.value.length, e = t.selectionEnd ?? t.value.length;
@@ -598,36 +604,79 @@
     t.focus();
     autosize();
   }
-  function renderEmojiPicker(tab) {
+  const normalize = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const emojiGrid = (list) => `<div class="ep-grid">${list.map((x) => `<button type="button" data-emoji="${x}" title="${esc(EMOJI_KW[x] || '')}">${x}</button>`).join('')}</div>`;
+
+  function renderEmojiPicker(query = '') {
     const picker = $('emoji-picker');
-    const tabs = Object.keys(EMOJI);
-    const active = tab || tabs[0];
-    const quick = emojiTarget ? `<div class="ep-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:6px">${QUICK_REACTIONS.map((x) => `<button type="button" data-emoji="${x}">${x}</button>`).join('')}</div>` : '';
-    picker.innerHTML = quick + `<div class="ep-tabs">${tabs.map((t) => `<button type="button" data-tab="${t}" class="${t === active ? 'active' : ''}">${t}</button>`).join('')}</div>
-      <div class="ep-grid">${EMOJI[active].map((x) => `<button type="button" data-emoji="${x}">${x}</button>`).join('')}</div>`;
+    const q = normalize(query.trim());
+    const quick = emojiTarget
+      ? `<div class="ep-quick">${QUICK_REACTIONS.map((x) => `<button type="button" data-emoji="${x}">${x}</button>`).join('')}</div>` : '';
+    let body;
+    if (q) {
+      const hits = [];
+      for (const c of EMOJI_CATS) {
+        const catMatch = normalize(c.title).includes(q);
+        for (const e of c.list) if (catMatch || normalize(EMOJI_KW[e] || '').includes(q)) hits.push(e);
+      }
+      body = hits.length ? `<div class="ep-section"><div class="ep-title">Resultados</div>${emojiGrid([...new Set(hits)])}</div>`
+        : '<div class="ep-empty">Nenhum emoji encontrado</div>';
+    } else {
+      const recent = recentEmojis();
+      body = (recent.length ? `<div class="ep-section" data-cat="recent"><div class="ep-title">Usados recentemente</div>${emojiGrid(recent)}</div>` : '')
+        + EMOJI_CATS.map((c) => `<div class="ep-section" data-cat="${c.id}"><div class="ep-title">${esc(c.title)}</div>${emojiGrid(c.list)}</div>`).join('');
+    }
+    picker.innerHTML = `
+      ${quick}
+      <div class="ep-tabs">
+        ${recentEmojis().length && !q ? '<button type="button" data-cat="recent" title="Usados recentemente">🕒</button>' : ''}
+        ${EMOJI_CATS.map((c) => `<button type="button" data-cat="${c.id}" title="${esc(c.title)}">${c.icon}</button>`).join('')}
+      </div>
+      <div class="ep-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="search" id="ep-search" placeholder="Pesquisar emoji" value="${esc(query)}" autocomplete="off"></div>
+      <div class="ep-body" id="ep-body">${body}</div>`;
+    const bodyEl = $('ep-body');
+    const tabs = [...picker.querySelectorAll('.ep-tabs button')];
+    const syncTab = () => {
+      const sections = [...bodyEl.querySelectorAll('.ep-section[data-cat]')];
+      let cur = sections[0]?.dataset.cat;
+      for (const s of sections) if (s.offsetTop - bodyEl.offsetTop <= bodyEl.scrollTop + 8) cur = s.dataset.cat;
+      tabs.forEach((t) => t.classList.toggle('active', t.dataset.cat === cur));
+    };
+    bodyEl.addEventListener('scroll', syncTab);
+    syncTab();
+    const input = $('ep-search');
+    let t;
+    input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { renderEmojiPicker(input.value); $('ep-search').focus(); $('ep-search').setSelectionRange(input.value.length, input.value.length); }, 120); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeEmojiPicker(); });
   }
   function openEmojiPicker({ forReaction = null, anchor = null } = {}) {
     emojiTarget = forReaction;
     const picker = $('emoji-picker');
     picker.classList.toggle('for-reaction', Boolean(forReaction));
-    renderEmojiPicker();
+    renderEmojiPicker('');
     picker.hidden = false;
     if (forReaction && anchor) {
       const r = anchor.getBoundingClientRect();
-      picker.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 356))}px`;
+      picker.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - picker.offsetWidth - 8))}px`;
       picker.style.top = `${Math.max(8, r.top - picker.offsetHeight - 8)}px`;
     } else {
       picker.style.left = ''; picker.style.top = '';
+      $('ep-search')?.focus();
     }
   }
   function closeEmojiPicker() { $('emoji-picker').hidden = true; emojiTarget = null; }
   $('btn-emoji').addEventListener('click', (e) => { e.stopPropagation(); if ($('emoji-picker').hidden) openEmojiPicker(); else closeEmojiPicker(); });
   $('emoji-picker').addEventListener('click', async (e) => {
     e.stopPropagation();
-    const tab = e.target.closest('button[data-tab]');
-    if (tab) { renderEmojiPicker(tab.dataset.tab); return; }
+    const tab = e.target.closest('.ep-tabs button[data-cat]');
+    if (tab) {
+      const sec = $('ep-body').querySelector(`.ep-section[data-cat="${tab.dataset.cat}"]`);
+      if (sec) $('ep-body').scrollTo({ top: sec.offsetTop - $('ep-body').offsetTop, behavior: 'smooth' });
+      return;
+    }
     const em = e.target.closest('button[data-emoji]');
     if (!em) return;
+    rememberEmoji(em.dataset.emoji);
     if (emojiTarget) { const id = emojiTarget; closeEmojiPicker(); await sendReaction(id, em.dataset.emoji); }
     else insertAtCaret(em.dataset.emoji);
   });

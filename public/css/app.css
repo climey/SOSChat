@@ -540,3 +540,24 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .settings-section .card { padding: 22px 24px; }
 .settings-section .card h3 { font-size: 16px; color: var(--text); }
 @media (max-width: 900px) { .settings-layout { flex-direction: column; } .settings-nav { width: 100%; flex-direction: row; flex-wrap: wrap; position: static; } }
+
+/* ---------- Seletor de emojis no estilo WhatsApp ---------- */
+.emoji-picker { width: 460px; max-width: calc(100vw - 32px); padding: 0; overflow: hidden; display: flex; flex-direction: column; height: 420px; }
+.emoji-picker .ep-quick { display: flex; gap: 4px; padding: 8px 10px 4px; border-bottom: 1px solid var(--border); }
+.emoji-picker .ep-quick button { flex: 1; border: none; background: transparent; font-size: 24px; padding: 4px 0; border-radius: 8px; }
+.emoji-picker .ep-quick button:hover { background: var(--surface-3); }
+.emoji-picker .ep-tabs { display: flex; gap: 0; padding: 4px 8px 0; margin: 0; border-bottom: 1px solid var(--border); }
+.emoji-picker .ep-tabs button { flex: 1; border: none; border-bottom: 3px solid transparent; background: transparent; padding: 8px 0 6px; font-size: 20px; border-radius: 0; filter: grayscale(1) opacity(0.6); transition: filter 0.15s; }
+.emoji-picker .ep-tabs button:hover { filter: none; }
+.emoji-picker .ep-tabs button.active { border-bottom-color: var(--primary); filter: none; }
+.emoji-picker .ep-search { position: relative; padding: 8px 10px; }
+.emoji-picker .ep-search svg { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--muted); }
+.emoji-picker .ep-search input { width: 100%; padding: 8px 12px 8px 34px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); outline: none; }
+.emoji-picker .ep-search input:focus { border-color: var(--primary); }
+.emoji-picker .ep-body { flex: 1; overflow-y: auto; padding: 0 8px 10px; }
+.emoji-picker .ep-title { font-size: 12px; color: var(--muted); font-weight: 600; padding: 10px 4px 4px; position: sticky; top: 0; background: var(--surface-2); z-index: 1; }
+.emoji-picker .ep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 2px; max-height: none; }
+.emoji-picker .ep-grid button { border: none; background: transparent; font-size: 26px; line-height: 1.25; padding: 3px 0; border-radius: 8px; }
+.emoji-picker .ep-grid button:hover { background: var(--surface-3); }
+.emoji-picker .ep-empty { padding: 30px; text-align: center; color: var(--muted); }
+.emoji-picker.for-reaction { height: 360px; width: 400px; }
