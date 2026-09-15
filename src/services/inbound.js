@@ -162,6 +162,42 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
   return result;
 }
 
+/** Aplica uma edição feita no WhatsApp ao texto da mensagem. */
+async function handleEdit(waMessageId, msg) {
+  const content = extractContent(msg);
+  const { rows } = await db.query(
+    `UPDATE messages SET body = $2, edited_at = NOW() WHERE wa_message_id = $1 AND deleted_at IS NULL RETURNING *`,
+    [waMessageId, content.body]
+  );
+  if (!rows.length) return null;
+  await refreshPreview(rows[0]);
+  realtime.broadcast('message:updated', rows[0]);
+  return rows[0];
+}
+
+/** Marca uma mensagem apagada "para todos" no WhatsApp. */
+async function handleRevoke(waMessageId) {
+  const { rows } = await db.query(
+    `UPDATE messages SET deleted_at = NOW(), body = '[Mensagem apagada]', media_id = NULL WHERE wa_message_id = $1 RETURNING *`,
+    [waMessageId]
+  );
+  if (!rows.length) return null;
+  await refreshPreview(rows[0]);
+  realtime.broadcast('message:updated', rows[0]);
+  return rows[0];
+}
+
+/** Se a mensagem for a última da conversa, atualiza a prévia na lista. */
+async function refreshPreview(message) {
+  const { rows } = await db.query(
+    `UPDATE conversations SET last_message_preview = $2
+      WHERE id = $1 AND (SELECT id FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1) = $3
+      RETURNING id`,
+    [message.conversation_id, String(message.body || '').slice(0, PREVIEW_MAX), message.id]
+  );
+  if (rows.length) realtime.broadcast('conversation:updated', await conversations.getById(message.conversation_id));
+}
+
 /** Atualiza status de entrega (sent → delivered → read / failed) de mensagens enviadas. */
 async function handleStatus(st) {
   if (!st.id || !STATUS_RANK.hasOwnProperty(st.status)) return;
@@ -202,4 +238,4 @@ async function processWebhook(payload) {
   }
 }
 
-module.exports = { processWebhook, handleInboundMessage, handleOutboundEcho, handleStatus, extractContent };
+module.exports = { processWebhook, handleInboundMessage, handleOutboundEcho, handleEdit, handleRevoke, handleStatus, extractContent };

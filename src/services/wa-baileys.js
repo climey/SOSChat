@@ -10,8 +10,10 @@ const realtime = require('../realtime');
 const {
   makeWASocket, DisconnectReason, initAuthCreds, BufferJSON, proto,
   makeCacheableSignalKeyStore, fetchLatestBaileysVersion, downloadMediaMessage,
-  getContentType, jidNormalizedUser, isJidGroup, isJidBroadcast, Browsers,
+  getContentType, jidNormalizedUser, isJidGroup, isJidBroadcast, Browsers, WAMessageStubType,
 } = baileys;
+
+const avatarAttempts = new Map(); // waId -> timestamp da última tentativa de baixar a foto
 
 const logger = pino({ level: process.env.WA_LOG_LEVEL || 'error' });
 const MEDIA_MAX_BYTES = 25 * 1024 * 1024;
@@ -128,6 +130,7 @@ function toCloudMessage(m) {
     case 'messageContextInfo':
     case 'editedMessage':
     case 'pollUpdateMessage':
+    case 'albumMessage': // só anuncia um álbum; as imagens chegam em mensagens separadas
       return null; // eventos internos, sem conteúdo para o atendente
     default:
       return { ...base, type: 'unsupported' };
@@ -264,6 +267,7 @@ class Session {
         const cloudMsg = toCloudMessage(m);
         if (!cloudMsg) continue;
         if (m.key.fromMe) {
+          await this.storeMedia(m, cloudMsg);
           await new Promise((r) => setTimeout(r, ECHO_DELAY_MS));
           await getInbound().handleOutboundEcho(waId, cloudMsg, this.account.id);
           continue;
@@ -274,6 +278,7 @@ class Session {
           m.pushName ? { profile: { name: m.pushName } } : {},
           this.account.id
         );
+        this.refreshAvatar(waId).catch(() => {});
       } catch (err) {
         console.error(`[baileys:${this.account.id}] erro ao processar mensagem`, m.key?.id, err);
       }
@@ -282,14 +287,56 @@ class Session {
 
   async onMessagesUpdate(updates) {
     for (const { key, update } of updates) {
-      const status = STATUS_MAP[update?.status];
-      if (!key?.fromMe || !status) continue;
+      if (!key?.id) continue;
       try {
-        await getInbound().handleStatus({ id: key.id, status });
+        // Mensagem editada
+        const edited = update?.message?.editedMessage?.message;
+        if (edited) {
+          const cloudMsg = toCloudMessage({ key, message: edited, messageTimestamp: update.messageTimestamp });
+          if (cloudMsg) await getInbound().handleEdit(key.id, cloudMsg);
+          continue;
+        }
+        // Mensagem apagada para todos
+        if (update?.messageStubType === WAMessageStubType.REVOKE || (update && 'message' in update && update.message === null)) {
+          await getInbound().handleRevoke(key.id);
+          continue;
+        }
+        const status = STATUS_MAP[update?.status];
+        if (key.fromMe && status) await getInbound().handleStatus({ id: key.id, status });
       } catch (err) {
-        console.error(`[baileys:${this.account.id}] erro ao atualizar status`, key.id, err);
+        console.error(`[baileys:${this.account.id}] erro ao processar atualização`, key.id, err);
       }
     }
+  }
+
+  /** Baixa a foto de perfil do contato (no máximo uma vez por dia) e guarda em media_files. */
+  async refreshAvatar(waId) {
+    if (!this.isConnected()) return;
+    const now = Date.now();
+    if ((avatarAttempts.get(waId) || 0) > now - 6 * 3600 * 1000) return;
+    avatarAttempts.set(waId, now);
+    const { rows } = await db.query('SELECT id, avatar_updated_at FROM contacts WHERE wa_id = $1', [waId]);
+    if (!rows.length) return;
+    if (rows[0].avatar_updated_at && now - new Date(rows[0].avatar_updated_at).getTime() < 24 * 3600 * 1000) return;
+    const contactId = rows[0].id;
+    let url = null;
+    try { url = await this.sock.profilePictureUrl(toJid(waId), 'image', 10000); } catch { /* sem foto ou privacidade */ }
+    if (!url) {
+      await db.query('UPDATE contacts SET avatar_updated_at = NOW() WHERE id = $1', [contactId]);
+      return;
+    }
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length > 5 * 1024 * 1024) return;
+    const mediaId = `avatar-${String(waId).replace(/[^\w.-]/g, '_')}`;
+    await db.query(
+      `INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET mime = EXCLUDED.mime, size = EXCLUDED.size, data = EXCLUDED.data, created_at = NOW()`,
+      [mediaId, res.headers.get('content-type') || 'image/jpeg', buffer.length, buffer]
+    );
+    await db.query('UPDATE contacts SET avatar_media_id = $2, avatar_updated_at = NOW() WHERE id = $1', [contactId, mediaId]);
+    realtime.broadcast('contact:avatar', { contact_id: contactId, avatar_media_id: mediaId, version: now });
   }
 
   isConnected() {

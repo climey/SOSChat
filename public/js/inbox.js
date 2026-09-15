@@ -51,7 +51,7 @@
     } else {
       els.items.innerHTML = list.map((c) => `
         <div class="conv-item ${c.id === state.currentId ? 'active' : ''} ${c.unread_count > 0 ? 'unread' : ''}" data-id="${c.id}">
-          <div class="avatar">${esc(initials(contactName(c)))}</div>
+          ${avatarHtml(c)}
           <div class="body">
             <div class="top">
               <span class="name">${esc(contactName(c))}</span>
@@ -121,7 +121,8 @@
     if (!c) return;
     els.chatEmpty.hidden = true;
     els.chatPanel.hidden = false;
-    els.chatAvatar.textContent = initials(contactName(c));
+    els.chatAvatar.outerHTML = avatarHtml(c).replace('<div class="avatar ', '<div id="chat-avatar" class="avatar ');
+    els.chatAvatar = $('chat-avatar');
     els.chatTitle.textContent = contactName(c);
     els.chatSub.textContent = `${formatPhone(c.wa_id)} · ${c.assigned_user_name ? 'Responsável: ' + c.assigned_user_name : 'Sem responsável'}`
       + (c.account_name && state.multiAccount ? ` · via ${c.account_name}` : '');
@@ -136,13 +137,23 @@
     return `<span class="st ${cls}" title="${esc(m.error || m.status)}">${txt}</span>`;
   }
 
+  const isPlaceholder = (body) => /^\[[^\]]*\]$/.test(body || '');
+
   function mediaHtml(m) {
-    if (!m.media_id) return '';
+    if (!m.media_id || m.deleted_at) return '';
+    const src = `/api/media/${esc(m.media_id)}`;
     if (m.type === 'image' || m.type === 'sticker') {
-      return `<img class="media-img" src="/api/media/${esc(m.media_id)}" alt="imagem" loading="lazy">`;
+      return `<a href="${src}" target="_blank" rel="noopener"><img class="media-img" src="${src}" alt="" loading="lazy"></a>`;
     }
-    const label = { audio: 'Ouvir áudio', video: 'Ver vídeo', document: 'Baixar documento' }[m.type] || 'Abrir mídia';
-    return `<div class="media"><a href="/api/media/${esc(m.media_id)}" target="_blank" rel="noopener">📎 ${label}</a></div>`;
+    if (m.type === 'audio') return `<audio class="media-audio" controls preload="none" src="${src}"></audio>`;
+    if (m.type === 'video') return `<video class="media-video" controls preload="metadata" src="${src}"></video>`;
+    const name = m.body && !isPlaceholder(m.body) ? m.body : 'Documento';
+    return `<a class="media-doc" href="${src}" target="_blank" rel="noopener">📎 <span class="name">${esc(name)}</span></a>`;
+  }
+
+  function avatarHtml(c, cls = '') {
+    const img = c.avatar_media_id ? `<img src="/api/media/${esc(c.avatar_media_id)}" alt="" loading="lazy">` : '';
+    return `<div class="avatar ${cls}">${esc(initials(contactName(c)))}${img}</div>`;
   }
 
   function renderMessages(scroll) {
@@ -151,11 +162,12 @@
       const day = fmtDay(m.created_at);
       const sep = day !== lastDay ? `<div class="day-sep">${esc(day)}</div>` : '';
       lastDay = day;
-      const showBody = !(m.media_id && (m.type === 'image' || m.type === 'sticker') && /^\[/.test(m.body || ''));
-      return `${sep}<div class="msg ${m.direction}" data-id="${m.id}">
+      // Esconde o texto quando ele é só um marcador de mídia ("[Áudio]") ou o nome do arquivo já mostrado no link
+      const showBody = m.deleted_at || !m.media_id || !(isPlaceholder(m.body) || m.type === 'document');
+      return `${sep}<div class="msg ${m.direction} ${m.deleted_at ? 'deleted' : ''}" data-id="${m.id}">
         ${m.direction === 'out' && m.sender_name ? `<div class="sender">${esc(m.sender_name)}</div>` : ''}
         ${mediaHtml(m)}${showBody ? `<div class="body">${esc(m.body)}</div>` : ''}
-        <div class="foot"><span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</div>
+        <div class="foot">${m.edited_at && !m.deleted_at ? '<span class="edited">editada</span>' : ''}<span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</div>
       </div>`;
     }).join('');
     if (scroll) els.messages.scrollTop = els.messages.scrollHeight;
@@ -205,7 +217,8 @@
     const c = current();
     if (!c) { els.details.hidden = true; return; }
     els.details.hidden = false;
-    els.dAvatar.textContent = initials(contactName(c));
+    els.dAvatar.outerHTML = avatarHtml(c).replace('<div class="avatar ', '<div id="d-avatar" class="avatar ');
+    els.dAvatar = $('d-avatar');
     els.dName.textContent = contactName(c);
     els.dPhone.textContent = formatPhone(c.wa_id) + (c.profile_name ? ` · perfil: ${c.profile_name}` : '');
     if (document.activeElement !== els.dNameInput) els.dNameInput.value = c.contact_name || '';
@@ -294,6 +307,16 @@
     socket.on('message:status', ({ id, status, error }) => {
       const m = state.messages.find((x) => x.id === id);
       if (m) { m.status = status; m.error = error; renderMessages(false); }
+    });
+    socket.on('message:updated', (updated) => {
+      const i = state.messages.findIndex((x) => x.id === updated.id);
+      if (i >= 0) { state.messages[i] = { ...state.messages[i], ...updated }; renderMessages(false); }
+    });
+    socket.on('contact:avatar', ({ contact_id, avatar_media_id }) => {
+      let touched = false;
+      for (const c of state.conversations) if (c.contact_id === contact_id) { c.avatar_media_id = avatar_media_id; touched = true; }
+      if (state.currentConv?.contact_id === contact_id) { state.currentConv.avatar_media_id = avatar_media_id; renderChat(); renderDetails(); }
+      if (touched) renderList();
     });
     socket.on('connect_error', () => toast('Conexão em tempo real perdida, tentando reconectar…', true));
   }

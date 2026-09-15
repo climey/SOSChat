@@ -68,9 +68,11 @@ if (config.enableDevSimulator) {
 const publicDir = path.join(__dirname, '..', 'public');
 app.get(['/', '/index.html', '/reports.html', '/settings.html'], requirePageAuth, (req, res) => {
   const file = req.path === '/' ? 'index.html' : req.path.slice(1);
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(publicDir, file));
 });
-app.use(express.static(publicDir, { index: false }));
+// no-cache = o navegador revalida a cada carregamento (304 quando nada mudou), evitando CSS/JS antigos após deploy
+app.use(express.static(publicDir, { index: false, etag: true, setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 
 app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
 

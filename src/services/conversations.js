@@ -3,7 +3,7 @@ const db = require('../db');
 const CONVERSATION_SELECT = `
   SELECT c.id, c.status, c.assigned_user_id, c.unread_count, c.last_message_at,
          c.last_message_preview, c.first_response_at, c.resolved_at, c.created_at,
-         ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name,
+         ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id,
          u.name AS assigned_user_name,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone
     FROM conversations c

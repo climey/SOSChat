@@ -257,3 +257,15 @@ table.table tr:last-child td { border-bottom: none; }
 .wa-account .qr img { width: 180px; height: 180px; border-radius: 8px; background: #fff; padding: 5px; display: block; }
 .wa-account .qr .hint { font-size: 11px; color: var(--muted); margin-top: 4px; max-width: 180px; }
 .via { font-size: 11px; color: var(--muted); background: var(--surface-3); padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+
+/* ---------- Mídia nos balões e avatares ---------- */
+.msg .media-img { max-width: 100%; max-height: 320px; width: auto; border-radius: 8px; display: block; cursor: zoom-in; }
+.msg .media-video { max-width: 100%; max-height: 320px; border-radius: 8px; display: block; }
+.msg .media-audio { display: block; min-width: 260px; max-width: 100%; height: 40px; margin: 2px 0; }
+.msg .media-doc { display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,0.25); color: var(--text); }
+.msg .media-doc .name { font-weight: 500; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.in .body + .foot, .msg.out .body + .foot { margin-top: 2px; }
+.msg .edited { font-style: italic; margin-right: 4px; }
+.msg.deleted .body { color: var(--muted); font-style: italic; }
+.avatar { position: relative; overflow: hidden; }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
