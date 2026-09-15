@@ -450,7 +450,7 @@
     $('lb-stage').innerHTML = isVideo
       ? `<video controls autoplay src="${src}"></video>`
       : isDoc
-        ? `<iframe class="lb-pdf" src="${src}#toolbar=0&view=FitH" title="${esc(m.body || 'PDF')}"></iframe>`
+        ? `<iframe class="lb-pdf" src="${src}#view=FitH" title="${esc(m.body || 'PDF')}"></iframe>`
         : `<img src="${src}" alt="" id="lb-img">`;
     const who = m.direction === 'in' ? (c ? contactName(c) : 'Cliente') : (m.sender_name || 'Você');
     $('lb-name').textContent = who;
@@ -467,6 +467,8 @@
     $('lb-next').disabled = lb.idx >= lb.items.length - 1;
     $('lb-zoom-in').hidden = isVideo || isDoc;
     $('lb-zoom-out').hidden = isVideo || isDoc;
+    $('lb-open').hidden = !isDoc;
+    $('lb-open').href = src;
     document.querySelectorAll('.lb-thumb').forEach((t) => t.classList.toggle('current', Number(t.dataset.id) === m.id));
     document.querySelector('.lb-thumb.current')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   }

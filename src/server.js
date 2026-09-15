@@ -28,8 +28,11 @@ app.use(
         mediaSrc: ["'self'", 'blob:'],
         connectSrc: ["'self'", 'ws:', 'wss:'],
         fontSrc: ["'self'"],
-        objectSrc: ["'none'"],
-        frameAncestors: ["'none'"],
+        // PDFs no visualizador: o leitor embutido do Chrome depende de object-src/frame-src da própria origem
+        objectSrc: ["'self'"],
+        frameSrc: ["'self'"],
+        childSrc: ["'self'"],
+        frameAncestors: ["'self'"],
       },
     },
   })
