@@ -24,9 +24,18 @@ router.get('/:mediaId', async (req, res, next) => {
     const media = local.rows.length
       ? { buffer: local.rows[0].data, mimeType: local.rows[0].mime, size: local.rows[0].size }
       : await whatsapp.fetchMedia(mediaId);
-    res.setHeader('Content-Type', media.mimeType);
-    res.setHeader('Content-Disposition', 'inline');
+    const mime = String(media.mimeType || 'application/octet-stream').toLowerCase();
+    const inlineSafe = /^(image\/(jpeg|png|gif|webp)|video\/|audio\/|application\/pdf)/.test(mime);
+    res.setHeader('Content-Type', mime);
+    // Tipos que poderiam executar script se abertos na página (svg, html...) vão como download
+    res.setHeader('Content-Disposition', inlineSafe ? 'inline' : 'attachment');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (mime === 'application/pdf') {
+      // O leitor de PDF do Chrome abre o arquivo num quadro interno; a CSP da página (frame-ancestors) barra isso
+      res.removeHeader('Content-Security-Policy');
+      res.removeHeader('X-Frame-Options');
+      res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    }
     res.setHeader('Cache-Control', 'private, max-age=3600');
     if (media.size) res.setHeader('Content-Length', media.size);
     if (media.buffer) return res.end(media.buffer);
