@@ -10,6 +10,7 @@
     currentId: null,
     messages: [],
     filters: { status: 'open', assigned: 'all', tag: '', account: '', q: '' },
+    accounts: new Map(), // id -> status do número (só provedor baileys)
   };
 
   const $ = (id) => document.getElementById(id);
@@ -61,7 +62,7 @@
             <div class="meta">
               ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
               ${c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : ''}
-              ${c.account_name && state.multiAccount ? `<span class="via">via ${esc(c.account_name)}</span>` : ''}
+              ${c.account_name && state.multiAccount ? `<span class="via ${accountOffline(c.account_id) ? 'off' : ''}">via ${esc(c.account_name)}</span>` : ''}
               ${c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')}
               <span class="assignee">${c.assigned_user_name ? esc(c.assigned_user_name) : 'Sem responsável'}</span>
             </div>
@@ -116,11 +117,53 @@
     if (conversation.unread_count > 0) api('POST', `/api/conversations/${id}/read`).catch(() => {});
   }
 
+  // ---------- Estado dos números ----------
+  const ACCOUNT_LABELS = {
+    qr: 'aguardando leitura do QR code',
+    connecting: 'conectando…',
+    reconnecting: 'reconectando…',
+    disconnected: 'desconectado',
+    off: 'desligado',
+  };
+  function accountOffline(accountId) {
+    if (!state.multiAccount || !accountId) return false;
+    const a = state.accounts.get(Number(accountId));
+    return Boolean(a) && a.status !== 'connected';
+  }
+  function anyAccountConnected() {
+    for (const a of state.accounts.values()) if (a.status === 'connected') return true;
+    return false;
+  }
+  function renderBanner() {
+    const banner = $('wa-banner');
+    const c = current();
+    if (!c || !state.multiAccount) { banner.hidden = true; return; }
+    const a = c.account_id ? state.accounts.get(Number(c.account_id)) : null;
+    let text = null;
+    let warn = false;
+    if (c.account_id && !a) {
+      text = 'O número desta conversa foi removido. Respostas sairão pelo primeiro número conectado.';
+      warn = true;
+    } else if (a && a.status !== 'connected') {
+      const label = ACCOUNT_LABELS[a.status] || a.status;
+      warn = a.status === 'connecting' || a.status === 'reconnecting';
+      text = `Número "${a.name}" ${label}. Mensagens deste cliente não estão chegando e envios vão falhar até reconectar.`
+        + (a.lastError ? ` (${a.lastError})` : '');
+    } else if (!c.account_id && !anyAccountConnected()) {
+      text = 'Nenhum número de WhatsApp conectado.';
+    }
+    if (!text) { banner.hidden = true; return; }
+    banner.className = `wa-banner ${warn ? 'warn' : ''}`;
+    banner.innerHTML = `<span class="dot"></span><span>${esc(text)}</span>${state.me.role === 'admin' ? '<a href="/settings.html">Abrir Configurações</a>' : ''}`;
+    banner.hidden = false;
+  }
+
   function renderChat() {
     const c = current();
     if (!c) return;
     els.chatEmpty.hidden = true;
     els.chatPanel.hidden = false;
+    renderBanner();
     els.chatAvatar.outerHTML = avatarHtml(c).replace('<div class="avatar ', '<div id="chat-avatar" class="avatar ');
     els.chatAvatar = $('chat-avatar');
     els.chatTitle.textContent = contactName(c);
@@ -312,6 +355,12 @@
       const i = state.messages.findIndex((x) => x.id === updated.id);
       if (i >= 0) { state.messages[i] = { ...state.messages[i], ...updated }; renderMessages(false); }
     });
+    socket.on('whatsapp:status', (a) => {
+      if (!state.multiAccount || !a?.id) return;
+      if (a.removed) state.accounts.delete(a.id); else state.accounts.set(a.id, a);
+      renderBanner();
+      renderList();
+    });
     socket.on('contact:avatar', ({ contact_id, avatar_media_id }) => {
       let touched = false;
       for (const c of state.conversations) if (c.contact_id === contact_id) { c.avatar_media_id = avatar_media_id; touched = true; }
@@ -356,6 +405,7 @@
     try {
       const wa = await api('GET', '/api/whatsapp/status');
       state.multiAccount = wa.provider === 'baileys';
+      for (const a of wa.accounts || []) if (a.id) state.accounts.set(a.id, a);
       if (state.multiAccount && wa.accounts.length > 1) {
         $('account-filter').innerHTML = '<option value="">Todos os números</option>' +
           wa.accounts.map((a) => `<option value="${a.id}">${esc(a.name)}${a.phone ? ' · ' + esc(a.phone) : ''}</option>`).join('');
