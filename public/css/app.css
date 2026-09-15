@@ -597,3 +597,14 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .now-agents { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
 .agent-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 9px; background: var(--surface); border: 1px solid var(--border); opacity: 0.55; }
 .agent-card.on { opacity: 1; }
+
+/* ---------- Preferências de notificação ---------- */
+.sound-list { display: flex; flex-direction: column; gap: 4px; }
+.sound-list label { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; }
+.sound-list label:hover { background: var(--surface-2); }
+.sound-list label.on { border-color: var(--primary); background: var(--primary-soft); }
+.sound-list input { accent-color: var(--primary); }
+.sound-list .name { flex: 1; }
+.sound-list .play { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text-2); display: flex; align-items: center; justify-content: center; }
+.sound-list .play:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+.sound-list .play svg { width: 12px; height: 12px; }

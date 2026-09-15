@@ -1595,7 +1595,8 @@
           const nearBottom = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight < 120;
           renderMessages(nearBottom || message.direction === 'out');
         }
-        if (message.direction === 'in' && document.hasFocus()) api('POST', `/api/conversations/${state.currentId}/read`).catch(() => {});
+        if (message.direction === 'in' && document.hasFocus() && !document.hidden) api('POST', `/api/conversations/${state.currentId}/read`).catch(() => {});
+        else if (message.direction === 'in') notify(applyPrefs(conversation), message, { sameConversation: true });
       } else if (message.direction === 'in') {
         notify(applyPrefs(conversation), message);
       }
@@ -1644,12 +1645,74 @@
     socket.io.on('reconnect', () => SOS.checkVersion(canReloadNow));
   }
 
-  function notify(conv, message) {
+  // ---------- Notificações: som, aviso do sistema e título piscando ----------
+  const notifyState = { unseen: 0, flashTimer: null, baseTitle: document.title };
+  function notify(conv, message, { sameConversation = false } = {}) {
     if (conv.muted) return;
-    if (!('Notification' in window) || Notification.permission !== 'granted' || document.hasFocus()) return;
-    const n = new Notification(contactName(conv), { body: message.body || 'Nova mensagem', icon: '/img/logo.svg' });
-    n.onclick = () => { window.focus(); openConversation(conv.id); n.close(); };
+    const prefs = SOS.sound.load();
+    const away = document.hidden || !document.hasFocus();
+    // Som: fora da aba conforme preferência; dentro da aba só para outras conversas, se o atendente quiser
+    if ((away && prefs.whenBackground) || (!away && !sameConversation && prefs.whenFocused)) SOS.sound.play(prefs.sound, prefs.volume);
+    if (!away) return;
+    if (prefs.flashTitle) { notifyState.unseen += 1; startTitleFlash(); }
+    if (prefs.desktop && 'Notification' in window && Notification.permission === 'granted') {
+      const n = new Notification(contactName(conv), { body: stripWa(message.body) || 'Nova mensagem', icon: '/img/logo.svg', tag: `conv-${conv.id}` });
+      n.onclick = () => { window.focus(); openConversation(conv.id); n.close(); };
+    }
   }
+  function startTitleFlash() {
+    if (notifyState.flashTimer) return;
+    let on = false;
+    notifyState.flashTimer = setInterval(() => {
+      on = !on;
+      document.title = on ? `(${notifyState.unseen}) Nova mensagem` : notifyState.baseTitle;
+    }, 1200);
+  }
+  function stopTitleFlash() {
+    clearInterval(notifyState.flashTimer);
+    notifyState.flashTimer = null;
+    notifyState.unseen = 0;
+    document.title = notifyState.baseTitle;
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) stopTitleFlash(); });
+  window.addEventListener('focus', stopTitleFlash);
+
+  // Preferências (modal)
+  function openPrefs() {
+    const prefs = SOS.sound.load();
+    $('sound-list').innerHTML = Object.entries(SOS.sound.SOUNDS).map(([id, s]) => `
+      <label class="${prefs.sound === id ? 'on' : ''}"><input type="radio" name="sound" value="${id}" ${prefs.sound === id ? 'checked' : ''}><span class="name">${esc(s.name)}</span>
+        ${id !== 'none' ? `<button type="button" class="play" data-play="${id}" title="Ouvir"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>` : ''}</label>`).join('');
+    $('pref-volume').value = prefs.volume;
+    $('pref-background').checked = prefs.whenBackground;
+    $('pref-focused').checked = prefs.whenFocused;
+    $('pref-desktop').checked = prefs.desktop;
+    $('pref-flash').checked = prefs.flashTitle;
+    $('prefs-modal').hidden = false;
+  }
+  $('open-prefs').addEventListener('click', () => { $('presence-menu').hidden = true; openPrefs(); });
+  $('prefs-cancel').addEventListener('click', () => { $('prefs-modal').hidden = true; });
+  $('sound-list').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-play]');
+    if (b) { e.preventDefault(); SOS.sound.play(b.dataset.play, Number($('pref-volume').value)); return; }
+    const lab = e.target.closest('label');
+    if (lab) document.querySelectorAll('#sound-list label').forEach((l) => l.classList.toggle('on', l === lab));
+  });
+  $('prefs-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const prefs = {
+      sound: document.querySelector('#sound-list input:checked')?.value || 'ding',
+      volume: Number($('pref-volume').value),
+      whenBackground: $('pref-background').checked,
+      whenFocused: $('pref-focused').checked,
+      desktop: $('pref-desktop').checked,
+      flashTitle: $('pref-flash').checked,
+    };
+    SOS.sound.save(prefs);
+    if (prefs.desktop && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+    $('prefs-modal').hidden = true;
+    toast('Preferências salvas');
+  });
 
   // ---------- Simulador (dev) ----------
   async function setupSimulator() {
