@@ -67,8 +67,10 @@ router.get('/:id/messages', async (req, res, next) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
     const { rows } = await db.query(
-      `SELECT m.*, u.name AS sender_name
-         FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id
+      `SELECT m.*, u.name AS sender_name, mf.size AS media_size
+         FROM messages m
+         LEFT JOIN users u ON u.id = m.sender_user_id
+         LEFT JOIN media_files mf ON mf.id = m.media_id
         WHERE m.conversation_id = $1
         ORDER BY m.created_at ASC, m.id ASC
         LIMIT 500`,

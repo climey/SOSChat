@@ -104,7 +104,7 @@
               <span class="time">${esc(fmtTime(c.last_message_at))}</span>
             </div>
             <div class="mid">
-              <span class="preview">${tickHtml(c)}<span>${esc(c.last_message_preview || '')}</span></span>
+              <span class="preview">${tickHtml(c)}<span>${esc(stripWa(c.last_message_preview))}</span></span>
               ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
               ${c.assigned_user_name
                 ? `<span class="agent" title="Responsável: ${esc(c.assigned_user_name)}">${esc(initials(c.assigned_user_name))}</span>`
@@ -217,9 +217,47 @@
       return `<span class="media-wrap"><video class="media-video" controls preload="metadata" src="${src}"></video>
         <button type="button" class="media-expand" data-lb="${m.id}" title="Abrir em tela cheia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button></span>`;
     }
-    const name = m.body && !isPlaceholder(m.body) ? m.body : 'Documento';
-    return `<a class="media-doc" href="${src}" target="_blank" rel="noopener">📎 <span class="name">${esc(name)}</span></a>`;
+    return docCardHtml(m, src);
   }
+
+  const DOC_KINDS = [
+    [/pdf/, 'PDF', '#e03131'], [/word|officedocument\.wordprocessingml|msword/, 'DOC', '#1c7ed6'],
+    [/excel|spreadsheet|csv/, 'XLS', '#2f9e44'], [/powerpoint|presentation/, 'PPT', '#f08c00'],
+    [/zip|rar|7z|compressed/, 'ZIP', '#868e96'], [/text\/plain/, 'TXT', '#868e96'], [/xml|json/, 'XML', '#7048e8'],
+  ];
+  function docKind(m) {
+    const mime = (m.media_mime || '').toLowerCase();
+    const ext = ((m.body || '').match(/\.([a-z0-9]{2,5})$/i) || [])[1];
+    for (const [re, label, color] of DOC_KINDS) if (re.test(mime)) return { label, color };
+    return { label: (ext || 'ARQ').toUpperCase().slice(0, 4), color: '#868e96' };
+  }
+  const isPdf = (m) => /pdf/i.test(m.media_mime || '') || /\.pdf$/i.test(m.body || '');
+  function docCardHtml(m, src) {
+    const name = m.body && !isPlaceholder(m.body) ? m.body : 'Documento';
+    const k = docKind(m);
+    const size = m.media_size ? SOS.fmtBytes(Number(m.media_size)) : '';
+    const viewable = isPdf(m);
+    return `<div class="doc-card">
+      <div class="doc-main">
+        <span class="doc-icon" style="background:${k.color}">${esc(k.label)}</span>
+        <div class="doc-info"><div class="doc-name" title="${esc(name)}">${esc(name)}</div><div class="doc-meta">${esc(k.label)}${size ? ' · ' + esc(size) : ''}</div></div>
+      </div>
+      <div class="doc-actions">
+        ${viewable ? `<button type="button" data-lb="${m.id}">Ver</button>` : ''}
+        <a href="${src}" download="${esc(name)}">Baixar</a>
+      </div>
+    </div>`;
+  }
+
+  /** Formatação do WhatsApp: *negrito*, _itálico_, ~tachado~, \`\`\`mono\`\`\` (aplicada sobre texto já escapado). */
+  function waFormat(html) {
+    return html
+      .replace(/```([\s\S]+?)```/g, '<code>$1</code>')
+      .replace(/(^|[\s(>])\*([^*\n]+?)\*(?=[\s.,;:!?)<]|$)/g, '$1<b>$2</b>')
+      .replace(/(^|[\s(>])_([^_\n]+?)_(?=[\s.,;:!?)<]|$)/g, '$1<i>$2</i>')
+      .replace(/(^|[\s(>])~([^~\n]+?)~(?=[\s.,;:!?)<]|$)/g, '$1<s>$2</s>');
+  }
+  const stripWa = (text) => String(text || '').replace(/[*_~]/g, '');
 
   function renderMessages(scroll) {
     let lastDay = null;
@@ -236,7 +274,7 @@
         ? `<div class="sender">${isNote ? 'Nota interna · ' : ''}${esc(m.sender_name)}</div>` : '';
       const dimmed = state.search.q && !state.search.hits.includes(m.id) ? 'dimmed' : '';
       return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed}" data-id="${m.id}">
-        <div class="msg">${sender}${mediaHtml(m)}${showBody ? `<span class="body">${highlight(m.body)}</span>` : ''}
+        <div class="msg">${sender}${mediaHtml(m)}${showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : ''}
           <span class="foot">${m.edited_at && !m.deleted_at ? '<span class="edited">editada</span>' : ''}<span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</span>
         </div>${agent}
       </div>`;
@@ -247,7 +285,8 @@
   // ---------- Visualizador de mídia (lightbox) ----------
   const lb = { items: [], idx: -1, zoom: 1 };
   const VIDEO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>';
-  const lbMedia = () => state.messages.filter((m) => m.media_id && !m.deleted_at && ['image', 'sticker', 'video'].includes(m.type));
+  const DOC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+  const lbMedia = () => state.messages.filter((m) => m.media_id && !m.deleted_at && (['image', 'sticker', 'video'].includes(m.type) || (m.type === 'document' && isPdf(m))));
 
   function openLightbox(messageId) {
     lb.items = lbMedia();
@@ -270,9 +309,12 @@
     lb.zoom = 1;
     const src = `/api/media/${esc(m.media_id)}`;
     const isVideo = m.type === 'video';
+    const isDoc = m.type === 'document';
     $('lb-stage').innerHTML = isVideo
       ? `<video controls autoplay src="${src}"></video>`
-      : `<img src="${src}" alt="" id="lb-img">`;
+      : isDoc
+        ? `<iframe class="lb-pdf" src="${src}#toolbar=0&view=FitH" title="${esc(m.body || 'PDF')}"></iframe>`
+        : `<img src="${src}" alt="" id="lb-img">`;
     const who = m.direction === 'in' ? (c ? contactName(c) : 'Cliente') : (m.sender_name || 'Você');
     $('lb-name').textContent = who;
     $('lb-date').textContent = new Date(m.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', ' às');
@@ -280,19 +322,21 @@
       ? avatarHtml(c, 'sm', false)
       : `<div class="avatar sm">${esc(initials(m.sender_name || 'V'))}</div>`).replace('<div class="avatar ', '<div id="lb-avatar" class="avatar ');
     $('lb-download').href = src;
-    $('lb-download').setAttribute('download', `${m.type}-${m.id}${isVideo ? '.mp4' : '.jpg'}`);
-    const caption = m.body && !isPlaceholder(m.body) ? m.body : '';
+    $('lb-download').setAttribute('download', isDoc ? (m.body || 'documento.pdf') : `${m.type}-${m.id}${isVideo ? '.mp4' : '.jpg'}`);
+    const caption = !isDoc && m.body && !isPlaceholder(m.body) ? m.body : '';
     $('lb-caption').hidden = !caption;
     $('lb-caption').textContent = caption;
     $('lb-prev').disabled = lb.idx <= 0;
     $('lb-next').disabled = lb.idx >= lb.items.length - 1;
-    $('lb-zoom-in').hidden = isVideo;
-    $('lb-zoom-out').hidden = isVideo;
+    $('lb-zoom-in').hidden = isVideo || isDoc;
+    $('lb-zoom-out').hidden = isVideo || isDoc;
     document.querySelectorAll('.lb-thumb').forEach((t) => t.classList.toggle('current', Number(t.dataset.id) === m.id));
     document.querySelector('.lb-thumb.current')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   }
   function renderStrip() {
-    $('lb-strip').innerHTML = lb.items.map((m) => `<div class="lb-thumb" data-id="${m.id}" title="${esc(fmtClock(m.created_at))}">${m.type === 'video' ? VIDEO_ICON : `<img src="/api/media/${esc(m.media_id)}" alt="" loading="lazy">`}</div>`).join('');
+    $('lb-strip').innerHTML = lb.items.map((m) => `<div class="lb-thumb" data-id="${m.id}" title="${esc(m.type === 'document' ? m.body : fmtClock(m.created_at))}">${
+      m.type === 'video' ? VIDEO_ICON : m.type === 'document' ? `<span class="lb-doc">${DOC_ICON}<small>PDF</small></span>` : `<img src="/api/media/${esc(m.media_id)}" alt="" loading="lazy">`
+    }</div>`).join('');
   }
   function stepLightbox(dir) {
     const n = lb.idx + dir;
