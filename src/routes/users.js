@@ -66,6 +66,23 @@ router.delete('/me/avatar', async (req, res, next) => {
   }
 });
 
+// Perfil do próprio atendente: assinatura (texto livre; vazio = usa o nome)
+router.patch('/me/profile', async (req, res, next) => {
+  try {
+    const sets = [];
+    const params = [req.user.id];
+    if (req.body?.signature !== undefined) {
+      const sig = String(req.body.signature || '').replace(/[\r\n*]/g, ' ').trim().slice(0, 60);
+      params.push(sig || null); sets.push(`signature = $${params.length}`);
+    }
+    if (!sets.length) return res.status(400).json({ error: 'Nada para atualizar' });
+    const { rows } = await db.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING id, name, signature`, params);
+    res.json({ user: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Status manual do próprio atendente: available | away
 router.patch('/me/availability', async (req, res, next) => {
   try {

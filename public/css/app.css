@@ -653,3 +653,5 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .dtp-col button.sel { background: var(--primary); color: #fff; font-weight: 700; }
 .dtp-chosen { text-align: center; font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
 @media (max-width: 560px) { .dtp-pop { flex-direction: column; } .dtp-cal { border-right: none; border-bottom: 1px solid var(--border); width: 100%; } .dtp-time { width: 100%; } }
+.prefs-section { min-height: 260px; }
+#pref-availability .chip { display: inline-flex; align-items: center; gap: 6px; }

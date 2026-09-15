@@ -1161,7 +1161,7 @@
   async function sendAttachment(id, caption) {
     const fd = new FormData();
     fd.append('file', attach.file, attach.file.name);
-    fd.append('caption', els.signToggle.checked && caption ? `*${state.me.name}:*\n${caption}` : caption);
+    fd.append('caption', els.signToggle.checked && caption ? `*${signText()}:*\n${caption}` : caption);
     if (state.reply) fd.append('quoted_message_id', state.reply.id);
     els.composeSend.disabled = true;
     els.composeSend.textContent = 'Enviando…';
@@ -1379,7 +1379,7 @@
     if (!c) return;
     $('schedule-drawer').hidden = false;
     $('schedule-contact').innerHTML = avatarHtml(c, 'sm', false) + `<span>${esc(contactName(c))}</span>`;
-    $('sched-sign-name').textContent = state.me.name;
+    refreshSignatureLabels();
     $('sched-sign').checked = els.signToggle.checked;
     resetSchedForm();
     setSchedTab('new');
@@ -1447,7 +1447,7 @@
     if (!c) return;
     const when = new Date($('sched-when').value);
     const text = $('sched-body').value.trim();
-    const body = sched.kind === 'message' && $('sched-sign').checked && text ? `*${state.me.name}:*\n${text}` : text;
+    const body = sched.kind === 'message' && $('sched-sign').checked && text ? `*${signText()}:*\n${text}` : text;
     const payload = {
       kind: sched.kind, body, send_at: when.toISOString(),
       cancel_on_contact_reply: $('sched-c-contact').checked,
@@ -1521,7 +1521,7 @@
       if (state.composeMode === 'note') {
         await api('POST', `/api/conversations/${id}/notes`, { body: text });
       } else {
-        const body = els.signToggle.checked ? `*${state.me.name}:*\n${text}` : text;
+        const body = els.signToggle.checked ? `*${signText()}:*\n${text}` : text;
         await api('POST', `/api/conversations/${id}/messages`, { body, quoted_message_id: state.reply?.id || null });
         clearReply();
       }
@@ -1871,10 +1871,16 @@
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { if (!$('prefs-modal').hidden) renderDevices(); });
 
   // Preferências (modal)
-  function openPrefs() {
+  function openPrefs(tab = 'profile') {
     const prefs = SOS.sound.load();
     renderPrefsAvatar();
     renderDevices();
+    showPrefsTab(tab);
+    $('pref-signature').value = state.me.signature || '';
+    $('pref-signature-name').textContent = state.me.name;
+    $('pref-signature-preview').textContent = `${signText()}:`;
+    const av = state.presence.get(state.me.id)?.availability || 'available';
+    document.querySelectorAll('#pref-availability .chip').forEach((c) => c.classList.toggle('active', c.dataset.availability === av));
     $('sound-list').innerHTML = Object.entries(SOS.sound.SOUNDS).map(([id, s]) => `
       <label class="${prefs.sound === id ? 'on' : ''}"><input type="radio" name="sound" value="${id}" ${prefs.sound === id ? 'checked' : ''}><span class="name">${esc(s.name)}</span>
         ${id !== 'none' ? `<button type="button" class="play" data-play="${id}" title="Ouvir"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>` : ''}</label>`).join('');
@@ -1885,7 +1891,36 @@
     $('pref-flash').checked = prefs.flashTitle;
     $('prefs-modal').hidden = false;
   }
-  $('open-prefs').addEventListener('click', () => { $('presence-menu').hidden = true; openPrefs(); });
+  // Texto da assinatura: o que o atendente definiu, ou o nome
+  const signText = () => (state.me.signature || state.me.name).trim();
+  function refreshSignatureLabels() {
+    els.signName.textContent = signText();
+    $('sched-sign-name').textContent = signText();
+  }
+  function showPrefsTab(tab) {
+    document.querySelectorAll('#prefs-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.ptab === tab));
+    document.querySelectorAll('.prefs-section').forEach((s) => { s.hidden = s.dataset.ptab !== tab; });
+  }
+  $('prefs-tabs').addEventListener('click', (e) => { const b = e.target.closest('button[data-ptab]'); if (b) showPrefsTab(b.dataset.ptab); });
+  $('presence-menu').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-prefs]');
+    if (!b) return;
+    $('presence-menu').hidden = true;
+    openPrefs(b.dataset.prefs);
+  });
+  $('pref-signature').addEventListener('input', () => {
+    $('pref-signature-preview').textContent = `${($('pref-signature').value.trim() || state.me.name)}:`;
+  });
+  $('pref-availability').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-availability]');
+    if (!b) return;
+    try {
+      await api('PATCH', '/api/users/me/availability', { availability: b.dataset.availability });
+      setPresence(state.me.id, { availability: b.dataset.availability, online: true });
+      renderMyPresence(); renderList();
+      document.querySelectorAll('#pref-availability .chip').forEach((c) => c.classList.toggle('active', c === b));
+    } catch (err) { toast(err.message, true); }
+  });
   $('prefs-cancel').addEventListener('click', () => { stopMicTest(); $('prefs-modal').hidden = true; });
   $('sound-list').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-play]');
@@ -1893,8 +1928,17 @@
     const lab = e.target.closest('label');
     if (lab) document.querySelectorAll('#sound-list label').forEach((l) => l.classList.toggle('on', l === lab));
   });
-  $('prefs-form').addEventListener('submit', (e) => {
+  $('prefs-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    // Assinatura fica na conta (vale em qualquer computador)
+    const sig = $('pref-signature').value.trim();
+    if (sig !== (state.me.signature || '')) {
+      try {
+        const { user } = await api('PATCH', '/api/users/me/profile', { signature: sig });
+        state.me.signature = user.signature;
+        refreshSignatureLabels();
+      } catch (err) { toast(err.message, true); return; }
+    }
     const prefs = {
       sound: document.querySelector('#sound-list input:checked')?.value || 'ding',
       volume: Number($('pref-volume').value),
@@ -1940,7 +1984,7 @@
   // ---------- Init ----------
   async function init() {
     state.me = await SOS.loadMe();
-    els.signName.textContent = state.me.name;
+    refreshSignatureLabels();
     $('me-avatar').title = `${state.me.name} · ${state.me.role === 'admin' ? 'Administrador' : 'Atendente'}`;
     const [{ tags }, { users }, qr, st] = await Promise.all([
       api('GET', '/api/tags'), api('GET', '/api/users'),

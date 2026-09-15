@@ -34,7 +34,7 @@ async function loadUserFromToken(token) {
     return null;
   }
   const { rows } = await db.query(
-    'SELECT id, name, email, role, active, avatar_media_id FROM users WHERE id = $1 AND active = TRUE',
+    'SELECT id, name, email, role, active, avatar_media_id, signature FROM users WHERE id = $1 AND active = TRUE',
     [payload.sub]
   );
   return rows[0] || null;
