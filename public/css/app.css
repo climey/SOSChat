@@ -660,3 +660,11 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .sign-edit:hover { background: var(--surface-2); color: var(--text); }
 .sign-edit svg { width: 13px; height: 13px; }
 .sign-input { width: 220px; padding: 5px 10px; font-size: 13px; }
+
+/* ---------- Figurinhas: pequenas e sem balão ---------- */
+.msg-row.sticker .msg { background: transparent !important; border: none; padding: 0; min-width: 0; box-shadow: none; }
+.msg-row.sticker .media-img { max-width: 150px; max-height: 150px; border-radius: 6px; margin-bottom: 0; }
+.msg-row.sticker .sender { display: none; }
+.msg-row.sticker .foot { float: none; display: flex; justify-content: flex-end; margin: 2px 2px 0; }
+.msg-row.in.sticker .foot { justify-content: flex-start; }
+.msg-row.sticker .msg-actions { top: -8px; }

@@ -480,7 +480,8 @@
           <button type="button" data-msg-act="reply" title="Responder">${REPLY_ICON}</button>
           <button type="button" data-msg-act="react" title="Reagir">😊</button>
         </div>` : '';
-      return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed}" data-id="${m.id}">
+      const stickerCls = m.type === 'sticker' && m.media_id && !m.deleted_at ? 'sticker' : '';
+      return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed} ${stickerCls}" data-id="${m.id}">
         <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : ''}
           <span class="foot">${m.edited_at && !m.deleted_at ? '<span class="edited">editada</span>' : ''}<span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</span>
           ${reactionsHtml(m)}
