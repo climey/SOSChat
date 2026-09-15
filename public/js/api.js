@@ -142,7 +142,48 @@
     const railName = document.getElementById('rail-user-name');
     if (railName) railName.textContent = user.name;
     initRail();
+    // Páginas sem campo de texto podem recarregar a qualquer momento; a inbox passa a própria regra depois
+    if (!document.getElementById('compose-text')) initUpdater(() => true);
     return user;
+  }
+
+  /**
+   * Atualização automática após deploy: compara a versão do servidor com a carregada.
+   * `canReloadNow()` diz se é seguro recarregar sozinho (nada sendo digitado); senão mostra uma faixa com botão.
+   */
+  const updater = { version: null, timer: null, banner: null, pending: false };
+  async function checkVersion(canReloadNow) {
+    try {
+      const res = await fetch('/health', { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) return;
+      const { version } = await res.json();
+      if (!version) return;
+      if (!updater.version) { updater.version = version; return; }
+      if (version === updater.version || updater.pending) return;
+      updater.pending = true;
+      if (!canReloadNow || canReloadNow()) {
+        toast('Nova versão do SOS Chat, atualizando…');
+        setTimeout(() => location.reload(), 1200);
+      } else {
+        showUpdateBanner();
+      }
+    } catch { /* offline ou deploy em andamento: tenta na próxima */ }
+  }
+  function showUpdateBanner() {
+    if (updater.banner) return;
+    const el = document.createElement('div');
+    el.className = 'update-banner';
+    el.innerHTML = '<span>Nova versão do SOS Chat disponível.</span><button type="button">Atualizar agora</button>';
+    el.querySelector('button').addEventListener('click', () => location.reload());
+    document.body.appendChild(el);
+    updater.banner = el;
+  }
+  function initUpdater(canReloadNow) {
+    checkVersion(canReloadNow);
+    clearInterval(updater.timer);
+    updater.timer = setInterval(() => checkVersion(canReloadNow), 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(canReloadNow); });
+    window.addEventListener('focus', () => checkVersion(canReloadNow));
   }
 
   function fmtBytes(n) {
@@ -151,5 +192,5 @@
     return `${(n / 1024 / 1024).toFixed(1)} MB`;
   }
 
-  window.SOS = { api, upload, esc, initials, formatPhone, fmtTime, fmtClock, fmtDay, fmtDuration, fmtBytes, toast, loadMe, initRail };
+  window.SOS = { api, upload, esc, initials, formatPhone, fmtTime, fmtClock, fmtDay, fmtDuration, fmtBytes, toast, loadMe, initRail, initUpdater, checkVersion };
 })();

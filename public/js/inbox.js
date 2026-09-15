@@ -1127,6 +1127,8 @@
       if (touched) renderList();
     });
     socket.on('connect_error', () => toast('Conexão em tempo real perdida, tentando reconectar…', true));
+    // Um deploy derruba e religa o socket: boa hora para conferir se há versão nova
+    socket.io.on('reconnect', () => SOS.checkVersion(canReloadNow));
   }
 
   function notify(conv, message) {
@@ -1154,6 +1156,12 @@
     } catch { /* ignora */ }
   }
 
+  // Seguro recarregar sozinho quando não há texto, anexo ou agendamento sendo escrito
+  function canReloadNow() {
+    return !els.composeText.value.trim() && !attach.file
+      && ($('schedule-drawer').hidden || !$('sched-body').value.trim());
+  }
+
   // ---------- Init ----------
   async function init() {
     state.me = await SOS.loadMe();
@@ -1177,6 +1185,7 @@
     await loadConversations();
     connectSocket();
     setupSimulator();
+    SOS.initUpdater(canReloadNow);
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   }
 

@@ -48,7 +48,7 @@ app.use(
   })
 );
 
-app.get('/health', (_req, res) => res.json({ ok: true, whatsapp: whatsapp.getStatus(), dev: config.enableDevSimulator }));
+app.get('/health', (_req, res) => res.json({ ok: true, version: config.version, whatsapp: whatsapp.getStatus(), dev: config.enableDevSimulator }));
 
 // Webhook da Meta (sem auth de usuário; validado por assinatura)
 app.use('/webhook', require('./routes/webhook'));

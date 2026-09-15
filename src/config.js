@@ -13,6 +13,8 @@ function required(name) {
 
 module.exports = {
   isProd,
+  // Identifica a versão publicada (Railway injeta o commit); muda a cada deploy e a tela usa para se atualizar
+  version: (process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_VERSION || `dev-${Date.now()}`).slice(0, 12),
   port: Number(process.env.PORT) || 3000,
   appUrl: process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`,
   databaseUrl: required('DATABASE_URL') || 'postgresql://postgres:postgres@localhost:5432/soschat',
