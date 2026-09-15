@@ -608,3 +608,6 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .sound-list .play { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text-2); display: flex; align-items: center; justify-content: center; }
 .sound-list .play:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 .sound-list .play svg { width: 12px; height: 12px; }
+.tag.new { background: rgba(224, 49, 49, 0.18); color: #ff8787; }
+.seg button.has-queue .cnt { background: var(--primary); color: #fff; padding: 0 6px; border-radius: 999px; opacity: 1; }
+.seg button.active.has-queue .cnt { background: #fff; color: var(--primary); }

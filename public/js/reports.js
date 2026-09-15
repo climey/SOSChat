@@ -207,9 +207,9 @@
     state.data.now = n;
     const online = n.agents.filter((a) => a.online);
     $('now-stats').innerHTML = [
+      tile('Na fila (Esperando)', fmtN(n.queued), 'ninguém assumiu nem respondeu ainda'),
       tile('Aguardando resposta', fmtN(n.waiting), 'clientes esperando um atendente', n.overdue ? `<span class="delta bad">▲ ${n.overdue} acima de ${n.sla.sla_alert_minutes} min</span>` : '<span class="delta good">nenhuma estourada</span>'),
       tile('Aguardando o cliente', fmtN(n.in_progress), 'já respondidas, esperando retorno'),
-      tile('Sem responsável', fmtN(n.unassigned), 'abertas que ninguém assumiu'),
       tile('Atendentes online', `${online.length}<span class="muted" style="font-size:16px">/${n.agents.length}</span>`, online.map((a) => `<span class="mini-av" title="${esc(a.name)}">${esc(initials(a.name))}</span>`).join('') || 'ninguém conectado'),
       tile('Resposta na última hora', fmtDuration(n.last_hour.median_response_seconds), `${fmtN(n.last_hour.replies)} respostas · média ${fmtDuration(n.last_hour.avg_response_seconds)}`),
       tile('Recebidas na última hora', fmtN(n.last_hour.messages_in), 'mensagens de clientes'),

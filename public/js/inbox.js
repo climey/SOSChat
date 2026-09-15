@@ -27,7 +27,7 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     items: $('conv-items'), search: $('search'), tagFilter: $('tag-filter'), accountFilter: $('account-filter'),
-    cntActive: $('cnt-active'), railUnread: $('rail-unread'), filtersDrawer: $('filters-drawer'), btnFilters: $('btn-filters'),
+    cntInbox: $('cnt-inbox'), cntWaiting: $('cnt-waiting'), railUnread: $('rail-unread'), filtersDrawer: $('filters-drawer'), btnFilters: $('btn-filters'),
     chatEmpty: $('chat-empty'), chatPanel: $('chat-panel'), chatTitle: $('chat-title'), chatTags: $('chat-tags'),
     messages: $('chat-messages'), banner: $('wa-banner'),
     composer: $('composer'), compose: $('compose'), composeText: $('compose-text'), composeSend: $('compose-send'), composeHint: $('compose-hint'),
@@ -93,6 +93,29 @@
     conversations.forEach(rememberPrefs);
     state.conversations = conversations;
     renderList();
+    loadCounts();
+  }
+
+  // Contadores das abas (Entrada / Esperando), com os mesmos filtros
+  let countsTimer = null;
+  function loadCounts() {
+    clearTimeout(countsTimer);
+    countsTimer = setTimeout(async () => {
+      const f = state.filters;
+      const qs = new URLSearchParams({ assigned: f.assigned });
+      if (f.tag) qs.set('tag', f.tag);
+      if (f.account) qs.set('account', f.account);
+      if (f.sector) qs.set('sector', f.sector);
+      if (f.q) qs.set('q', f.q);
+      if (f.hidden !== 'none') qs.set('hidden', f.hidden);
+      try {
+        const c = await api('GET', `/api/conversations/counts?${qs}`);
+        els.cntInbox.textContent = c.inbox ? c.inbox : '';
+        els.cntInbox.title = c.needs_reply ? `${c.needs_reply} aguardando sua resposta` : '';
+        els.cntWaiting.textContent = c.waiting ? c.waiting : '';
+        els.cntWaiting.parentElement.classList.toggle('has-queue', c.waiting > 0);
+      } catch { /* ignora */ }
+    }, 200);
   }
 
   // Fixar, silenciar e ocultar são preferências pessoais: as atualizações em tempo real chegam sem elas,
@@ -170,6 +193,7 @@
             <div class="meta">
               ${c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')}
               ${c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : ''}
+              ${c.status === 'open' && !c.attended ? '<span class="tag new">Na fila</span>' : ''}
               ${c.scheduled_count > 0 ? `<span class="chip-soft" title="${c.scheduled_count} mensagem(ns) agendada(s)">⏰ ${c.scheduled_count}</span>` : ''}
               <span class="spacer"></span>
               ${c.account_name && state.multiAccount ? `<span class="chip-soft ${accountOffline(c.account_id) ? 'off' : ''}">${esc(c.account_name)}</span>` : ''}
@@ -179,7 +203,6 @@
           <button type="button" class="more" data-menu="${c.id}" title="Mais opções"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
         </div>`).join('');
     }
-    els.cntActive.textContent = list.length ? list.length : '';
     const unread = list.reduce((n, c) => n + (c.status === 'open' && c.unread_count > 0 ? 1 : 0), 0);
     els.railUnread.hidden = unread === 0;
     els.railUnread.textContent = unread > 99 ? '99+' : unread;
@@ -222,7 +245,7 @@
       ['unread', MI.unread, c.unread_count > 0 ? 'Marcar como lida' : 'Marcar como não lida'],
       'sep',
       c.status === 'resolved' ? ['reopen', MI.check, 'Reabrir conversa'] : ['resolve', MI.check, 'Finalizar conversa'],
-      c.status === 'open' ? (c.last_message_direction === 'out' ? ['inbox', MI.wait, 'Voltar para Entrada'] : ['waiting', MI.wait, 'Marcar como esperando']) : null,
+      c.status === 'open' ? (c.attended ? ['waiting', MI.wait, 'Devolver para a fila (Esperando)'] : ['inbox', MI.wait, 'Puxar para a Entrada']) : null,
       ['sector', MI.tag, 'Mudar setor'],
       ['pin', MI.pin, c.pinned ? 'Desafixar (só para você)' : 'Fixar (só para você)'],
       ['hide', MI.hide, c.hidden ? 'Mostrar conversa' : 'Ocultar (só para você)'],
@@ -272,8 +295,8 @@
         case 'unread': await patch({ unread: !(c.unread_count > 0) }); break;
         case 'resolve': await patch({ status: 'resolved' }); toast('Conversa finalizada'); break;
         case 'reopen': await patch({ status: 'open' }); toast('Conversa reaberta'); break;
-        case 'waiting': await patch({ waiting: true }); toast('Movida para Esperando'); break;
-        case 'inbox': await patch({ waiting: false }); toast('Movida para Entrada'); break;
+        case 'waiting': await patch({ waiting: true }); toast('Devolvida para a fila'); break;
+        case 'inbox': await patch({ waiting: false }); toast('Movida para a Entrada'); break;
         case 'pin': await pref({ pinned: !c.pinned }); break;
         case 'hide': await pref({ hidden: !c.hidden }); toast(c.hidden ? 'Conversa visível de novo' : 'Oculta só na sua lista. Use "Mostrar ocultas" nos filtros para ver.'); break;
         case 'block':
@@ -1520,8 +1543,8 @@
   // ---------- Tempo real ----------
   function matchesFilters(c) {
     const f = state.filters;
-    if (f.status === 'inbox' && !(c.status === 'open' && c.last_message_direction !== 'out')) return false;
-    if (f.status === 'waiting' && !(c.status === 'open' && c.last_message_direction === 'out')) return false;
+    if (f.status === 'inbox' && !(c.status === 'open' && c.attended)) return false;
+    if (f.status === 'waiting' && !(c.status === 'open' && !c.attended)) return false;
     if (f.status === 'resolved' && c.status !== 'resolved') return false;
     if (f.status === 'open' && c.status !== 'open') return false;
     if (f.assigned === 'me' && c.assigned_user_id !== state.me.id) return false;
@@ -1543,12 +1566,16 @@
     const idx = state.conversations.findIndex((c) => c.id === conv.id);
     if (matchesFilters(conv)) {
       if (idx >= 0) state.conversations[idx] = conv; else state.conversations.push(conv);
-      state.conversations.sort((a, b) => (b.pinned - a.pinned) || (new Date(b.last_message_at) - new Date(a.last_message_at)));
+      const needs = (c) => (c.status === 'open' && c.last_message_direction !== 'out' ? 1 : 0);
+      state.conversations.sort((a, b) => state.filters.status === 'waiting'
+        ? (b.pinned - a.pinned) || (new Date(a.created_at) - new Date(b.created_at)) // fila: mais antiga primeiro
+        : (b.pinned - a.pinned) || (needs(b) - needs(a)) || (new Date(b.last_message_at) - new Date(a.last_message_at)));
     } else if (idx >= 0) {
       state.conversations.splice(idx, 1);
     }
     if (conv.id === state.currentId) state.currentConv = conv;
     renderList();
+    loadCounts();
   }
 
   function connectSocket() {

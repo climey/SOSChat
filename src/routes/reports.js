@@ -269,7 +269,8 @@ router.get('/now', async (req, res, next) => {
     const alertParam = params.length;
     const [state, oldest, lastHour, opened, inbound] = await Promise.all([
       db.query(
-        `SELECT COUNT(*) FILTER (WHERE c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out')::int AS waiting,
+        `SELECT COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = FALSE)::int AS queued,
+                COUNT(*) FILTER (WHERE c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out')::int AS waiting,
                 COUNT(*) FILTER (WHERE c.status = 'open' AND c.last_message_direction = 'out')::int AS in_progress,
                 COUNT(*) FILTER (WHERE c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out'
                                    AND c.last_message_at < NOW() - ($${alertParam} || ' minutes')::interval)::int AS overdue,

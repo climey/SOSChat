@@ -13,6 +13,7 @@ async function touchAfterSend(id, preview, userId) {
         SET last_message_at = NOW(),
             last_message_preview = $2,
             last_message_direction = 'out',
+            attended = TRUE,
             first_response_at = COALESCE(first_response_at, NOW()),
             assigned_user_id = COALESCE(assigned_user_id, $3),
             status = 'open', resolved_at = NULL, resolved_by_user_id = NULL
@@ -121,7 +122,7 @@ async function transfer(conversationId, user, toUserId, note) {
   const target = rows[0];
   if (!target) throw new SendError(400, 'Atendente inválido');
   if (target.id === user.id) throw new SendError(400, 'A conversa já é sua');
-  await db.query('UPDATE conversations SET assigned_user_id = $2 WHERE id = $1', [conversationId, target.id]);
+  await db.query('UPDATE conversations SET assigned_user_id = $2, attended = TRUE WHERE id = $1', [conversationId, target.id]);
   const text = `Transferida de ${conv.assigned_user_name || user.name} para ${target.name}${note ? `: ${String(note).trim().slice(0, 500)}` : ''}`;
   const noteRow = await db.query(
     `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id)

@@ -53,6 +53,23 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Contadores das abas com os filtros atuais
+router.get('/counts', async (req, res, next) => {
+  try {
+    res.json(await conversations.counts({
+      assigned: ['me', 'unassigned', 'all'].includes(req.query.assigned) ? req.query.assigned : 'all',
+      userId: req.user.id,
+      tagId: parseId(req.query.tag),
+      accountId: parseId(req.query.account),
+      sectorId: parseId(req.query.sector),
+      hidden: ['only', 'all'].includes(req.query.hidden) ? req.query.hidden : 'none',
+      q: String(req.query.q || '').trim().slice(0, 100) || null,
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
@@ -300,9 +317,9 @@ router.patch('/:id', async (req, res, next) => {
     // "Marcar como não lida": garante ao menos 1 não lida; "marcar como lida": zera
     if (unread === true) sets.push('unread_count = GREATEST(unread_count, 1)');
     if (unread === false) sets.push('unread_count = 0');
-    // "Marcar como esperando": sai da Entrada sem precisar responder
-    if (waiting === true) sets.push(`last_message_direction = 'out'`);
-    if (waiting === false) sets.push(`last_message_direction = 'in'`);
+    // "Devolver para a fila" (Esperando) / "Puxar para a Entrada"
+    if (waiting === true) sets.push('attended = FALSE', 'assigned_user_id = NULL');
+    if (waiting === false) sets.push('attended = TRUE');
 
     if (status !== undefined) {
       if (!['open', 'resolved'].includes(status)) return res.status(400).json({ error: 'Status inválido' });
@@ -324,6 +341,7 @@ router.patch('/:id', async (req, res, next) => {
       }
       params.push(uid);
       sets.push(`assigned_user_id = $${params.length}`);
+      if (uid) sets.push('attended = TRUE');
     }
     const prefsOnly = !sets.length && (pinned !== undefined || muted !== undefined || hidden !== undefined);
     if (!sets.length && !prefsOnly) return res.status(400).json({ error: 'Nada para atualizar' });

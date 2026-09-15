@@ -10,7 +10,7 @@ function selectSql(userParam) {
     : `LEFT JOIN conversation_prefs cp ON FALSE`;
   return `
   SELECT c.id, c.status, c.assigned_user_id, c.unread_count, c.last_message_at,
-         c.last_message_preview, c.last_message_direction, c.first_response_at, c.resolved_at, c.created_at,
+         c.last_message_preview, c.last_message_direction, c.first_response_at, c.resolved_at, c.created_at, c.attended,
          COALESCE(cp.pinned, FALSE) AS pinned, COALESCE(cp.muted, FALSE) AS muted, COALESCE(cp.hidden, FALSE) AS hidden,
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id, ct.blocked AS contact_blocked,
          u.name AS assigned_user_name,
@@ -82,9 +82,9 @@ async function list(filters = {}) {
     where.push(sql.replace('?', `$${params.length}`));
   };
 
-  // inbox = abertas aguardando o atendente; waiting = abertas aguardando o cliente
-  if (filters.status === 'inbox') where.push(`c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out'`);
-  else if (filters.status === 'waiting') where.push(`c.status = 'open' AND c.last_message_direction = 'out'`);
+  // inbox = abertas em atendimento; waiting = fila (abertas que ninguém assumiu nem respondeu)
+  if (filters.status === 'inbox') where.push(`c.status = 'open' AND c.attended = TRUE`);
+  else if (filters.status === 'waiting') where.push(`c.status = 'open' AND c.attended = FALSE`);
   else if (filters.status && filters.status !== 'all') add('c.status = ?', filters.status);
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
@@ -107,12 +107,48 @@ async function list(filters = {}) {
   const offset = Math.max(Number(filters.offset) || 0, 0);
   params.push(limit, offset);
 
+  // Fila: mais antiga primeiro. Entrada: quem está esperando resposta sobe; depois a mais recente.
+  const order = filters.status === 'waiting'
+    ? 'COALESCE(cp.pinned, FALSE) DESC, c.created_at ASC'
+    : `COALESCE(cp.pinned, FALSE) DESC, (c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out') DESC, c.last_message_at DESC`;
   const sql = `${selectSql(1)} ${joins}
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY COALESCE(cp.pinned, FALSE) DESC, c.last_message_at DESC
+    ORDER BY ${order}
     LIMIT $${params.length - 1} OFFSET $${params.length}`;
   const { rows } = await db.query(sql, params);
   return attachTags(rows, db);
+}
+
+/** Contagem por aba (Esperando / Entrada / Finalizados) com os mesmos filtros da lista, exceto status. */
+async function counts(filters = {}) {
+  const params = [filters.userId || null];
+  const where = [];
+  const add = (sql, value) => { params.push(value); where.push(sql.replace('?', `$${params.length}`)); };
+  let joins = '';
+  if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
+  if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
+  if (filters.accountId) add('c.account_id = ?', filters.accountId);
+  if (filters.sectorId) add('c.sector_id = ?', filters.sectorId);
+  if (filters.hidden === 'only') where.push('COALESCE(cp.hidden, FALSE) = TRUE');
+  else if (filters.hidden !== 'all') where.push('COALESCE(cp.hidden, FALSE) = FALSE');
+  if (filters.tagId) { params.push(filters.tagId); joins += ` JOIN conversation_tags ft ON ft.conversation_id = c.id AND ft.tag_id = $${params.length}`; }
+  if (filters.q) {
+    params.push(`%${filters.q}%`);
+    const p = `$${params.length}`;
+    joins += ' JOIN contacts ctq ON ctq.id = c.contact_id';
+    where.push(`(ctq.wa_id ILIKE ${p} OR ctq.name ILIKE ${p} OR ctq.profile_name ILIKE ${p})`);
+  }
+  const { rows } = await db.query(
+    `SELECT COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = FALSE)::int AS waiting,
+            COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = TRUE)::int AS inbox,
+            COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = TRUE AND c.last_message_direction IS DISTINCT FROM 'out')::int AS needs_reply,
+            COUNT(*) FILTER (WHERE c.status = 'resolved')::int AS resolved
+       FROM conversations c
+       LEFT JOIN conversation_prefs cp ON cp.conversation_id = c.id AND cp.user_id = $1
+       ${joins} ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`,
+    params
+  );
+  return rows[0];
 }
 
 /** Id do setor padrão (para conversas novas). */
@@ -149,4 +185,4 @@ async function deleteByAccount(accountId) {
   return rowCount;
 }
 
-module.exports = { getById, list, setPrefs, defaultSectorId, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };
+module.exports = { getById, list, counts, setPrefs, defaultSectorId, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };
