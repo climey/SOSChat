@@ -90,7 +90,8 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
       `UPDATE conversations
           SET unread_count = unread_count + 1,
               last_message_at = GREATEST(last_message_at, $2::timestamptz),
-              last_message_preview = $3
+              last_message_preview = $3,
+              last_message_direction = 'in'
         WHERE id = $1`,
       [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]
     );
@@ -147,6 +148,7 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
       `UPDATE conversations
           SET last_message_at = GREATEST(last_message_at, $2::timestamptz),
               last_message_preview = $3,
+              last_message_direction = 'out',
               first_response_at = COALESCE(first_response_at, $2::timestamptz)
         WHERE id = $1`,
       [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]

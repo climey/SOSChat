@@ -27,7 +27,7 @@ router.get('/summary', async (req, res, next) => {
          (SELECT COUNT(*)::int FROM conversations WHERE resolved_at BETWEEN $1 AND $2) AS resolved_total,
          (SELECT COUNT(*)::int FROM conversations WHERE status = 'open') AS open_now,
          (SELECT COUNT(*)::int FROM messages WHERE direction = 'in'  AND created_at BETWEEN $1 AND $2) AS messages_in,
-         (SELECT COUNT(*)::int FROM messages WHERE direction = 'out' AND created_at BETWEEN $1 AND $2) AS messages_out,
+         (SELECT COUNT(*)::int FROM messages WHERE direction = 'out' AND type <> 'note' AND created_at BETWEEN $1 AND $2) AS messages_out,
          (SELECT COUNT(DISTINCT contact_id)::int FROM conversations WHERE created_at BETWEEN $1 AND $2) AS contacts_total,
          (SELECT EXTRACT(EPOCH FROM AVG(first_response_at - created_at))::int
             FROM conversations WHERE first_response_at IS NOT NULL AND created_at BETWEEN $1 AND $2) AS avg_first_response_seconds,
@@ -42,7 +42,7 @@ router.get('/summary', async (req, res, next) => {
          SELECT direction, created_at,
                 LAG(direction) OVER (PARTITION BY conversation_id ORDER BY created_at, id) AS prev_dir,
                 LAG(created_at) OVER (PARTITION BY conversation_id ORDER BY created_at, id) AS prev_at
-           FROM messages
+           FROM messages WHERE type <> 'note'
        )
        SELECT EXTRACT(EPOCH FROM AVG(created_at - prev_at))::int AS avg_response_seconds,
               EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY created_at - prev_at))::int AS median_response_seconds
@@ -69,7 +69,7 @@ router.get('/volume', async (req, res, next) => {
          UNION ALL
          SELECT date_trunc('${group}', created_at), 'in'  FROM messages WHERE direction = 'in'  AND created_at BETWEEN $1 AND $2
          UNION ALL
-         SELECT date_trunc('${group}', created_at), 'out' FROM messages WHERE direction = 'out' AND created_at BETWEEN $1 AND $2
+         SELECT date_trunc('${group}', created_at), 'out' FROM messages WHERE direction = 'out' AND type <> 'note' AND created_at BETWEEN $1 AND $2
        )
        SELECT bucket,
               COUNT(*) FILTER (WHERE kind = 'conv')::int AS conversations,
@@ -93,7 +93,7 @@ router.get('/agents', async (req, res, next) => {
          SELECT sender_user_id, direction, created_at,
                 LAG(direction) OVER (PARTITION BY conversation_id ORDER BY created_at, id) AS prev_dir,
                 LAG(created_at) OVER (PARTITION BY conversation_id ORDER BY created_at, id) AS prev_at
-           FROM messages
+           FROM messages WHERE type <> 'note'
        ),
        resp AS (
          SELECT sender_user_id,
@@ -113,7 +113,7 @@ router.get('/agents', async (req, res, next) => {
        ),
        sent AS (
          SELECT sender_user_id AS uid, COUNT(*)::int AS messages_sent
-           FROM messages WHERE direction = 'out' AND created_at BETWEEN $1 AND $2 GROUP BY sender_user_id
+           FROM messages WHERE direction = 'out' AND type <> 'note' AND created_at BETWEEN $1 AND $2 GROUP BY sender_user_id
        )
        SELECT u.id, u.name, u.active,
               COALESCE(a.conversations, 0) AS conversations,

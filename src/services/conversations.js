@@ -2,7 +2,7 @@ const db = require('../db');
 
 const CONVERSATION_SELECT = `
   SELECT c.id, c.status, c.assigned_user_id, c.unread_count, c.last_message_at,
-         c.last_message_preview, c.first_response_at, c.resolved_at, c.created_at,
+         c.last_message_preview, c.last_message_direction, c.first_response_at, c.resolved_at, c.created_at,
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id,
          u.name AS assigned_user_name,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone
@@ -50,7 +50,10 @@ async function list(filters = {}) {
     where.push(sql.replace('?', `$${params.length}`));
   };
 
-  if (filters.status && filters.status !== 'all') add('c.status = ?', filters.status);
+  // inbox = abertas aguardando o atendente; waiting = abertas aguardando o cliente
+  if (filters.status === 'inbox') where.push(`c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out'`);
+  else if (filters.status === 'waiting') where.push(`c.status = 'open' AND c.last_message_direction = 'out'`);
+  else if (filters.status && filters.status !== 'all') add('c.status = ?', filters.status);
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
   if (filters.accountId) add('c.account_id = ?', filters.accountId);

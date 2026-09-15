@@ -19,7 +19,7 @@ function parseId(value) {
 router.get('/', async (req, res, next) => {
   try {
     const rows = await conversations.list({
-      status: ['open', 'resolved', 'all'].includes(req.query.status) ? req.query.status : 'open',
+      status: ['open', 'inbox', 'waiting', 'resolved', 'all'].includes(req.query.status) ? req.query.status : 'open',
       assigned: ['me', 'unassigned', 'all'].includes(req.query.assigned) ? req.query.assigned : 'all',
       userId: req.user.id,
       tagId: parseId(req.query.tag),
@@ -110,6 +110,7 @@ router.post('/:id/messages', async (req, res, next) => {
       `UPDATE conversations
           SET last_message_at = NOW(),
               last_message_preview = $2,
+              last_message_direction = 'out',
               first_response_at = COALESCE(first_response_at, NOW()),
               assigned_user_id = COALESCE(assigned_user_id, $3),
               status = 'open', resolved_at = NULL, resolved_by_user_id = NULL
@@ -122,6 +123,29 @@ router.post('/:id/messages', async (req, res, next) => {
     realtime.broadcast('message:new', { message, conversation: updated });
     realtime.broadcast('conversation:updated', updated);
     res.status(message.status === 'failed' ? 502 : 201).json({ message, conversation: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Nota interna: fica no histórico da conversa, não vai para o WhatsApp
+router.post('/:id/notes', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    const body = String(req.body?.body || '').trim();
+    if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    if (!body) return res.status(400).json({ error: 'Nota vazia' });
+    if (body.length > MESSAGE_MAX) return res.status(400).json({ error: `Nota excede ${MESSAGE_MAX} caracteres` });
+    const conv = await conversations.getById(id);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const { rows } = await db.query(
+      `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id)
+       VALUES ($1, 'out', 'note', $2, 'sent', $3) RETURNING *`,
+      [id, body, req.user.id]
+    );
+    const message = { ...rows[0], sender_name: req.user.name };
+    realtime.broadcast('message:new', { message, conversation: conv });
+    res.status(201).json({ message });
   } catch (err) {
     next(err);
   }
