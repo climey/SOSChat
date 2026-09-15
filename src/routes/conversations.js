@@ -317,9 +317,9 @@ router.patch('/:id', async (req, res, next) => {
     // "Marcar como não lida": garante ao menos 1 não lida; "marcar como lida": zera
     if (unread === true) sets.push('unread_count = GREATEST(unread_count, 1)');
     if (unread === false) sets.push('unread_count = 0');
-    // "Devolver para a fila" (Esperando) / "Puxar para a Entrada"
-    if (waiting === true) sets.push('attended = FALSE', 'assigned_user_id = NULL');
-    if (waiting === false) sets.push('attended = TRUE');
+    // "Marcar como esperando resposta" / "Marcar como respondida"
+    if (waiting === true) sets.push(`last_message_direction = 'in'`);
+    if (waiting === false) sets.push(`last_message_direction = 'out'`);
 
     if (status !== undefined) {
       if (!['open', 'resolved'].includes(status)) return res.status(400).json({ error: 'Status inválido' });

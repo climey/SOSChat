@@ -82,9 +82,9 @@ async function list(filters = {}) {
     where.push(sql.replace('?', `$${params.length}`));
   };
 
-  // inbox = abertas em atendimento; waiting = fila (abertas que ninguém assumiu nem respondeu)
-  if (filters.status === 'inbox') where.push(`c.status = 'open' AND c.attended = TRUE`);
-  else if (filters.status === 'waiting') where.push(`c.status = 'open' AND c.attended = FALSE`);
+  // inbox = todas as abertas; waiting = abertas aguardando resposta do atendente (última mensagem é do cliente)
+  if (filters.status === 'inbox') where.push(`c.status = 'open'`);
+  else if (filters.status === 'waiting') where.push(`c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out'`);
   else if (filters.status && filters.status !== 'all') add('c.status = ?', filters.status);
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
@@ -107,9 +107,9 @@ async function list(filters = {}) {
   const offset = Math.max(Number(filters.offset) || 0, 0);
   params.push(limit, offset);
 
-  // Fila: mais antiga primeiro. Entrada: quem está esperando resposta sobe; depois a mais recente.
+  // Esperando: quem espera há mais tempo primeiro. Entrada: quem está esperando resposta sobe; depois a mais recente.
   const order = filters.status === 'waiting'
-    ? 'COALESCE(cp.pinned, FALSE) DESC, c.created_at ASC'
+    ? 'COALESCE(cp.pinned, FALSE) DESC, c.last_message_at ASC'
     : `COALESCE(cp.pinned, FALSE) DESC, (c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out') DESC, c.last_message_at DESC`;
   const sql = `${selectSql(1)} ${joins}
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -139,9 +139,9 @@ async function counts(filters = {}) {
     where.push(`(ctq.wa_id ILIKE ${p} OR ctq.name ILIKE ${p} OR ctq.profile_name ILIKE ${p})`);
   }
   const { rows } = await db.query(
-    `SELECT COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = FALSE)::int AS waiting,
-            COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = TRUE)::int AS inbox,
-            COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = TRUE AND c.last_message_direction IS DISTINCT FROM 'out')::int AS needs_reply,
+    `SELECT COUNT(*) FILTER (WHERE c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out')::int AS waiting,
+            COUNT(*) FILTER (WHERE c.status = 'open')::int AS inbox,
+            COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = FALSE)::int AS queued,
             COUNT(*) FILTER (WHERE c.status = 'resolved')::int AS resolved
        FROM conversations c
        LEFT JOIN conversation_prefs cp ON cp.conversation_id = c.id AND cp.user_id = $1

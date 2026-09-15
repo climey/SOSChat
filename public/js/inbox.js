@@ -111,7 +111,7 @@
       try {
         const c = await api('GET', `/api/conversations/counts?${qs}`);
         els.cntInbox.textContent = c.inbox ? c.inbox : '';
-        els.cntInbox.title = c.needs_reply ? `${c.needs_reply} aguardando sua resposta` : '';
+        els.cntInbox.title = c.queued ? `${c.queued} nunca respondida(s)` : '';
         els.cntWaiting.textContent = c.waiting ? c.waiting : '';
         els.cntWaiting.parentElement.classList.toggle('has-queue', c.waiting > 0);
       } catch { /* ignora */ }
@@ -245,7 +245,7 @@
       ['unread', MI.unread, c.unread_count > 0 ? 'Marcar como lida' : 'Marcar como não lida'],
       'sep',
       c.status === 'resolved' ? ['reopen', MI.check, 'Reabrir conversa'] : ['resolve', MI.check, 'Finalizar conversa'],
-      c.status === 'open' ? (c.attended ? ['waiting', MI.wait, 'Devolver para a fila (Esperando)'] : ['inbox', MI.wait, 'Puxar para a Entrada']) : null,
+      c.status === 'open' ? (c.last_message_direction === 'out' ? ['waiting', MI.wait, 'Marcar como esperando resposta'] : ['inbox', MI.wait, 'Marcar como respondida']) : null,
       ['sector', MI.tag, 'Mudar setor'],
       ['pin', MI.pin, c.pinned ? 'Desafixar (só para você)' : 'Fixar (só para você)'],
       ['hide', MI.hide, c.hidden ? 'Mostrar conversa' : 'Ocultar (só para você)'],
@@ -295,8 +295,8 @@
         case 'unread': await patch({ unread: !(c.unread_count > 0) }); break;
         case 'resolve': await patch({ status: 'resolved' }); toast('Conversa finalizada'); break;
         case 'reopen': await patch({ status: 'open' }); toast('Conversa reaberta'); break;
-        case 'waiting': await patch({ waiting: true }); toast('Devolvida para a fila'); break;
-        case 'inbox': await patch({ waiting: false }); toast('Movida para a Entrada'); break;
+        case 'waiting': await patch({ waiting: true }); toast('Marcada como esperando resposta'); break;
+        case 'inbox': await patch({ waiting: false }); toast('Marcada como respondida'); break;
         case 'pin': await pref({ pinned: !c.pinned }); break;
         case 'hide': await pref({ hidden: !c.hidden }); toast(c.hidden ? 'Conversa visível de novo' : 'Oculta só na sua lista. Use "Mostrar ocultas" nos filtros para ver.'); break;
         case 'block':
@@ -1543,8 +1543,8 @@
   // ---------- Tempo real ----------
   function matchesFilters(c) {
     const f = state.filters;
-    if (f.status === 'inbox' && !(c.status === 'open' && c.attended)) return false;
-    if (f.status === 'waiting' && !(c.status === 'open' && !c.attended)) return false;
+    if (f.status === 'inbox' && c.status !== 'open') return false;
+    if (f.status === 'waiting' && !(c.status === 'open' && c.last_message_direction !== 'out')) return false;
     if (f.status === 'resolved' && c.status !== 'resolved') return false;
     if (f.status === 'open' && c.status !== 'open') return false;
     if (f.assigned === 'me' && c.assigned_user_id !== state.me.id) return false;
@@ -1568,7 +1568,7 @@
       if (idx >= 0) state.conversations[idx] = conv; else state.conversations.push(conv);
       const needs = (c) => (c.status === 'open' && c.last_message_direction !== 'out' ? 1 : 0);
       state.conversations.sort((a, b) => state.filters.status === 'waiting'
-        ? (b.pinned - a.pinned) || (new Date(a.created_at) - new Date(b.created_at)) // fila: mais antiga primeiro
+        ? (b.pinned - a.pinned) || (new Date(a.last_message_at) - new Date(b.last_message_at)) // esperando: quem espera há mais tempo primeiro
         : (b.pinned - a.pinned) || (needs(b) - needs(a)) || (new Date(b.last_message_at) - new Date(a.last_message_at)));
     } else if (idx >= 0) {
       state.conversations.splice(idx, 1);
