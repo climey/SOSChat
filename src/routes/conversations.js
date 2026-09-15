@@ -39,6 +39,7 @@ router.get('/:id', async (req, res, next) => {
     const id = parseId(req.params.id);
     const conv = id && (await conversations.getById(id));
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    whatsapp.refreshAvatar(conv.account_id, conv.wa_id).catch(() => {}); // atualiza a foto do contato em segundo plano
     res.json({ conversation: conv });
   } catch (err) {
     next(err);

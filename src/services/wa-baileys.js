@@ -219,6 +219,7 @@ class Session {
       if (this.state.me) {
         db.query('UPDATE wa_accounts SET phone = $2 WHERE id = $1', [this.account.id, this.state.me]).catch(() => {});
       }
+      setTimeout(() => this.backfillAvatars().catch((err) => console.warn(`${tag} backfill de fotos falhou`, err.message)), 5000);
     }
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
@@ -320,13 +321,19 @@ class Session {
     if (rows[0].avatar_updated_at && now - new Date(rows[0].avatar_updated_at).getTime() < 24 * 3600 * 1000) return;
     const contactId = rows[0].id;
     let url = null;
-    try { url = await this.sock.profilePictureUrl(toJid(waId), 'image', 10000); } catch { /* sem foto ou privacidade */ }
+    try {
+      url = await this.sock.profilePictureUrl(toJid(waId), 'image', 10000);
+    } catch (err) {
+      // 404 / not-authorized = contato sem foto ou com privacidade "meus contatos"
+      const code = err?.output?.statusCode || err?.data?.code || '';
+      if (![401, 404, '401', '404'].includes(code)) console.warn(`[baileys:${this.account.id}] foto de ${waId}: ${err.message || code}`);
+    }
     if (!url) {
       await db.query('UPDATE contacts SET avatar_updated_at = NOW() WHERE id = $1', [contactId]);
       return;
     }
     const res = await fetch(url);
-    if (!res.ok) return;
+    if (!res.ok) { console.warn(`[baileys:${this.account.id}] download da foto de ${waId} falhou: HTTP ${res.status}`); return; }
     const buffer = Buffer.from(await res.arrayBuffer());
     if (buffer.length > 5 * 1024 * 1024) return;
     const mediaId = `avatar-${String(waId).replace(/[^\w.-]/g, '_')}`;
@@ -337,6 +344,24 @@ class Session {
     );
     await db.query('UPDATE contacts SET avatar_media_id = $2, avatar_updated_at = NOW() WHERE id = $1', [contactId, mediaId]);
     realtime.broadcast('contact:avatar', { contact_id: contactId, avatar_media_id: mediaId, version: now });
+  }
+
+  /** Após conectar, busca aos poucos as fotos dos contatos que ainda não têm (1 a cada 1,5s para não chamar atenção). */
+  async backfillAvatars() {
+    const { rows } = await db.query(
+      `SELECT DISTINCT ct.wa_id FROM contacts ct
+         JOIN conversations c ON c.contact_id = ct.id
+        WHERE c.account_id = $1 AND (ct.avatar_updated_at IS NULL OR ct.avatar_updated_at < NOW() - INTERVAL '7 days')
+        ORDER BY ct.wa_id LIMIT 300`,
+      [this.account.id]
+    );
+    if (!rows.length) return;
+    console.log(`[baileys:${this.account.id}] buscando foto de ${rows.length} contato(s)`);
+    for (const r of rows) {
+      if (!this.isConnected()) return;
+      await this.refreshAvatar(r.wa_id).catch(() => {});
+      await new Promise((res) => setTimeout(res, 1500));
+    }
   }
 
   isConnected() {
@@ -486,6 +511,7 @@ function verifySignature() {
 module.exports = {
   start, stop, getStatus, getQr, pickAccount,
   addAccount, renameAccount, removeAccount,
+  refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
   isConfigured, sendText, markAsRead, fetchMedia, verifySignature,

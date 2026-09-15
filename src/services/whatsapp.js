@@ -35,4 +35,5 @@ module.exports = {
   logout: (id) => provider.logout(id),
   reconnect: (id) => provider.reconnect(id),
   getQr: (id) => provider.getQr(id),
+  refreshAvatar: (accountId, waId) => (isBaileys && accountId ? provider.refreshAvatar(accountId, waId) : Promise.resolve()),
 };
