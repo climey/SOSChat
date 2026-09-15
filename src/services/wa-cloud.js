@@ -49,6 +49,35 @@ async function sendText(to, body) {
   return data?.messages?.[0]?.id || null;
 }
 
+/** Envia mídia: faz upload para a Meta e depois envia a mensagem referenciando o ID. */
+async function sendMedia(to, file) {
+  if (!isConfigured()) {
+    console.log(`[whatsapp:mock] -> ${to}: [${file.kind}] ${file.filename || ''} ${file.caption || ''}`);
+    return `mock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', file.mimetype);
+  form.append('file', new Blob([file.buffer], { type: file.mimetype }), file.filename || 'arquivo');
+  const up = await fetch(`${GRAPH}/${wa.apiVersion}/${wa.phoneNumberId}/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${wa.accessToken}` },
+    body: form,
+  });
+  const upData = await up.json().catch(() => ({}));
+  if (!up.ok || !upData.id) throw new Error(`WhatsApp API (upload): ${upData?.error?.message || `HTTP ${up.status}`}`);
+
+  const kind = file.kind === 'audio' ? 'audio' : file.kind;
+  const media = { id: upData.id };
+  if (kind !== 'audio' && file.caption) media.caption = file.caption;
+  if (kind === 'document' && file.filename) media.filename = file.filename;
+  const data = await graphRequest(`${wa.phoneNumberId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: kind, [kind]: media }),
+  });
+  return data?.messages?.[0]?.id || null;
+}
+
 /** Marca uma mensagem recebida como lida. */
 async function markAsRead(waMessageId) {
   if (!isConfigured() || !waMessageId || waMessageId.startsWith('sim-')) return;
@@ -86,4 +115,4 @@ function getStatus() {
   return { provider: 'cloud', status: isConfigured() ? 'connected' : 'mock', me: wa.phoneNumberId || null };
 }
 
-module.exports = { isConfigured, sendText, markAsRead, fetchMedia, verifySignature, getStatus };
+module.exports = { isConfigured, sendText, sendMedia, markAsRead, fetchMedia, verifySignature, getStatus };

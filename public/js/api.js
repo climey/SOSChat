@@ -20,6 +20,40 @@
     return data;
   }
 
+  /** Envio multipart (arquivos). */
+  async function upload(path, formData) {
+    const res = await fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      body: formData,
+    });
+    if (res.status === 401) { location.href = '/login.html'; throw new Error('Sessão expirada'); }
+    let data = null;
+    try { data = await res.json(); } catch { /* sem corpo */ }
+    if (!res.ok) throw new Error(data?.error || data?.message?.error || `Erro ${res.status}`);
+    return data;
+  }
+
+  /** Barra lateral: recolhida (só ícones) ou expandida (com nomes), lembrada no navegador. */
+  function initRail() {
+    const rail = document.querySelector('.rail');
+    const toggle = document.getElementById('rail-toggle');
+    if (!rail || !toggle) return;
+    let expanded = false;
+    try { expanded = localStorage.getItem('sos.rail') === '1'; } catch { /* sem storage */ }
+    const apply = () => {
+      rail.classList.toggle('expanded', expanded);
+      toggle.title = expanded ? 'Recolher menu' : 'Expandir menu';
+    };
+    apply();
+    toggle.addEventListener('click', () => {
+      expanded = !expanded;
+      try { localStorage.setItem('sos.rail', expanded ? '1' : '0'); } catch { /* ignora */ }
+      apply();
+    });
+  }
+
   const escDiv = document.createElement('div');
   function esc(value) {
     escDiv.textContent = value == null ? '' : String(value);
@@ -105,8 +139,17 @@
     document.querySelectorAll('[data-admin-only]').forEach((el) => { el.hidden = user.role !== 'admin'; });
     const logout = document.getElementById('logout');
     if (logout) logout.addEventListener('click', async () => { await api('POST', '/api/auth/logout'); location.href = '/login.html'; });
+    const railName = document.getElementById('rail-user-name');
+    if (railName) railName.textContent = user.name;
+    initRail();
     return user;
   }
 
-  window.SOS = { api, esc, initials, formatPhone, fmtTime, fmtClock, fmtDay, fmtDuration, toast, loadMe };
+  function fmtBytes(n) {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  window.SOS = { api, upload, esc, initials, formatPhone, fmtTime, fmtClock, fmtDay, fmtDuration, fmtBytes, toast, loadMe, initRail };
 })();

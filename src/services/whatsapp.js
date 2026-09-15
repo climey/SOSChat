@@ -24,6 +24,7 @@ module.exports = {
   pickAccount: () => (isBaileys ? provider.pickAccount() : null),
   sendText: (accountId, to, body) => (isBaileys ? provider.sendText(accountId, to, body) : provider.sendText(to, body)),
   markAsRead: (accountId, waMessageId, waId) => (isBaileys ? provider.markAsRead(accountId, waMessageId, waId) : provider.markAsRead(waMessageId)),
+  sendMedia: (accountId, to, file) => (isBaileys ? provider.sendMedia(accountId, to, file) : provider.sendMedia(to, file)),
   fetchMedia: (mediaId) => provider.fetchMedia(mediaId),
   verifySignature: (rawBody, header) => provider.verifySignature(rawBody, header),
   start: () => (provider.start ? provider.start() : Promise.resolve()),

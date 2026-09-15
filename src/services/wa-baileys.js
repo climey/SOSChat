@@ -268,9 +268,10 @@ class Session {
         const cloudMsg = toCloudMessage(m);
         if (!cloudMsg) continue;
         if (m.key.fromMe) {
-          await this.storeMedia(m, cloudMsg);
+          // Espera a rota de envio gravar o wa_message_id; se a mensagem já existe (enviada pela inbox), nada a fazer
           await new Promise((r) => setTimeout(r, ECHO_DELAY_MS));
-          await getInbound().handleOutboundEcho(waId, cloudMsg, this.account.id);
+          const echo = await getInbound().handleOutboundEcho(waId, cloudMsg, this.account.id);
+          if (echo) await this.storeMedia(m, cloudMsg);
           continue;
         }
         await this.storeMedia(m, cloudMsg);
@@ -371,6 +372,21 @@ class Session {
   async sendText(to, body) {
     if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado. Escaneie o QR code em Configurações.`);
     const sent = await this.sock.sendMessage(toJid(to), { text: body });
+    return sent?.key?.id || null;
+  }
+
+  /** Envia mídia. file: { buffer, mimetype, filename, caption, kind: image|video|audio|document } */
+  async sendMedia(to, file) {
+    if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado. Escaneie o QR code em Configurações.`);
+    const jid = toJid(to);
+    let content;
+    switch (file.kind) {
+      case 'image': content = { image: file.buffer, caption: file.caption || undefined, mimetype: file.mimetype }; break;
+      case 'video': content = { video: file.buffer, caption: file.caption || undefined, mimetype: file.mimetype }; break;
+      case 'audio': content = { audio: file.buffer, mimetype: file.mimetype, ptt: false }; break;
+      default: content = { document: file.buffer, mimetype: file.mimetype, fileName: file.filename || 'arquivo', caption: file.caption || undefined };
+    }
+    const sent = await this.sock.sendMessage(jid, content);
     return sent?.key?.id || null;
   }
 
@@ -493,6 +509,10 @@ function sendText(accountId, to, body) {
   return getSession(accountId).sendText(to, body);
 }
 
+function sendMedia(accountId, to, file) {
+  return getSession(accountId).sendMedia(to, file);
+}
+
 function markAsRead(accountId, waMessageId, waId) {
   if (!accountId) return Promise.resolve();
   return getSession(accountId).markAsRead(waMessageId, waId);
@@ -514,5 +534,5 @@ module.exports = {
   refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
-  isConfigured, sendText, markAsRead, fetchMedia, verifySignature,
+  isConfigured, sendText, sendMedia, markAsRead, fetchMedia, verifySignature,
 };

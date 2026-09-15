@@ -18,7 +18,12 @@ router.get('/:mediaId', async (req, res, next) => {
       [mediaId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Mídia não encontrada' });
-    const media = await whatsapp.fetchMedia(mediaId);
+    // Arquivos guardados no banco (enviados pela inbox, recebidos via Baileys, fotos de perfil) saem daqui;
+    // o resto (Cloud API) é buscado no provedor
+    const local = await db.query('SELECT mime, size, data FROM media_files WHERE id = $1', [mediaId]);
+    const media = local.rows.length
+      ? { buffer: local.rows[0].data, mimeType: local.rows[0].mime, size: local.rows[0].size }
+      : await whatsapp.fetchMedia(mediaId);
     res.setHeader('Content-Type', media.mimeType);
     res.setHeader('Content-Disposition', 'inline');
     res.setHeader('X-Content-Type-Options', 'nosniff');

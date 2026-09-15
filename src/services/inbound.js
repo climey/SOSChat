@@ -103,6 +103,7 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
   if (result) {
     realtime.broadcast('message:new', { message: result.message, conversation: result.conversation });
     realtime.broadcast('conversation:updated', result.conversation);
+    require('./schedules').cancelFor(result.conversation.id, 'contact').catch(() => {});
   }
   return result;
 }

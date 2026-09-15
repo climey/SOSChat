@@ -5,11 +5,14 @@ const CONVERSATION_SELECT = `
          c.last_message_preview, c.last_message_direction, c.first_response_at, c.resolved_at, c.created_at,
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id,
          u.name AS assigned_user_name,
-         c.account_id, wa.name AS account_name, wa.phone AS account_phone
+         c.account_id, wa.name AS account_name, wa.phone AS account_phone,
+         COALESCE(sc.n, 0) AS scheduled_count
     FROM conversations c
     JOIN contacts ct ON ct.id = c.contact_id
     LEFT JOIN users u ON u.id = c.assigned_user_id
     LEFT JOIN wa_accounts wa ON wa.id = c.account_id
+    LEFT JOIN (SELECT conversation_id, COUNT(*)::int AS n FROM scheduled_messages WHERE status = 'pending' GROUP BY conversation_id) sc
+           ON sc.conversation_id = c.id
 `;
 
 /** Anexa o array `tags` a cada conversa (uma query para o lote inteiro). */

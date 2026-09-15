@@ -1,14 +1,30 @@
 const express = require('express');
+const multer = require('multer');
 const db = require('../db');
 const realtime = require('../realtime');
 const whatsapp = require('../services/whatsapp');
 const conversations = require('../services/conversations');
 const { requireAuth } = require('../middleware/auth');
+const outbound = require('../services/outbound');
+const schedules = require('../services/schedules');
 
 const router = express.Router();
 router.use(requireAuth);
 
 const MESSAGE_MAX = 4096; // limite da Cloud API para texto
+const MEDIA_MAX_BYTES = 25 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MEDIA_MAX_BYTES, files: 1 } });
+
+/** Classifica o arquivo do jeito que o WhatsApp espera. O que não é suportado nativamente vai como documento. */
+function mediaKind(mimetype = '') {
+  if (['image/jpeg', 'image/png'].includes(mimetype)) return 'image';
+  if (['video/mp4', 'video/3gpp'].includes(mimetype)) return 'video';
+  if (['audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/ogg', 'audio/opus', 'audio/amr', 'audio/x-m4a'].includes(mimetype)) return 'audio';
+  return 'document';
+}
+
+const touchConversationAfterSend = outbound.touchAfterSend;
+const resolveAccount = outbound.resolveAccount;
 
 function parseId(value) {
   const n = Number(value);
@@ -68,61 +84,71 @@ router.get('/:id/messages', async (req, res, next) => {
 router.post('/:id/messages', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const body = String(req.body?.body || '').trim();
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
-    if (!body) return res.status(400).json({ error: 'Mensagem vazia' });
-    if (body.length > MESSAGE_MAX) return res.status(400).json({ error: `Mensagem excede ${MESSAGE_MAX} caracteres` });
+    const result = await outbound.sendText(id, req.user, req.body?.body);
+    res.status(result.message.status === 'failed' ? 502 : 201).json(result);
+  } catch (err) {
+    if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// Envia arquivo (imagem, vídeo, áudio ou documento) com legenda opcional. multipart: file + caption
+router.post('/:id/media', (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (!err) return next();
+    res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo acima de 25 MB' : err.message });
+  });
+}, async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    const file = req.file;
+    const caption = String(req.body?.caption || '').trim().slice(0, 1024);
+    if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    if (!file || !file.buffer?.length) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
     const conv = await conversations.getById(id);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const accountId = await resolveAccount(conv);
+    if (whatsapp.multiAccount && !accountId) return res.status(502).json({ error: 'Nenhum número de WhatsApp conectado. Escaneie o QR code em Configurações.' });
 
-    // Conversa antiga sem número associado: usa o primeiro número conectado
-    let accountId = conv.account_id;
-    if (whatsapp.multiAccount && !accountId) {
-      accountId = whatsapp.pickAccount();
-      if (!accountId) return res.status(502).json({ error: 'Nenhum número de WhatsApp conectado. Escaneie o QR code em Configurações.' });
-      await db.query('UPDATE conversations SET account_id = $2 WHERE id = $1', [id, accountId]);
-    }
+    const kind = mediaKind(file.mimetype);
+    const filename = String(file.originalname || 'arquivo').slice(0, 200);
+    const label = { image: '[Imagem]', video: '[Vídeo]', audio: '[Áudio]' }[kind];
+    const body = kind === 'document' ? filename : (caption || label);
 
-    // Grava como pendente, envia, depois atualiza com o ID do WhatsApp
     const { rows } = await db.query(
-      `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id)
-       VALUES ($1, 'out', 'text', $2, 'pending', $3) RETURNING *`,
-      [id, body, req.user.id]
+      `INSERT INTO messages (conversation_id, direction, type, body, media_mime, status, sender_user_id)
+       VALUES ($1, 'out', $2, $3, $4, 'pending', $5) RETURNING *`,
+      [id, kind, body, file.mimetype, req.user.id]
     );
     let message = rows[0];
+    const mediaId = `out-${message.id}`;
+    await db.query(
+      `INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+      [mediaId, file.mimetype, file.size, file.buffer]
+    );
 
     try {
-      const waId = await whatsapp.sendText(accountId, conv.wa_id, body);
+      const waId = await whatsapp.sendMedia(accountId, conv.wa_id, { buffer: file.buffer, mimetype: file.mimetype, filename, caption, kind });
       const upd = await db.query(
-        `UPDATE messages SET wa_message_id = $2, status = 'sent' WHERE id = $1 RETURNING *`,
-        [message.id, waId]
+        `UPDATE messages SET wa_message_id = $2, media_id = $3, status = 'sent' WHERE id = $1 RETURNING *`,
+        [message.id, waId, mediaId]
       );
       message = upd.rows[0];
     } catch (err) {
       const upd = await db.query(
-        `UPDATE messages SET status = 'failed', error = $2 WHERE id = $1 RETURNING *`,
-        [message.id, String(err.message).slice(0, 500)]
+        `UPDATE messages SET media_id = $3, status = 'failed', error = $2 WHERE id = $1 RETURNING *`,
+        [message.id, String(err.message).slice(0, 500), mediaId]
       );
       message = upd.rows[0];
     }
 
-    await db.query(
-      `UPDATE conversations
-          SET last_message_at = NOW(),
-              last_message_preview = $2,
-              last_message_direction = 'out',
-              first_response_at = COALESCE(first_response_at, NOW()),
-              assigned_user_id = COALESCE(assigned_user_id, $3),
-              status = 'open', resolved_at = NULL, resolved_by_user_id = NULL
-        WHERE id = $1`,
-      [id, body.slice(0, 120), req.user.id]
-    );
-
-    const updated = await conversations.getById(id);
+    const updated = await touchConversationAfterSend(id, kind === 'document' ? `[Arquivo] ${filename}` : (caption ? `${label} ${caption}` : label), req.user.id);
     message.sender_name = req.user.name;
     realtime.broadcast('message:new', { message, conversation: updated });
     realtime.broadcast('conversation:updated', updated);
+    schedules.cancelFor(id, 'agent').catch(() => {});
     res.status(message.status === 'failed' ? 502 : 201).json({ message, conversation: updated });
   } catch (err) {
     next(err);
@@ -133,21 +159,10 @@ router.post('/:id/messages', async (req, res, next) => {
 router.post('/:id/notes', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const body = String(req.body?.body || '').trim();
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
-    if (!body) return res.status(400).json({ error: 'Nota vazia' });
-    if (body.length > MESSAGE_MAX) return res.status(400).json({ error: `Nota excede ${MESSAGE_MAX} caracteres` });
-    const conv = await conversations.getById(id);
-    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
-    const { rows } = await db.query(
-      `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id)
-       VALUES ($1, 'out', 'note', $2, 'sent', $3) RETURNING *`,
-      [id, body, req.user.id]
-    );
-    const message = { ...rows[0], sender_name: req.user.name };
-    realtime.broadcast('message:new', { message, conversation: conv });
-    res.status(201).json({ message });
+    res.status(201).json(await outbound.addNote(id, req.user, req.body?.body));
   } catch (err) {
+    if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });
@@ -206,6 +221,7 @@ router.patch('/:id', async (req, res, next) => {
 
     const r = await db.query(`UPDATE conversations SET ${sets.join(', ')} WHERE id = $1`, params);
     if (!r.rowCount) return res.status(404).json({ error: 'Conversa não encontrada' });
+    if (status === 'resolved') schedules.cancelFor(id, 'resolve').catch(() => {});
     const conv = await conversations.getById(id);
     realtime.broadcast('conversation:updated', conv);
     res.json({ conversation: conv });
@@ -256,6 +272,56 @@ router.patch('/:id/contact', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// ---------- Agendamentos ----------
+function scheduleError(res, err) {
+  if (err.status) return res.status(err.status).json({ error: err.message });
+  throw err;
+}
+
+router.get('/:id/schedules', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    res.json({ schedules: await schedules.list(id) });
+  } catch (err) { next(err); }
+});
+
+router.post('/:id/schedules', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const conv = await conversations.getById(id);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    res.status(201).json({ schedule: await schedules.create(id, req.user, req.body || {}) });
+  } catch (err) { try { scheduleError(res, err); } catch (e) { next(e); } }
+});
+
+router.patch('/:id/schedules/:sid', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id), sid = parseId(req.params.sid);
+    if (!id || !sid) return res.status(404).json({ error: 'Agendamento não encontrado' });
+    res.json({ schedule: await schedules.update(sid, id, req.body || {}) });
+  } catch (err) { try { scheduleError(res, err); } catch (e) { next(e); } }
+});
+
+router.post('/:id/schedules/:sid/send-now', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id), sid = parseId(req.params.sid);
+    if (!id || !sid) return res.status(404).json({ error: 'Agendamento não encontrado' });
+    const s = await schedules.dispatch(sid);
+    if (!s || s.conversation_id !== id) return res.status(404).json({ error: 'Agendamento não encontrado' });
+    res.json({ schedule: s });
+  } catch (err) { next(err); }
+});
+
+router.delete('/:id/schedules/:sid', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id), sid = parseId(req.params.sid);
+    if (!id || !sid) return res.status(404).json({ error: 'Agendamento não encontrado' });
+    res.json({ schedule: await schedules.cancel(sid, id, `Cancelado por ${req.user.name}`) });
+  } catch (err) { try { scheduleError(res, err); } catch (e) { next(e); } }
 });
 
 module.exports = router;

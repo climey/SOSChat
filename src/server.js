@@ -85,6 +85,7 @@ app.use((err, req, res, _next) => {
 async function start() {
   await db.query('SELECT 1');
   whatsapp.start().catch((err) => console.error('[whatsapp] falha ao iniciar provedor', err));
+  require('./services/schedules').start();
   server.listen(config.port, () => {
     console.log(`SOS Chat rodando em ${config.appUrl} (${config.isProd ? 'produção' : 'desenvolvimento'})`);
     console.log(`WhatsApp: provedor ${whatsapp.provider}${whatsapp.provider === 'cloud' ? (whatsapp.isConfigured() ? ' (Cloud API configurada)' : ' (modo simulado, sem credenciais)') : ' (QR code em Configurações)'}`);

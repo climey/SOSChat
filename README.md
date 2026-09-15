@@ -112,7 +112,8 @@ Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` 
 - [x] **Etapa 1 (MVP):** inbox compartilhada em tempo real, tags, responsável, finalizar/reabrir, relatórios, webhook oficial, mídia recebida
 - [x] **Etapa 1.5:** login por QR code (Baileys) como provedor alternativo, com sessão no Postgres
 - [x] **Etapa 1.6:** vários números de WhatsApp na mesma inbox (modelo Umbler Talk), conversa amarrada ao número
-- [ ] **Etapa 2:** envio de mídia e templates (janela de 24h), notas internas, respostas rápidas
+- [x] **Etapa 1.7:** inbox no estilo Umbler Talk (abas Entrada/Esperando/Finalizados, notas internas, assinatura), envio de arquivos, busca na conversa, mensagens agendadas com cancelamento automático, player de áudio próprio
+- [ ] **Etapa 2:** templates da Cloud API (janela de 24h), respostas rápidas, gravação de áudio pelo microfone
 - [ ] **Etapa 3:** integração com a plataforma de consultas (detectar placa/chassi na mensagem e mostrar dados do veículo no painel lateral)
 - [ ] **Etapa 4:** filas/departamentos, horário de atendimento com mensagem automática, distribuição automática
 - [ ] **Etapa 5:** relatórios por número, exportação em CSV, auditoria
