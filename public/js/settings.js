@@ -237,9 +237,76 @@
     } catch (err) { toast(err.message, true); }
   });
 
+  // ---------- Respostas rápidas ----------
+  let qrEditing = null;
+  let quickReplies = [];
+  async function loadQuickReplies() {
+    const admin = me.role === 'admin';
+    ({ quick_replies: quickReplies } = await api('GET', '/api/quick-replies'));
+    $('qr-table').innerHTML = `
+      <thead><tr><th>Atalho</th><th>Título</th><th>Texto</th>${admin ? '<th></th>' : ''}</tr></thead>
+      <tbody>${quickReplies.map((r) => `<tr data-id="${r.id}">
+        <td><code>/${esc(r.shortcut)}</code></td><td>${esc(r.title)}</td>
+        <td class="muted" style="max-width:320px;white-space:pre-wrap">${esc(r.body)}</td>
+        ${admin ? `<td class="row-actions"><button class="btn btn-sm" data-act="edit">Editar</button><button class="btn btn-sm btn-ghost" data-act="del">Excluir</button></td>` : ''}
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">Nenhuma resposta rápida</td></tr>'}</tbody>`;
+  }
+  function resetQrForm() {
+    qrEditing = null;
+    $('qr-form').reset();
+    $('qr-submit').textContent = 'Adicionar';
+    $('qr-cancel').hidden = true;
+  }
+  $('qr-cancel').addEventListener('click', resetQrForm);
+  $('qr-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = { shortcut: $('qr-shortcut').value, title: $('qr-title').value, body: $('qr-body').value };
+    try {
+      if (qrEditing) await api('PATCH', `/api/quick-replies/${qrEditing}`, payload);
+      else await api('POST', '/api/quick-replies', payload);
+      toast(qrEditing ? 'Resposta atualizada' : 'Resposta criada');
+      resetQrForm();
+      loadQuickReplies();
+    } catch (err) { toast(err.message, true); }
+  });
+  $('qr-table').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = Number(btn.closest('tr').dataset.id);
+    const r = quickReplies.find((x) => x.id === id);
+    try {
+      if (btn.dataset.act === 'edit') {
+        qrEditing = id;
+        $('qr-shortcut').value = r.shortcut; $('qr-title').value = r.title; $('qr-body').value = r.body;
+        $('qr-submit').textContent = 'Salvar'; $('qr-cancel').hidden = false; $('qr-body').focus();
+        return;
+      }
+      if (!confirm(`Excluir a resposta /${r.shortcut}?`)) return;
+      await api('DELETE', `/api/quick-replies/${id}`);
+      toast('Resposta excluída');
+      loadQuickReplies();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  // ---------- Alerta de conversa parada ----------
+  async function loadSla() {
+    const { settings } = await api('GET', '/api/settings');
+    $('sla-warn').value = settings.sla_warn_minutes ?? 5;
+    $('sla-alert').value = settings.sla_alert_minutes ?? 15;
+    const ro = me.role !== 'admin';
+    $('sla-warn').disabled = ro; $('sla-alert').disabled = ro;
+  }
+  $('sla-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const warn = Number($('sla-warn').value), alert = Number($('sla-alert').value);
+    if (alert <= warn) return toast('O limite vermelho deve ser maior que o amarelo', true);
+    try { await api('PUT', '/api/settings', { sla_warn_minutes: warn, sla_alert_minutes: alert }); toast('Limites salvos'); }
+    catch (err) { toast(err.message, true); }
+  });
+
   async function init() {
     me = await SOS.loadMe();
-    await Promise.all([loadTags(), loadUsers(), loadIntegration()]);
+    await Promise.all([loadTags(), loadUsers(), loadIntegration(), loadQuickReplies(), loadSla()]);
   }
   init().catch((err) => toast(err.message, true));
 })();

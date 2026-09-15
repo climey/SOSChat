@@ -13,6 +13,11 @@
     filters: { status: 'inbox', assigned: 'all', tag: '', account: '', q: '', hidden: 'none' },
     accounts: new Map(), // id -> status do número (só provedor baileys)
     prefs: new Map(), // conversa id -> { pinned, muted, hidden } deste atendente
+    presence: new Map(), // user id -> { online, availability }
+    settings: { sla_warn_minutes: 5, sla_alert_minutes: 15 },
+    quickReplies: [],
+    reply: null, // mensagem sendo citada
+    typing: new Map(), // conversa id -> Map(user id -> { name, until })
     multiAccount: false,
     composeMode: 'message', // message | note
     search: { open: false, q: '', hits: [], idx: -1 },
@@ -114,6 +119,22 @@
     if (c.hidden) f.push(`<span title="Oculta">${HIDE_ICON}</span>`);
     return f.length ? `<span class="flags">${f.join('')}</span>` : '';
   }
+  /** Bolinha de presença de um atendente (verde online, amarelo ausente, cinza offline). */
+  function pdot(userId) {
+    const p = state.presence.get(Number(userId));
+    const cls = p?.online ? (p.availability === 'away' ? 'away' : 'online') : '';
+    const title = p?.online ? (p.availability === 'away' ? 'Ausente' : 'Online') : 'Offline';
+    return `<span class="pdot ${cls}" title="${title}"></span>`;
+  }
+  /** Tempo que o cliente está esperando resposta, com cor pelo limite configurado. */
+  function waitHtml(c) {
+    if (c.status !== 'open' || c.last_message_direction === 'out') return '';
+    const min = Math.floor((Date.now() - new Date(c.last_message_at).getTime()) / 60000);
+    if (min < 1) return '';
+    const cls = min >= state.settings.sla_alert_minutes ? 'alert' : min >= state.settings.sla_warn_minutes ? 'warn' : '';
+    const label = min < 60 ? `${min} min` : `${Math.floor(min / 60)}h${min % 60 ? pad2(min % 60) : ''}`;
+    return `<span class="wait ${cls}" title="Cliente aguardando resposta há ${label}">⏱ ${label}</span>`;
+  }
   /** Prévia da lista com ícone por tipo, como no WhatsApp. */
   function previewText(c) {
     const p = stripWa(c.last_message_preview || '');
@@ -138,9 +159,10 @@
             </div>
             <div class="mid">
               <span class="preview">${tickHtml(c)}<span>${esc(previewText(c))}</span></span>
+              ${waitHtml(c)}
               ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
               ${c.assigned_user_name
-                ? `<span class="agent" title="Responsável: ${esc(c.assigned_user_name)}">${esc(initials(c.assigned_user_name))}</span>`
+                ? `<span class="agent" title="Responsável: ${esc(c.assigned_user_name)}">${esc(initials(c.assigned_user_name))}${pdot(c.assigned_user_id)}</span>`
                 : '<span class="agent none" title="Sem responsável">?</span>'}
             </div>
             <div class="meta">
@@ -305,6 +327,8 @@
     state.currentConv = conversation;
     state.messages = messages;
     if (state.search.open) closeSearch();
+    clearReply();
+    loadContactCard(conversation);
     upsertConversation(conversation);
     renderChat();
     renderMessages(true);
@@ -324,8 +348,9 @@
       `<span class="sub">${esc(formatPhone(c.wa_id))}</span>` +
       c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('') +
       (c.account_name && state.multiAccount ? `<span class="chip-soft ${accountOffline(c.account_id) ? 'off' : ''}">via ${esc(c.account_name)}</span>` : '') +
-      `<span class="chip-soft">${c.assigned_user_name ? esc(c.assigned_user_name) : 'Sem responsável'}</span>` +
-      (c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : '');
+      `<span class="chip-soft">${c.assigned_user_name ? `${pdot(c.assigned_user_id)}&nbsp;${esc(c.assigned_user_name)}` : 'Sem responsável'}</span>` +
+      (c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : '') +
+      typingHtml(c.id);
     els.btnResolve.title = c.status === 'resolved' ? 'Reabrir conversa' : 'Finalizar conversa';
     els.btnResolve.classList.toggle('success', c.status !== 'resolved');
     els.btnAssignMe.hidden = c.assigned_user_id === state.me.id;
@@ -410,13 +435,342 @@
       const sender = m.direction === 'out' && m.sender_name
         ? `<div class="sender">${isNote ? 'Nota interna · ' : ''}${esc(m.sender_name)}</div>` : '';
       const dimmed = state.search.q && !state.search.hits.includes(m.id) ? 'dimmed' : '';
+      const canAct = !isNote && !m.deleted_at && m.wa_message_id;
+      const actions = canAct ? `<div class="msg-actions">
+          <button type="button" data-msg-act="reply" title="Responder">${REPLY_ICON}</button>
+          <button type="button" data-msg-act="react" title="Reagir">😊</button>
+        </div>` : '';
       return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed}" data-id="${m.id}">
-        <div class="msg">${sender}${mediaHtml(m)}${showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : ''}
+        <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : ''}
           <span class="foot">${m.edited_at && !m.deleted_at ? '<span class="edited">editada</span>' : ''}<span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</span>
-        </div>${agent}
+          ${reactionsHtml(m)}
+        </div>${agent}${actions}
       </div>`;
     }).join('');
     if (scroll) els.messages.scrollTop = els.messages.scrollHeight;
+  }
+
+  // ---------- Citação e reações (renderização) ----------
+  const REPLY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
+  const quotedLabel = (q) => {
+    const c = current();
+    return q.direction === 'in' ? (c ? contactName(c) : 'Cliente') : (q.sender_name || 'Você');
+  };
+  const quotedText = (q) => {
+    if (!q) return '';
+    const map = { image: '📷 Foto', video: '🎥 Vídeo', audio: '🎤 Áudio', sticker: 'Figurinha', document: `📄 ${q.body || 'Documento'}` };
+    return q.media_id || ['image', 'video', 'audio', 'sticker', 'document'].includes(q.type) ? (isPlaceholder(q.body) || !q.body ? map[q.type] || q.body : q.body) : stripWa(q.body);
+  };
+  function quoteHtml(m) {
+    if (!m.quoted) return '';
+    return `<span class="quote" data-goto="${m.quoted.id}"><span class="qname">${esc(quotedLabel(m.quoted))}</span><span class="qbody">${esc(quotedText(m.quoted))}</span></span>`;
+  }
+  function reactionsHtml(m) {
+    const r = m.reactions || {};
+    const items = [];
+    if (r.contact) items.push(`<span class="reaction" title="Reação do cliente">${esc(r.contact)}</span>`);
+    if (r.me) items.push(`<span class="reaction mine" data-unreact="${m.id}" title="Sua reação (clique para remover)">${esc(r.me)}</span>`);
+    return items.length ? `<div class="reactions">${items.join('')}</div>` : '';
+  }
+  els.messages.addEventListener('click', async (e) => {
+    const go = e.target.closest('[data-goto]');
+    if (go) {
+      const row = els.messages.querySelector(`.msg-row[data-id="${go.dataset.goto}"]`);
+      if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1500); }
+      return;
+    }
+    const un = e.target.closest('[data-unreact]');
+    if (un) { await sendReaction(Number(un.dataset.unreact), ''); return; }
+    const act = e.target.closest('button[data-msg-act]');
+    if (!act) return;
+    const id = Number(act.closest('.msg-row').dataset.id);
+    const m = state.messages.find((x) => x.id === id);
+    if (!m) return;
+    if (act.dataset.msgAct === 'reply') setReply(m);
+    if (act.dataset.msgAct === 'react') openEmojiPicker({ forReaction: id, anchor: act });
+  });
+  function setReply(m) {
+    state.reply = m;
+    const p = $('reply-preview');
+    p.innerHTML = `<div class="info"><div class="qname">${esc(m.direction === 'in' ? contactName(current()) : (m.sender_name || 'Você'))}</div><div class="qbody">${esc(quotedText(m))}</div></div><button type="button" class="icon-btn" id="reply-cancel" title="Cancelar">✕</button>`;
+    p.hidden = false;
+    $('reply-cancel').addEventListener('click', clearReply);
+    els.composeText.focus();
+  }
+  function clearReply() { state.reply = null; $('reply-preview').hidden = true; $('reply-preview').innerHTML = ''; }
+  async function sendReaction(messageId, emoji) {
+    const c = current();
+    if (!c) return;
+    try { await api('POST', `/api/conversations/${c.id}/messages/${messageId}/react`, { emoji }); }
+    catch (err) { toast(err.message, true); }
+  }
+
+  // ---------- Emojis ----------
+  const EMOJI = {
+    '😀': ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '😎', '🤓', '🧐', '😕', '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '💀', '💩', '🤡', '👻', '👽', '🤖'],
+    '👍': ['👍', '👎', '👌', '🤌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '☝️', '👋', '🤚', '🖐️', '✋', '🖖', '👏', '🙌', '🤝', '🙏', '💪', '🫶', '✍️', '💅', '🤳', '👀', '👁️', '🧠', '🦷', '👂', '👃'],
+    '❤️': ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💯', '💢', '💥', '💫', '💦', '💨', '🔥', '⭐', '🌟', '✨', '⚡', '☀️', '🌈', '🎉', '🎊', '🎁', '🏆', '🥇', '🎯', '💰', '💸', '💳', '🧾', '📄', '📎', '📌', '📍', '🔍', '🔒', '🔑', '🚗', '🚙', '🏍️', '🚚', '🛻', '🚘', '🛞', '⛽'],
+    '✅': ['✅', '❌', '⚠️', '❗', '❓', '‼️', '⭕', '🚫', '⏰', '⏳', '⌛', '📅', '📆', '🕐', '☑️', '✔️', '➡️', '⬅️', '⬆️', '⬇️', '🔁', '🔔', '🔕', '📢', '💬', '💭', '📞', '📱', '💻', '📧', '📨', '🆗', '🆕', '🆓', '🔞', '🅿️'],
+  };
+  const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+  let emojiTarget = null; // null = compositor; número = reação na mensagem
+  function insertAtCaret(text) {
+    const t = els.composeText;
+    const s = t.selectionStart ?? t.value.length, e = t.selectionEnd ?? t.value.length;
+    t.value = t.value.slice(0, s) + text + t.value.slice(e);
+    t.selectionStart = t.selectionEnd = s + text.length;
+    t.focus();
+    autosize();
+  }
+  function renderEmojiPicker(tab) {
+    const picker = $('emoji-picker');
+    const tabs = Object.keys(EMOJI);
+    const active = tab || tabs[0];
+    const quick = emojiTarget ? `<div class="ep-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:6px">${QUICK_REACTIONS.map((x) => `<button type="button" data-emoji="${x}">${x}</button>`).join('')}</div>` : '';
+    picker.innerHTML = quick + `<div class="ep-tabs">${tabs.map((t) => `<button type="button" data-tab="${t}" class="${t === active ? 'active' : ''}">${t}</button>`).join('')}</div>
+      <div class="ep-grid">${EMOJI[active].map((x) => `<button type="button" data-emoji="${x}">${x}</button>`).join('')}</div>`;
+  }
+  function openEmojiPicker({ forReaction = null, anchor = null } = {}) {
+    emojiTarget = forReaction;
+    const picker = $('emoji-picker');
+    picker.classList.toggle('for-reaction', Boolean(forReaction));
+    renderEmojiPicker();
+    picker.hidden = false;
+    if (forReaction && anchor) {
+      const r = anchor.getBoundingClientRect();
+      picker.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 356))}px`;
+      picker.style.top = `${Math.max(8, r.top - picker.offsetHeight - 8)}px`;
+    } else {
+      picker.style.left = ''; picker.style.top = '';
+    }
+  }
+  function closeEmojiPicker() { $('emoji-picker').hidden = true; emojiTarget = null; }
+  $('btn-emoji').addEventListener('click', (e) => { e.stopPropagation(); if ($('emoji-picker').hidden) openEmojiPicker(); else closeEmojiPicker(); });
+  $('emoji-picker').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const tab = e.target.closest('button[data-tab]');
+    if (tab) { renderEmojiPicker(tab.dataset.tab); return; }
+    const em = e.target.closest('button[data-emoji]');
+    if (!em) return;
+    if (emojiTarget) { const id = emojiTarget; closeEmojiPicker(); await sendReaction(id, em.dataset.emoji); }
+    else insertAtCaret(em.dataset.emoji);
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#emoji-picker') && !e.target.closest('#btn-emoji')) closeEmojiPicker(); });
+
+  // ---------- Respostas rápidas ----------
+  let qrIndex = 0;
+  function fillVars(text) {
+    const c = current();
+    const first = (s) => String(s || '').trim().split(/\s+/)[0] || '';
+    return text
+      .replace(/\{nome\}/gi, c ? first(contactName(c)) : '')
+      .replace(/\{nome_completo\}/gi, c ? contactName(c) : '')
+      .replace(/\{atendente\}/gi, first(state.me.name))
+      .replace(/\{telefone\}/gi, c ? formatPhone(c.wa_id) : '');
+  }
+  function qrMatches(q) {
+    const term = q.toLowerCase();
+    return state.quickReplies.filter((r) => !term || r.shortcut.includes(term) || r.title.toLowerCase().includes(term) || r.body.toLowerCase().includes(term));
+  }
+  function renderQuickPopup(term) {
+    const list = qrMatches(term);
+    const pop = $('qr-popup');
+    qrIndex = Math.min(qrIndex, Math.max(0, list.length - 1));
+    pop.innerHTML = list.length
+      ? list.map((r, i) => `<div class="qr-item ${i === qrIndex ? 'active' : ''}" data-id="${r.id}"><div class="qr-head"><span class="qr-sc">/${esc(r.shortcut)}</span>${esc(r.title)}</div><div class="qr-body">${esc(r.body)}</div></div>`).join('')
+      : `<div class="qr-empty">${state.quickReplies.length ? 'Nenhuma resposta combina' : 'Nenhuma resposta rápida cadastrada. Crie em Configurações.'}</div>`;
+    pop.hidden = false;
+    pop.dataset.term = term;
+  }
+  function closeQuickPopup() { $('qr-popup').hidden = true; }
+  function applyQuick(id) {
+    const r = state.quickReplies.find((x) => x.id === Number(id));
+    if (!r) return;
+    const v = els.composeText.value;
+    els.composeText.value = /^\/\S*$/.test(v.trim()) ? fillVars(r.body) : v + (v.endsWith(' ') || !v ? '' : ' ') + fillVars(r.body);
+    closeQuickPopup();
+    autosize();
+    els.composeText.focus();
+  }
+  $('btn-quick').addEventListener('click', (e) => { e.stopPropagation(); if ($('qr-popup').hidden) { qrIndex = 0; renderQuickPopup(''); } else closeQuickPopup(); });
+  $('qr-popup').addEventListener('click', (e) => { const it = e.target.closest('.qr-item'); if (it) applyQuick(it.dataset.id); });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#qr-popup') && !e.target.closest('#btn-quick')) closeQuickPopup(); });
+  els.composeText.addEventListener('input', () => {
+    const v = els.composeText.value;
+    const m = v.match(/^\/(\S*)$/);
+    if (m && state.composeMode === 'message') { qrIndex = 0; renderQuickPopup(m[1]); } else closeQuickPopup();
+    emitTyping();
+  });
+  els.composeText.addEventListener('keydown', (e) => {
+    const pop = $('qr-popup');
+    if (pop.hidden) return;
+    const list = qrMatches(pop.dataset.term || '');
+    if (e.key === 'ArrowDown') { e.preventDefault(); qrIndex = (qrIndex + 1) % Math.max(list.length, 1); renderQuickPopup(pop.dataset.term || ''); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); qrIndex = (qrIndex - 1 + list.length) % Math.max(list.length, 1); renderQuickPopup(pop.dataset.term || ''); }
+    else if ((e.key === 'Enter' || e.key === 'Tab') && list.length) { e.preventDefault(); e.stopImmediatePropagation(); applyQuick(list[qrIndex].id); }
+    else if (e.key === 'Escape') closeQuickPopup();
+  }, true);
+
+  // ---------- Presença e "está digitando" ----------
+  let typingSocket = null;
+  let lastTypingAt = 0;
+  function emitTyping() {
+    if (!typingSocket || !state.currentId || state.composeMode === 'note') return;
+    const now = Date.now();
+    if (now - lastTypingAt < 2000) return;
+    lastTypingAt = now;
+    typingSocket.emit('typing', { conversation_id: state.currentId, active: true });
+  }
+  function typingHtml(conversationId) {
+    const map = state.typing.get(conversationId);
+    if (!map) return '';
+    const names = [...map.values()].filter((t) => t.until > Date.now()).map((t) => t.name);
+    return names.length ? `<span class="typing">${esc(names.join(', '))} está digitando…</span>` : '';
+  }
+  setInterval(() => {
+    // limpa "digitando" vencidos e atualiza os cronômetros de espera
+    let changed = false;
+    for (const [cid, map] of state.typing) { for (const [uid, t] of map) if (t.until <= Date.now()) { map.delete(uid); changed = true; } if (!map.size) state.typing.delete(cid); }
+    if (changed && current()) renderChat();
+    renderList();
+  }, 30000);
+  function setPresence(userId, data) {
+    const cur = state.presence.get(userId) || { online: false, availability: 'available' };
+    state.presence.set(userId, { ...cur, ...data });
+  }
+  function renderMyPresence() {
+    const p = state.presence.get(state.me.id);
+    const el = $('me-avatar');
+    el.querySelector('.pdot')?.remove();
+    el.insertAdjacentHTML('beforeend', `<span class="pdot ${p?.availability === 'away' ? 'away' : 'online'}"></span>`);
+    el.title = `${state.me.name} · ${p?.availability === 'away' ? 'Ausente' : 'Disponível'} (clique para mudar)`;
+  }
+  $('me-avatar').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = $('presence-menu');
+    const r = e.currentTarget.getBoundingClientRect();
+    menu.hidden = false;
+    menu.style.left = `${r.right + 8}px`;
+    menu.style.top = `${Math.min(r.top, window.innerHeight - menu.offsetHeight - 8)}px`;
+  });
+  $('presence-menu').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-availability]');
+    $('presence-menu').hidden = true;
+    if (!b) return;
+    try { await api('PATCH', '/api/users/me/availability', { availability: b.dataset.availability }); setPresence(state.me.id, { availability: b.dataset.availability, online: true }); renderMyPresence(); renderList(); }
+    catch (err) { toast(err.message, true); }
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#presence-menu') && !e.target.closest('#me-avatar')) $('presence-menu').hidden = true; });
+
+  // ---------- Transferir ----------
+  function userOption(u) {
+    const p = state.presence.get(u.id);
+    const st = p?.online ? (p.availability === 'away' ? '● ausente' : '● online') : '○ offline';
+    return `<option value="${u.id}">${esc(u.name)} · ${st}</option>`;
+  }
+  $('btn-transfer').addEventListener('click', () => {
+    const c = current();
+    if (!c) return;
+    const others = state.users.filter((u) => u.id !== state.me.id && u.active !== false);
+    const sorted = [...others].sort((a, b) => (Number(state.presence.get(b.id)?.online) - Number(state.presence.get(a.id)?.online)) || a.name.localeCompare(b.name));
+    $('transfer-user').innerHTML = sorted.map(userOption).join('') || '<option value="">Nenhum outro atendente</option>';
+    $('transfer-note').value = '';
+    $('transfer-modal').hidden = false;
+    $('transfer-user').focus();
+  });
+  $('transfer-cancel').addEventListener('click', () => { $('transfer-modal').hidden = true; });
+  $('transfer-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const c = current();
+    const uid = Number($('transfer-user').value);
+    if (!c || !uid) return;
+    try {
+      await api('POST', `/api/conversations/${c.id}/transfer`, { user_id: uid, note: $('transfer-note').value });
+      $('transfer-modal').hidden = true;
+      toast('Conversa transferida');
+    } catch (err) { toast(err.message, true); }
+  });
+
+  // ---------- Gravação de áudio ----------
+  const rec = { recorder: null, chunks: [], start: 0, timer: null, stream: null, cancelled: false };
+  function recSupported() { return Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder); }
+  function recMime() {
+    for (const t of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']) if (MediaRecorder.isTypeSupported(t)) return t;
+    return '';
+  }
+  async function startRecording() {
+    if (!recSupported()) { toast('Seu navegador não permite gravar áudio', true); return; }
+    try {
+      rec.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch { toast('Permita o uso do microfone para gravar', true); return; }
+    rec.chunks = []; rec.cancelled = false; rec.start = Date.now();
+    rec.recorder = new MediaRecorder(rec.stream, recMime() ? { mimeType: recMime() } : undefined);
+    rec.recorder.addEventListener('dataavailable', (e) => { if (e.data.size) rec.chunks.push(e.data); });
+    rec.recorder.addEventListener('stop', onRecordingStop);
+    rec.recorder.start(250);
+    $('rec-bar').hidden = false;
+    $('btn-mic').classList.add('recording');
+    els.composeText.hidden = true;
+    clearInterval(rec.timer);
+    rec.timer = setInterval(() => { const s = Math.floor((Date.now() - rec.start) / 1000); $('rec-time').textContent = `${Math.floor(s / 60)}:${pad2(s % 60)}`; if (s >= 300) stopRecording(false); }, 250);
+  }
+  function stopRecording(cancel) {
+    rec.cancelled = cancel;
+    clearInterval(rec.timer);
+    try { rec.recorder?.state !== 'inactive' && rec.recorder.stop(); } catch { /* ignora */ }
+    rec.stream?.getTracks().forEach((t) => t.stop());
+    $('rec-bar').hidden = true;
+    $('btn-mic').classList.remove('recording');
+    els.composeText.hidden = false;
+    $('rec-time').textContent = '0:00';
+  }
+  async function onRecordingStop() {
+    if (rec.cancelled || !rec.chunks.length || !state.currentId) return;
+    if (Date.now() - rec.start < 800) { toast('Áudio muito curto', true); return; }
+    const type = rec.recorder.mimeType || 'audio/webm';
+    const blob = new Blob(rec.chunks, { type });
+    const fd = new FormData();
+    fd.append('file', blob, `voz.${type.includes('mp4') ? 'mp4' : type.includes('ogg') ? 'ogg' : 'webm'}`);
+    if (state.reply) fd.append('quoted_message_id', state.reply.id);
+    $('btn-mic').disabled = true;
+    try {
+      await SOS.upload(`/api/conversations/${state.currentId}/audio`, fd);
+      clearReply();
+    } catch (err) { toast(err.message, true); }
+    finally { $('btn-mic').disabled = false; }
+  }
+  $('btn-mic').addEventListener('click', () => { if (rec.recorder && rec.recorder.state === 'recording') stopRecording(false); else startRecording(); });
+  $('rec-cancel').addEventListener('click', () => stopRecording(true));
+  $('rec-send').addEventListener('click', () => stopRecording(false));
+
+  // ---------- Ficha do contato ----------
+  let contactCardId = null;
+  async function loadContactCard(c) {
+    if (!c) return;
+    contactCardId = c.contact_id;
+    try {
+      const { contact, conversations } = await api('GET', `/api/contacts/${c.contact_id}`);
+      if (contactCardId !== c.contact_id) return;
+      if (document.activeElement !== $('d-cpf')) $('d-cpf').value = contact.cpf || '';
+      if (document.activeElement !== $('d-email')) $('d-email').value = contact.email || '';
+      if (document.activeElement !== $('d-notes')) $('d-notes').value = contact.notes || '';
+      const others = conversations.filter((x) => x.id !== c.id);
+      $('d-history').innerHTML = others.length ? others.map((x) => `
+        <div class="h-item" data-open="${x.id}">
+          <div class="h-top"><span>${x.status === 'resolved' ? 'Finalizada' : 'Aberta'} · ${esc(x.account_name || '')}</span><span class="muted">${esc(new Date(x.created_at).toLocaleDateString('pt-BR'))}</span></div>
+          <div class="h-prev">${esc(stripWa(x.last_message_preview || ''))}</div>
+          <div class="muted">${x.messages_count} msg · ${esc(x.assigned_user_name || 'sem responsável')}</div>
+        </div>`).join('') : '<div class="muted small">Primeira conversa deste contato</div>';
+    } catch { /* ignora */ }
+  }
+  $('d-history').addEventListener('click', (e) => { const it = e.target.closest('[data-open]'); if (it) openConversation(Number(it.dataset.open)); });
+  for (const [id, field] of [['d-cpf', 'cpf'], ['d-email', 'email'], ['d-notes', 'notes']]) {
+    $(id).addEventListener('change', async () => {
+      const c = current();
+      if (!c) return;
+      try { await api('PATCH', `/api/contacts/${c.contact_id}`, { [field]: $(id).value }); toast('Ficha salva'); }
+      catch (err) { toast(err.message, true); }
+    });
   }
 
   // ---------- Visualizador de mídia (lightbox) ----------
@@ -650,11 +1004,13 @@
     const fd = new FormData();
     fd.append('file', attach.file, attach.file.name);
     fd.append('caption', els.signToggle.checked && caption ? `*${state.me.name}:*\n${caption}` : caption);
+    if (state.reply) fd.append('quoted_message_id', state.reply.id);
     els.composeSend.disabled = true;
     els.composeSend.textContent = 'Enviando…';
     try {
       await SOS.upload(`/api/conversations/${id}/media`, fd);
       clearAttachment();
+      clearReply();
       els.composeText.value = '';
       autosize();
     } catch (err) {
@@ -944,7 +1300,8 @@
         await api('POST', `/api/conversations/${id}/notes`, { body: text });
       } else {
         const body = els.signToggle.checked ? `*${state.me.name}:*\n${text}` : text;
-        await api('POST', `/api/conversations/${id}/messages`, { body });
+        await api('POST', `/api/conversations/${id}/messages`, { body, quoted_message_id: state.reply?.id || null });
+        clearReply();
       }
     } catch (err) {
       toast(err.message, true);
@@ -1070,6 +1427,35 @@
 
   function connectSocket() {
     const socket = io({ withCredentials: true });
+    typingSocket = socket;
+    socket.on('presence:all', (ids) => { for (const id of ids) setPresence(id, { online: true }); renderList(); if (current()) renderChat(); });
+    socket.on('presence', ({ user_id, online, availability }) => {
+      setPresence(user_id, availability ? { online, availability } : { online });
+      if (user_id === state.me.id) renderMyPresence();
+      renderList();
+      if (current()) renderChat();
+    });
+    socket.on('typing', ({ conversation_id, user_id, name, active }) => {
+      if (user_id === state.me.id) return;
+      const map = state.typing.get(conversation_id) || new Map();
+      if (active) map.set(user_id, { name, until: Date.now() + 4000 }); else map.delete(user_id);
+      state.typing.set(conversation_id, map);
+      if (conversation_id === state.currentId) { renderChat(); setTimeout(() => { if (conversation_id === state.currentId) renderChat(); }, 4200); }
+    });
+    socket.on('settings:updated', (s) => { Object.assign(state.settings, s); renderList(); });
+    socket.on('contact:updated', (contact) => {
+      let touched = false;
+      for (const c of state.conversations) if (c.contact_id === contact.id) { c.contact_name = contact.name; touched = true; }
+      if (state.currentConv?.contact_id === contact.id) { state.currentConv.contact_name = contact.name; renderChat(); renderDetails(); loadContactCard(state.currentConv); }
+      if (touched) renderList();
+    });
+    socket.on('conversation:transferred', ({ conversation, from, note }) => {
+      toast(`${from} transferiu ${contactName(conversation)} para você${note ? ': ' + note : ''}`);
+      if ('Notification' in window && Notification.permission === 'granted' && !document.hasFocus()) {
+        const n = new Notification('Conversa transferida para você', { body: `${from}: ${contactName(conversation)}${note ? ' · ' + note : ''}`, icon: '/img/logo.svg' });
+        n.onclick = () => { window.focus(); openConversation(conversation.id); n.close(); };
+      }
+    });
     socket.on('conversation:updated', (conv) => {
       upsertConversation(conv);
       if (conv.id === state.currentId) { renderChat(); renderDetails(); }
@@ -1167,9 +1553,18 @@
     state.me = await SOS.loadMe();
     els.signName.textContent = state.me.name;
     $('me-avatar').title = `${state.me.name} · ${state.me.role === 'admin' ? 'Administrador' : 'Atendente'}`;
-    const [{ tags }, { users }] = await Promise.all([api('GET', '/api/tags'), api('GET', '/api/users')]);
+    const [{ tags }, { users }, qr, st] = await Promise.all([
+      api('GET', '/api/tags'), api('GET', '/api/users'),
+      api('GET', '/api/quick-replies').catch(() => ({ quick_replies: [] })),
+      api('GET', '/api/settings').catch(() => ({ settings: {} })),
+    ]);
     state.tags = tags;
     state.users = users;
+    state.quickReplies = qr.quick_replies || [];
+    Object.assign(state.settings, st.settings || {});
+    for (const u of users) setPresence(u.id, { online: Boolean(u.online), availability: u.availability || 'available' });
+    setPresence(state.me.id, { online: true });
+    renderMyPresence();
     els.tagFilter.innerHTML = '<option value="">Todas as tags</option>' + tags.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
     els.dAssignee.innerHTML = '<option value="">Sem responsável</option>' + users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
     try {

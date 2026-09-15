@@ -62,6 +62,9 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/media', require('./routes/media'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
+app.use('/api/quick-replies', require('./routes/quick-replies'));
+app.use('/api/settings', require('./routes/settings'));
+app.use('/api/contacts', require('./routes/contacts'));
 if (config.enableDevSimulator) {
   app.use('/api/dev', require('./routes/dev'));
   console.log('[dev] simulador de mensagens habilitado em POST /api/dev/simulate-inbound');

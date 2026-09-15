@@ -31,22 +31,30 @@ async function graphRequest(path, options = {}) {
 }
 
 /** Envia mensagem de texto. Retorna o ID da mensagem no WhatsApp. */
-async function sendText(to, body) {
+async function sendText(to, body, opts = {}) {
   if (!isConfigured()) {
-    console.log(`[whatsapp:mock] -> ${to}: ${body}`);
+    console.log(`[whatsapp:mock] -> ${to}: ${body}${opts.quoted ? ` (citando ${opts.quoted.wa_message_id})` : ''}`);
     return `mock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
-  const data = await graphRequest(`${wa.phoneNumberId}/messages`, {
-    method: 'POST',
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to,
-      type: 'text',
-      text: { preview_url: false, body },
-    }),
-  });
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'text',
+    text: { preview_url: false, body },
+  };
+  if (opts.quoted?.wa_message_id) payload.context = { message_id: opts.quoted.wa_message_id };
+  const data = await graphRequest(`${wa.phoneNumberId}/messages`, { method: 'POST', body: JSON.stringify(payload) });
   return data?.messages?.[0]?.id || null;
+}
+
+/** Reação a uma mensagem (emoji vazio remove). */
+async function sendReaction(to, waMessageId, _fromMe, emoji) {
+  if (!isConfigured()) { console.log(`[whatsapp:mock] reação ${emoji || '(remover)'} em ${waMessageId}`); return; }
+  await graphRequest(`${wa.phoneNumberId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'reaction', reaction: { message_id: waMessageId, emoji: emoji || '' } }),
+  });
 }
 
 /** Envia mídia: faz upload para a Meta e depois envia a mensagem referenciando o ID. */
@@ -124,4 +132,4 @@ function getStatus() {
   return { provider: 'cloud', status: isConfigured() ? 'connected' : 'mock', me: wa.phoneNumberId || null };
 }
 
-module.exports = { isConfigured, sendText, sendMedia, setBlocked, markAsRead, fetchMedia, verifySignature, getStatus };
+module.exports = { isConfigured, sendText, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature, getStatus };

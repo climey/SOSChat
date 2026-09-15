@@ -107,6 +107,9 @@ function toCloudMessage(m) {
   const ts = m.messageTimestamp;
   const base = { id: m.key.id, timestamp: String(typeof ts === 'object' && ts ? ts.toNumber() : Number(ts) || Math.floor(Date.now() / 1000)) };
   const c = message[type] || {};
+  // Citação: o WhatsApp manda o id da mensagem citada em contextInfo.stanzaId
+  const quotedId = c?.contextInfo?.stanzaId;
+  if (quotedId) base.context = { id: quotedId };
   switch (type) {
     case 'conversation': return { ...base, type: 'text', text: { body: message.conversation || '' } };
     case 'extendedTextMessage': return { ...base, type: 'text', text: { body: c.text || '' } };
@@ -119,7 +122,7 @@ function toCloudMessage(m) {
     case 'liveLocationMessage': return { ...base, type: 'location', location: { latitude: c.degreesLatitude, longitude: c.degreesLongitude, name: c.name || c.caption } };
     case 'contactMessage': return { ...base, type: 'contacts', contacts: [{ name: { formatted_name: c.displayName } }] };
     case 'contactsArrayMessage': return { ...base, type: 'contacts', contacts: (c.contacts || []).map((x) => ({ name: { formatted_name: x.displayName } })) };
-    case 'reactionMessage': return { ...base, type: 'reaction', reaction: { emoji: c.text } };
+    case 'reactionMessage': return { ...base, type: 'reaction', reaction: { message_id: c.key?.id, emoji: c.text || '' } };
     case 'buttonsResponseMessage': return { ...base, type: 'interactive', interactive: { button_reply: { title: c.selectedDisplayText } } };
     case 'listResponseMessage': return { ...base, type: 'interactive', interactive: { list_reply: { title: c.title } } };
     case 'templateButtonReplyMessage': return { ...base, type: 'interactive', interactive: { button_reply: { title: c.selectedDisplayText } } };
@@ -369,10 +372,24 @@ class Session {
     return Boolean(this.sock) && this.state.status === 'connected';
   }
 
-  async sendText(to, body) {
+  /** Monta a referência mínima de uma mensagem para citar (o WhatsApp mostra a prévia pelo texto incluído). */
+  quotedStub(jid, q) {
+    return { key: { remoteJid: jid, fromMe: Boolean(q.fromMe), id: q.wa_message_id }, message: { conversation: String(q.body || '') } };
+  }
+
+  async sendText(to, body, opts = {}) {
     if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado. Escaneie o QR code em Configurações.`);
-    const sent = await this.sock.sendMessage(toJid(to), { text: body });
+    const jid = toJid(to);
+    const options = opts.quoted?.wa_message_id ? { quoted: this.quotedStub(jid, opts.quoted) } : undefined;
+    const sent = await this.sock.sendMessage(jid, { text: body }, options);
     return sent?.key?.id || null;
+  }
+
+  /** Reage a uma mensagem (emoji vazio remove a reação). */
+  async sendReaction(to, waMessageId, fromMe, emoji) {
+    if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado.`);
+    const jid = toJid(to);
+    await this.sock.sendMessage(jid, { react: { text: emoji || '', key: { remoteJid: jid, fromMe: Boolean(fromMe), id: waMessageId } } });
   }
 
   /** Envia mídia. file: { buffer, mimetype, filename, caption, kind: image|video|audio|document } */
@@ -383,10 +400,11 @@ class Session {
     switch (file.kind) {
       case 'image': content = { image: file.buffer, caption: file.caption || undefined, mimetype: file.mimetype }; break;
       case 'video': content = { video: file.buffer, caption: file.caption || undefined, mimetype: file.mimetype }; break;
-      case 'audio': content = { audio: file.buffer, mimetype: file.mimetype, ptt: false }; break;
+      case 'audio': content = { audio: file.buffer, mimetype: file.mimetype, ptt: Boolean(file.ptt), seconds: file.seconds || undefined }; break;
       default: content = { document: file.buffer, mimetype: file.mimetype, fileName: file.filename || 'arquivo', caption: file.caption || undefined };
     }
-    const sent = await this.sock.sendMessage(jid, content);
+    const options = file.quoted?.wa_message_id ? { quoted: this.quotedStub(jid, file.quoted) } : undefined;
+    const sent = await this.sock.sendMessage(jid, content, options);
     return sent?.key?.id || null;
   }
 
@@ -511,8 +529,12 @@ function isConfigured() {
   return pickAccount() !== null;
 }
 
-function sendText(accountId, to, body) {
-  return getSession(accountId).sendText(to, body);
+function sendText(accountId, to, body, opts) {
+  return getSession(accountId).sendText(to, body, opts);
+}
+
+function sendReaction(accountId, to, waMessageId, fromMe, emoji) {
+  return getSession(accountId).sendReaction(to, waMessageId, fromMe, emoji);
 }
 
 function sendMedia(accountId, to, file) {
@@ -545,5 +567,5 @@ module.exports = {
   refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
-  isConfigured, sendText, sendMedia, setBlocked, markAsRead, fetchMedia, verifySignature,
+  isConfigured, sendText, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature,
 };

@@ -45,7 +45,10 @@ function extractContent(msg) {
 async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
   const waId = msg.from;
   if (!waId) return null;
+  // Reação não é mensagem: aplica na mensagem alvo e sai
+  if (msg.type === 'reaction') return handleReaction(msg.reaction?.message_id, 'contact', msg.reaction?.emoji || null);
   const content = extractContent(msg);
+  const quotedMessageId = await resolveQuoted(msg);
   const sentAt = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date();
   const profileName = contactInfo.profile?.name || null;
 
@@ -78,11 +81,11 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
     }
 
     const { rows: msgRows } = await client.query(
-      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at)
-       VALUES ($1, 'in', $2, $3, $4, $5, $6, 'received', $7)
+      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at, quoted_message_id)
+       VALUES ($1, 'in', $2, $3, $4, $5, $6, 'received', $7, $8)
        ON CONFLICT (wa_message_id) DO NOTHING
        RETURNING *`,
-      [conversationId, msg.id || null, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt]
+      [conversationId, msg.id || null, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt, quotedMessageId]
     );
     if (!msgRows.length) return null; // duplicado (Meta reenvia webhooks)
 
@@ -97,7 +100,7 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
     );
 
     const conversation = await conversations.getById(conversationId, client);
-    return { message: msgRows[0], conversation, isNew };
+    return { message: await withQuoted(msgRows[0], client), conversation, isNew };
   });
 
   if (result) {
@@ -113,8 +116,10 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
  * Ignorada se já existe (eco de um envio feito pela inbox).
  */
 async function handleOutboundEcho(waId, msg, accountId = null) {
+  if (msg.type === 'reaction') return handleReaction(msg.reaction?.message_id, 'me', msg.reaction?.emoji || null);
   const content = extractContent(msg);
   const sentAt = msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date();
+  const quotedMessageId = await resolveQuoted(msg);
 
   const result = await db.withTransaction(async (client) => {
     const exists = await client.query('SELECT 1 FROM messages WHERE wa_message_id = $1', [msg.id]);
@@ -139,10 +144,10 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
       conversationId = ins.rows[0].id;
     }
     const { rows: msgRows } = await client.query(
-      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at)
-       VALUES ($1, 'out', $2, $3, $4, $5, $6, 'sent', $7)
+      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at, quoted_message_id)
+       VALUES ($1, 'out', $2, $3, $4, $5, $6, 'sent', $7, $8)
        ON CONFLICT (wa_message_id) DO NOTHING RETURNING *`,
-      [conversationId, msg.id, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt]
+      [conversationId, msg.id, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt, quotedMessageId]
     );
     if (!msgRows.length) return null;
     await client.query(
@@ -155,7 +160,7 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
       [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]
     );
     const conversation = await conversations.getById(conversationId, client);
-    return { message: { ...msgRows[0], sender_name: 'Celular' }, conversation };
+    return { message: { ...(await withQuoted(msgRows[0], client)), sender_name: 'Celular' }, conversation };
   });
 
   if (result) {
@@ -163,6 +168,38 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
     realtime.broadcast('conversation:updated', result.conversation);
   }
   return result;
+}
+
+/** Descobre a mensagem citada (context.id = id no WhatsApp) e devolve o id interno. */
+async function resolveQuoted(msg) {
+  const waId = msg.context?.id;
+  if (!waId) return null;
+  const { rows } = await db.query('SELECT id FROM messages WHERE wa_message_id = $1', [waId]);
+  return rows[0]?.id || null;
+}
+
+/** Anexa os dados da mensagem citada (para a tela renderizar a citação). */
+async function withQuoted(message, client = db) {
+  if (!message?.quoted_message_id) return message;
+  const { rows } = await client.query(
+    `SELECT m.id, m.body, m.type, m.direction, m.media_id, u.name AS sender_name
+       FROM messages m LEFT JOIN users u ON u.id = m.sender_user_id WHERE m.id = $1`,
+    [message.quoted_message_id]
+  );
+  return { ...message, quoted: rows[0] || null };
+}
+
+/** Reação em uma mensagem: who = 'contact' (cliente) ou 'me' (nosso número); emoji null remove. */
+async function handleReaction(waMessageId, who, emoji) {
+  if (!waMessageId) return null;
+  const { rows } = await db.query(
+    `UPDATE messages
+        SET reactions = CASE WHEN $3::text IS NULL OR $3 = '' THEN reactions - $2::text ELSE reactions || jsonb_build_object($2::text, $3::text) END
+      WHERE wa_message_id = $1 RETURNING id, conversation_id, reactions`,
+    [waMessageId, who, emoji]
+  );
+  if (rows.length) realtime.broadcast('message:updated', rows[0]);
+  return rows[0] || null;
 }
 
 /** Aplica uma edição feita no WhatsApp ao texto da mensagem. */
@@ -241,4 +278,4 @@ async function processWebhook(payload) {
   }
 }
 
-module.exports = { processWebhook, handleInboundMessage, handleOutboundEcho, handleEdit, handleRevoke, handleStatus, extractContent };
+module.exports = { processWebhook, handleInboundMessage, handleOutboundEcho, handleReaction, handleEdit, handleRevoke, handleStatus, extractContent, withQuoted };

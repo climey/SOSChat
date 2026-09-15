@@ -7,6 +7,7 @@ const conversations = require('../services/conversations');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const outbound = require('../services/outbound');
 const schedules = require('../services/schedules');
+const audio = require('../services/audio');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -68,10 +69,15 @@ router.get('/:id/messages', async (req, res, next) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
     const { rows } = await db.query(
-      `SELECT m.*, u.name AS sender_name, mf.size AS media_size
+      `SELECT m.*, u.name AS sender_name, mf.size AS media_size,
+              CASE WHEN q.id IS NULL THEN NULL ELSE json_build_object(
+                'id', q.id, 'body', q.body, 'type', q.type, 'direction', q.direction, 'media_id', q.media_id, 'sender_name', qu.name
+              ) END AS quoted
          FROM messages m
          LEFT JOIN users u ON u.id = m.sender_user_id
          LEFT JOIN media_files mf ON mf.id = m.media_id
+         LEFT JOIN messages q ON q.id = m.quoted_message_id
+         LEFT JOIN users qu ON qu.id = q.sender_user_id
         WHERE m.conversation_id = $1
         ORDER BY m.created_at ASC, m.id ASC
         LIMIT 500`,
@@ -88,7 +94,7 @@ router.post('/:id/messages', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
-    const result = await outbound.sendText(id, req.user, req.body?.body);
+    const result = await outbound.sendText(id, req.user, req.body?.body, { quotedId: parseId(req.body?.quoted_message_id) });
     res.status(result.message.status === 'failed' ? 502 : 201).json(result);
   } catch (err) {
     if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
@@ -154,6 +160,84 @@ router.post('/:id/media', (req, res, next) => {
     schedules.cancelFor(id, 'agent').catch(() => {});
     res.status(message.status === 'failed' ? 502 : 201).json({ message, conversation: updated });
   } catch (err) {
+    next(err);
+  }
+});
+
+// Mensagem de voz gravada no navegador: converte para OGG/Opus e envia como áudio de voz
+router.post('/:id/audio', (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (!err) return next();
+    res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Áudio acima de 25 MB' : err.message });
+  });
+}, async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    const file = req.file;
+    if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    if (!file || !file.buffer?.length) return res.status(400).json({ error: 'Nenhum áudio enviado' });
+    if (!audio.isAvailable()) return res.status(501).json({ error: 'Conversor de áudio indisponível no servidor' });
+
+    const conv = await conversations.getById(id);
+    if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const accountId = await resolveAccount(conv);
+    if (whatsapp.multiAccount && !accountId) return res.status(502).json({ error: 'Nenhum número de WhatsApp conectado.' });
+
+    const ext = (file.mimetype || '').includes('mp4') || (file.mimetype || '').includes('aac') ? 'mp4' : (file.mimetype || '').includes('ogg') ? 'ogg' : 'webm';
+    let voice;
+    try {
+      voice = await audio.toVoiceNote(file.buffer, ext);
+    } catch (err) {
+      return res.status(500).json({ error: `Falha ao converter o áudio: ${err.message.slice(0, 200)}` });
+    }
+    const quoted = await outbound.loadQuoted(id, parseId(req.body?.quoted_message_id));
+
+    const { rows } = await db.query(
+      `INSERT INTO messages (conversation_id, direction, type, body, media_mime, status, sender_user_id, quoted_message_id)
+       VALUES ($1, 'out', 'audio', '[Áudio]', $2, 'pending', $3, $4) RETURNING *`,
+      [id, voice.mimetype, req.user.id, quoted?.id || null]
+    );
+    let message = rows[0];
+    const mediaId = `out-${message.id}`;
+    await db.query(`INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`, [mediaId, voice.mimetype, voice.buffer.length, voice.buffer]);
+    try {
+      const waId = await whatsapp.sendMedia(accountId, conv.wa_id, { buffer: voice.buffer, mimetype: voice.mimetype, kind: 'audio', ptt: true, seconds: voice.seconds, quoted });
+      message = (await db.query(`UPDATE messages SET wa_message_id = $2, media_id = $3, status = 'sent' WHERE id = $1 RETURNING *`, [message.id, waId, mediaId])).rows[0];
+    } catch (err) {
+      message = (await db.query(`UPDATE messages SET media_id = $3, status = 'failed', error = $2 WHERE id = $1 RETURNING *`, [message.id, String(err.message).slice(0, 500), mediaId])).rows[0];
+    }
+    const updated = await touchConversationAfterSend(id, '[Áudio]', req.user.id);
+    message.sender_name = req.user.name;
+    message.media_size = voice.buffer.length;
+    realtime.broadcast('message:new', { message, conversation: updated });
+    realtime.broadcast('conversation:updated', updated);
+    schedules.cancelFor(id, 'agent').catch(() => {});
+    res.status(message.status === 'failed' ? 502 : 201).json({ message, conversation: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Reação do atendente a uma mensagem ({ emoji }; vazio remove)
+router.post('/:id/messages/:mid/react', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id), mid = parseId(req.params.mid);
+    if (!id || !mid) return res.status(404).json({ error: 'Mensagem não encontrada' });
+    res.json({ message: await outbound.react(id, req.user, mid, req.body?.emoji) });
+  } catch (err) {
+    if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+// Transferir para outro atendente ({ user_id, note })
+router.post('/:id/transfer', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    res.json(await outbound.transfer(id, req.user, parseId(req.body?.user_id), req.body?.note));
+  } catch (err) {
+    if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });

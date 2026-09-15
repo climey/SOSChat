@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
+const realtime = require('../realtime');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
@@ -8,15 +9,27 @@ router.use(requireAuth);
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
 
-// Lista de atendentes (todos podem ver, para atribuir conversas)
+// Lista de atendentes (todos podem ver, para atribuir conversas), com presença
 router.get('/', async (req, res, next) => {
   try {
     const includeInactive = req.user.role === 'admin' && req.query.all === '1';
     const { rows } = await db.query(
-      `SELECT id, name, email, role, active, created_at FROM users
+      `SELECT id, name, email, role, active, availability, created_at FROM users
         ${includeInactive ? '' : 'WHERE active = TRUE'} ORDER BY name`
     );
-    res.json({ users: rows });
+    res.json({ users: rows.map((u) => ({ ...u, online: realtime.isOnline(u.id) })) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Status manual do próprio atendente: available | away
+router.patch('/me/availability', async (req, res, next) => {
+  try {
+    const availability = req.body?.availability === 'away' ? 'away' : 'available';
+    await db.query('UPDATE users SET availability = $2 WHERE id = $1', [req.user.id, availability]);
+    realtime.broadcast('presence', { user_id: req.user.id, online: realtime.isOnline(req.user.id), availability });
+    res.json({ availability });
   } catch (err) {
     next(err);
   }

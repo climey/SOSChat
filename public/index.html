@@ -102,6 +102,9 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><circle cx="12" cy="16" r="2.5"/><line x1="12" y1="14.5" x2="12" y2="16"/><line x1="12" y1="16" x2="13.2" y2="17"/></svg>
               <span class="rail-badge" id="schedule-badge" hidden>0</span>
             </button>
+            <button class="icon-btn" id="btn-transfer" title="Transferir para outro atendente">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            </button>
             <button class="icon-btn" id="btn-assign-me" title="Assumir esta conversa">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>
             </button>
@@ -135,12 +138,27 @@
             </div>
           </div>
           <form id="compose">
+            <div class="reply-preview" id="reply-preview" hidden></div>
             <div class="attach-preview" id="attach-preview" hidden></div>
+            <div class="qr-popup" id="qr-popup" hidden></div>
+            <div class="emoji-picker" id="emoji-picker" hidden></div>
             <textarea id="compose-text" rows="1" placeholder="Digite sua mensagem ou arraste um arquivo…"></textarea>
+            <div class="rec-bar" id="rec-bar" hidden>
+              <span class="rec-dot"></span><span id="rec-time">0:00</span><span class="muted small">Gravando… solte quando terminar</span>
+              <span class="spacer"></span>
+              <button type="button" class="btn btn-sm btn-ghost" id="rec-cancel">Cancelar</button>
+              <button type="button" class="btn btn-sm btn-primary" id="rec-send">Enviar áudio</button>
+            </div>
             <div class="composer-bottom">
               <div class="left">
                 <button type="button" class="icon-btn" id="btn-attach" title="Anexar arquivo">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button type="button" class="icon-btn" id="btn-emoji" title="Emoji">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                </button>
+                <button type="button" class="icon-btn" id="btn-quick" title="Respostas rápidas (ou digite / no início)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                 </button>
                 <div class="attach-menu" id="attach-menu" hidden>
                   <button type="button" data-pick="doc"><span class="ic doc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>Documento</button>
@@ -152,7 +170,12 @@
                 <input type="file" id="file-audio" accept="audio/*" hidden>
                 <span class="hint" id="compose-hint">Enter envia · Shift+Enter quebra linha</span>
               </div>
-              <button class="btn btn-primary" type="submit" id="compose-send">Enviar</button>
+              <div class="right">
+                <button type="button" class="icon-btn mic" id="btn-mic" title="Gravar mensagem de voz">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                </button>
+                <button class="btn btn-primary" type="submit" id="compose-send">Enviar</button>
+              </div>
             </div>
           </form>
         </div>
@@ -168,6 +191,11 @@
       <div class="field" style="margin-top:10px">
         <input class="input" id="d-name-input" placeholder="Nome do contato">
       </div>
+      <div class="field"><input class="input" id="d-cpf" placeholder="CPF / CNPJ" inputmode="numeric"></div>
+      <div class="field"><input class="input" id="d-email" placeholder="E-mail" type="email"></div>
+      <div class="field"><textarea class="textarea" id="d-notes" rows="3" placeholder="Observações sobre o cliente (só a equipe vê)"></textarea></div>
+      <h4>Conversas anteriores</h4>
+      <div id="d-history" class="d-history"></div>
       <h4>Status</h4>
       <div id="d-status"></div>
       <div class="small muted" id="d-times" style="margin-top:6px"></div>
@@ -177,6 +205,23 @@
       <div class="tag-picker" id="d-tags"></div>
     </aside>
   </main>
+</div>
+
+<div class="modal-bg" id="transfer-modal" hidden>
+  <form class="modal" id="transfer-form">
+    <h3>Transferir conversa</h3>
+    <div class="field"><label class="label">Para quem</label><select class="select" id="transfer-user" required></select></div>
+    <div class="field"><label class="label">Motivo (vira nota interna na conversa)</label><textarea class="textarea" id="transfer-note" rows="3" placeholder="Ex.: cliente quer falar sobre financeiro"></textarea></div>
+    <div class="actions">
+      <button type="button" class="btn" id="transfer-cancel">Cancelar</button>
+      <button type="submit" class="btn btn-primary">Transferir</button>
+    </div>
+  </form>
+</div>
+
+<div class="conv-menu" id="presence-menu" hidden>
+  <button type="button" data-availability="available"><span class="pdot online"></span>Disponível</button>
+  <button type="button" data-availability="away"><span class="pdot away"></span>Ausente</button>
 </div>
 
 <div class="conv-menu" id="conv-menu" hidden></div>

@@ -72,6 +72,37 @@
         </div>
       </div>
 
+      <div class="settings-grid" style="margin-top:20px">
+        <div class="card">
+          <h3>Respostas rápidas</h3>
+          <p class="small muted">Na conversa, digite <code>/</code> e o atalho, ou use o botão ⚡. Variáveis: <code>{nome}</code>, <code>{nome_completo}</code>, <code>{atendente}</code>, <code>{telefone}</code>.</p>
+          <form id="qr-form" data-admin-only>
+            <div class="inline-form" style="margin-bottom:8px">
+              <input class="input" id="qr-shortcut" placeholder="atalho (ex.: prazo)" maxlength="30" required style="max-width:160px">
+              <input class="input" id="qr-title" placeholder="Título" maxlength="80" required>
+            </div>
+            <textarea class="textarea" id="qr-body" rows="3" placeholder="Texto da resposta…" required></textarea>
+            <div class="row-actions" style="margin-top:8px">
+              <button type="button" class="btn" id="qr-cancel" hidden>Cancelar edição</button>
+              <button class="btn btn-primary" type="submit" id="qr-submit">Adicionar</button>
+            </div>
+          </form>
+          <table class="table" id="qr-table" style="margin-top:12px"></table>
+        </div>
+
+        <div class="card">
+          <h3>Alerta de conversa parada</h3>
+          <p class="small muted">Tempo que o cliente fica sem resposta até a conversa ser destacada na lista.</p>
+          <form class="inline-form" id="sla-form">
+            <label class="label" style="margin:0">Amarelo após</label>
+            <input class="input" type="number" id="sla-warn" min="1" max="1440" style="max-width:90px" required> <span class="muted small">min</span>
+            <label class="label" style="margin:0 0 0 12px">Vermelho após</label>
+            <input class="input" type="number" id="sla-alert" min="1" max="1440" style="max-width:90px" required> <span class="muted small">min</span>
+            <button class="btn btn-primary" type="submit" data-admin-only>Salvar</button>
+          </form>
+        </div>
+      </div>
+
       <div class="card" style="margin-top:20px" id="wa-card">
         <h3>Números de WhatsApp</h3>
         <p class="small muted" id="wa-help"></p>

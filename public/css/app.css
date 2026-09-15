@@ -438,3 +438,78 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 /* ---------- Aviso de nova versão ---------- */
 .update-banner { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 16px; border-radius: 999px; background: var(--primary); color: #fff; font-weight: 600; font-size: 13px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }
 .update-banner button { border: none; background: #fff; color: var(--primary); font-weight: 700; padding: 6px 12px; border-radius: 999px; }
+
+/* ---------- Presença ---------- */
+.pdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.pdot.online { background: var(--green); }
+.pdot.away { background: var(--amber); }
+.conv-item .agent { position: relative; overflow: visible; }
+.conv-item .agent .pdot, .rail-user .pdot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border: 2px solid var(--panel); }
+.rail-user { position: relative; cursor: pointer; }
+.rail-user .pdot { width: 11px; height: 11px; }
+.chat-tags .typing { color: var(--green); font-size: 12px; font-style: italic; }
+
+/* ---------- Alerta de conversa parada ---------- */
+.conv-item .wait { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--surface-3); color: var(--muted); white-space: nowrap; }
+.conv-item .wait.warn { background: rgba(245, 159, 0, 0.18); color: #ffd43b; }
+.conv-item .wait.alert { background: rgba(224, 49, 49, 0.2); color: #ff8787; animation: pulse 1.6s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* ---------- Citação, reações e ações do balão ---------- */
+.msg .quote { display: block; border-left: 3px solid var(--primary); background: rgba(0,0,0,0.22); border-radius: 6px; padding: 5px 8px; margin: 0 0 6px; font-size: 12px; cursor: pointer; max-width: 100%; }
+.msg .quote .qname { color: #ff8787; font-weight: 600; display: block; margin-bottom: 1px; }
+.msg .quote .qbody { color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.msg-row { position: relative; }
+.msg-actions { position: absolute; top: -12px; display: none; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; z-index: 3; }
+.msg-row.in .msg-actions { left: 8px; }
+.msg-row.out .msg-actions, .msg-row.note .msg-actions { right: 44px; }
+.msg-row:hover .msg-actions { display: flex; }
+.msg-actions button { width: 26px; height: 26px; border: none; background: transparent; color: var(--muted); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.msg-actions button:hover { background: var(--surface-3); color: var(--text); }
+.msg-actions button svg { width: 14px; height: 14px; }
+.reactions { display: flex; gap: 4px; margin-top: 4px; }
+.reaction { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; cursor: default; }
+.reaction.mine { border-color: var(--primary); cursor: pointer; }
+.msg-row.flash .msg { box-shadow: 0 0 0 2px var(--primary); }
+.reply-preview { display: flex; align-items: center; gap: 10px; padding: 6px 10px; margin-bottom: 6px; border-left: 3px solid var(--primary); background: var(--surface); border-radius: 8px; font-size: 12px; }
+.reply-preview .info { flex: 1; min-width: 0; }
+.reply-preview .qname { color: #ff8787; font-weight: 600; }
+.reply-preview .qbody { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Respostas rápidas e emojis ---------- */
+.composer-bottom .right { display: flex; align-items: center; gap: 6px; }
+.qr-popup, .emoji-picker { position: absolute; bottom: 100%; left: 0; margin-bottom: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,0.5); z-index: 30; }
+.composer { position: relative; }
+.qr-popup { width: min(520px, 100%); max-height: 320px; overflow-y: auto; padding: 6px; }
+.qr-popup .qr-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+.qr-popup .qr-item:hover, .qr-popup .qr-item.active { background: var(--surface-3); }
+.qr-popup .qr-head { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.qr-popup .qr-sc { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #ff8787; background: rgba(224,49,49,0.12); padding: 1px 6px; border-radius: 4px; }
+.qr-popup .qr-body { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qr-popup .qr-empty { padding: 10px 12px; color: var(--muted); font-size: 13px; }
+.emoji-picker { width: 340px; padding: 8px; }
+.emoji-picker .ep-tabs { display: flex; gap: 2px; margin-bottom: 6px; }
+.emoji-picker .ep-tabs button { flex: 1; border: none; background: transparent; padding: 6px 0; border-radius: 6px; font-size: 16px; }
+.emoji-picker .ep-tabs button.active { background: var(--surface-3); }
+.emoji-picker .ep-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; max-height: 220px; overflow-y: auto; }
+.emoji-picker .ep-grid button { border: none; background: transparent; font-size: 20px; padding: 4px 0; border-radius: 6px; line-height: 1.3; }
+.emoji-picker .ep-grid button:hover { background: var(--surface-3); }
+.emoji-picker.for-reaction { position: fixed; bottom: auto; left: auto; margin: 0; }
+
+/* ---------- Gravação de áudio ---------- */
+.rec-bar { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
+.rec-bar .spacer { flex: 1; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--primary); animation: pulse 1s infinite; }
+#rec-time { font-variant-numeric: tabular-nums; font-weight: 700; }
+.icon-btn.mic.recording { background: var(--primary); color: #fff; }
+
+/* ---------- Ficha do contato ---------- */
+.d-history { display: flex; flex-direction: column; gap: 6px; }
+.d-history .h-item { padding: 8px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; font-size: 12px; }
+.d-history .h-item:hover { background: var(--surface-2); }
+.d-history .h-item.current { border-color: var(--primary); }
+.d-history .h-top { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.d-history .h-prev { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.details .field { margin-bottom: 8px; }
+.reactions { clear: both; }
+.msg-row .agent-avatar { position: relative; overflow: visible; }
