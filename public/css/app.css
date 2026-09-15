@@ -668,3 +668,26 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .msg-row.sticker .foot { float: none; display: flex; justify-content: flex-end; margin: 2px 2px 0; }
 .msg-row.in.sticker .foot { justify-content: flex-start; }
 .msg-row.sticker .msg-actions { top: -8px; }
+
+/* ---------- Transferir conversa ---------- */
+.modal.transfer { max-width: 500px; }
+.transfer-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.transfer-tabs button { border: none; background: transparent; color: var(--text-2); padding: 10px 14px; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 8px; }
+.transfer-tabs button svg { width: 16px; height: 16px; }
+.transfer-tabs button.active { color: #ff8787; border-bottom-color: var(--primary); }
+.transfer-list { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.t-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid transparent; cursor: pointer; }
+.t-item:hover { background: var(--surface); }
+.t-item.sel { background: var(--surface-2); border-color: var(--primary); }
+.t-item .t-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--surface-3); color: var(--text-2); position: relative; flex-shrink: 0; font-weight: 700; }
+.t-item .t-icon svg { width: 18px; height: 18px; }
+.t-item .t-icon img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+.t-item .t-icon .pdot { position: absolute; right: -3px; bottom: -3px; border: 2px solid var(--panel); }
+.t-item .t-main { flex: 1; min-width: 0; }
+.t-item .t-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t-item .t-sub { font-size: 12px; color: var(--muted); }
+.t-item .t-meta { font-size: 12px; color: var(--green); white-space: nowrap; }
+.t-item .t-meta.off { color: var(--muted); }
+.t-item .t-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); flex-shrink: 0; }
+.t-item.sel .t-radio { border-color: var(--primary); background: radial-gradient(circle, var(--primary) 45%, transparent 50%); }
+.t-item.current { opacity: 0.5; cursor: default; }

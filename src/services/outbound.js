@@ -115,16 +115,44 @@ async function react(conversationId, user, messageId, emoji) {
   return upd.rows[0];
 }
 
-/** Transfere a conversa para outro atendente, com nota interna do motivo e aviso para quem recebe. */
-async function transfer(conversationId, user, toUserId, note) {
+/**
+ * Transfere a conversa. Destino: { user_id } (atendente), { sector_id } (setor: tira o responsável e vai
+ * para a fila do setor) ou { account_id } (número: as próximas respostas saem por ele).
+ * Registra nota interna com o motivo e avisa o atendente que recebeu.
+ */
+async function transfer(conversationId, user, target, note) {
   const conv = await conversations.getById(conversationId);
   if (!conv) throw new SendError(404, 'Conversa não encontrada');
-  const { rows } = await db.query('SELECT id, name FROM users WHERE id = $1 AND active = TRUE', [toUserId]);
-  const target = rows[0];
-  if (!target) throw new SendError(400, 'Atendente inválido');
-  if (target.id === user.id) throw new SendError(400, 'A conversa já é sua');
-  await db.query('UPDATE conversations SET assigned_user_id = $2, attended = TRUE WHERE id = $1', [conversationId, target.id]);
-  const text = `Transferida de ${conv.assigned_user_name || user.name} para ${target.name}${note ? `: ${String(note).trim().slice(0, 500)}` : ''}`;
+  const reason = note ? `: ${String(note).trim().slice(0, 500)}` : '';
+  const from = conv.assigned_user_name || user.name;
+  let text;
+  let notifyUserId = null;
+
+  if (target.user_id) {
+    const { rows } = await db.query('SELECT id, name FROM users WHERE id = $1 AND active = TRUE', [target.user_id]);
+    const u = rows[0];
+    if (!u) throw new SendError(400, 'Atendente inválido');
+    if (u.id === conv.assigned_user_id) throw new SendError(400, 'A conversa já está com esse atendente');
+    await db.query('UPDATE conversations SET assigned_user_id = $2, attended = TRUE WHERE id = $1', [conversationId, u.id]);
+    text = `Transferida de ${from} para ${u.name}${reason}`;
+    notifyUserId = u.id;
+  } else if (target.sector_id) {
+    const { rows } = await db.query('SELECT id, name FROM sectors WHERE id = $1', [target.sector_id]);
+    const s = rows[0];
+    if (!s) throw new SendError(400, 'Setor inválido');
+    await db.query('UPDATE conversations SET sector_id = $2, assigned_user_id = NULL WHERE id = $1', [conversationId, s.id]);
+    text = `Transferida para o setor ${s.name} por ${user.name}${reason}`;
+  } else if (target.account_id) {
+    const { rows } = await db.query('SELECT id, name FROM wa_accounts WHERE id = $1 AND active = TRUE', [target.account_id]);
+    const a = rows[0];
+    if (!a) throw new SendError(400, 'Número inválido');
+    if (a.id === conv.account_id) throw new SendError(400, 'A conversa já está nesse número');
+    await db.query('UPDATE conversations SET account_id = $2 WHERE id = $1', [conversationId, a.id]);
+    text = `Transferida para o número ${a.name} por ${user.name}${reason}. As próximas respostas saem por esse número.`;
+  } else {
+    throw new SendError(400, 'Escolha um atendente, setor ou número');
+  }
+
   const noteRow = await db.query(
     `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id)
      VALUES ($1, 'out', 'note', $2, 'sent', $3) RETURNING *`,
@@ -133,7 +161,7 @@ async function transfer(conversationId, user, toUserId, note) {
   const updated = await conversations.getById(conversationId);
   realtime.broadcast('message:new', { message: { ...noteRow.rows[0], sender_name: user.name }, conversation: updated });
   realtime.broadcast('conversation:updated', updated);
-  realtime.toUser(target.id, 'conversation:transferred', { conversation: updated, from: user.name, note: note || '' });
+  if (notifyUserId) realtime.toUser(notifyUserId, 'conversation:transferred', { conversation: updated, from: user.name, note: note || '' });
   return { conversation: updated };
 }
 

@@ -255,7 +255,8 @@ router.post('/:id/transfer', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
-    res.json(await outbound.transfer(id, req.user, parseId(req.body?.user_id), req.body?.note));
+    const b = req.body || {};
+    res.json(await outbound.transfer(id, req.user, { user_id: parseId(b.user_id), sector_id: parseId(b.sector_id), account_id: parseId(b.account_id) }, b.note));
   } catch (err) {
     if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
     next(err);

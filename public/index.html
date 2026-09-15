@@ -211,13 +211,25 @@
 </div>
 
 <div class="modal-bg" id="transfer-modal" hidden>
-  <form class="modal" id="transfer-form">
-    <h3>Transferir conversa</h3>
-    <div class="field"><label class="label">Para quem</label><select class="select" id="transfer-user" required></select></div>
-    <div class="field"><label class="label">Motivo (vira nota interna na conversa)</label><textarea class="textarea" id="transfer-note" rows="3" placeholder="Ex.: cliente quer falar sobre financeiro"></textarea></div>
+  <form class="modal wide transfer" id="transfer-form">
+    <div class="drawer-head" style="padding:0 0 10px">
+      <button type="button" class="icon-btn" id="transfer-cancel" title="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <h3 style="margin:0">Transferir conversa</h3>
+    </div>
+    <div class="transfer-tabs" id="transfer-tabs">
+      <button type="button" class="active" data-ttab="sector"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Setor</button>
+      <button type="button" data-ttab="user"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Atendente</button>
+      <button type="button" data-ttab="account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>Número</button>
+    </div>
+    <div class="search-wrap" style="padding:10px 0 6px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input class="input" id="transfer-search" type="search" placeholder="Pesquisar setor" autocomplete="off" style="padding-left:36px">
+    </div>
+    <div class="transfer-list" id="transfer-list"></div>
+    <div class="small muted" id="transfer-hint" style="margin-top:8px"></div>
+    <div class="field" style="margin-top:12px"><textarea class="textarea" id="transfer-note" rows="2" placeholder="Motivo (opcional, vira nota interna na conversa)"></textarea></div>
     <div class="actions">
-      <button type="button" class="btn" id="transfer-cancel">Cancelar</button>
-      <button type="submit" class="btn btn-primary">Transferir</button>
+      <button type="submit" class="btn btn-primary" id="transfer-submit" disabled>Transferir</button>
     </div>
   </form>
 </div>

@@ -818,33 +818,101 @@
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#presence-menu') && !e.target.closest('#me-avatar')) $('presence-menu').hidden = true; });
 
-  // ---------- Transferir ----------
-  function userOption(u) {
-    const p = state.presence.get(u.id);
-    const st = p?.online ? (p.availability === 'away' ? '● ausente' : '● online') : '○ offline';
-    return `<option value="${u.id}">${esc(u.name)} · ${st}</option>`;
+  // ---------- Transferir (setor, atendente ou número) ----------
+  const tr = { tab: 'sector', sel: null, sectorsOpen: new Map() };
+  const T_ICON = {
+    sector: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
+    account: WA_ICON,
+  };
+  const T_PLACEHOLDER = { sector: 'Pesquisar setor', user: 'Pesquisar atendente', account: 'Pesquisar número' };
+  const T_HINT = {
+    sector: 'A conversa vai para a fila do setor escolhido, sem responsável, até alguém do setor assumir.',
+    user: 'O atendente recebe um aviso e a conversa passa a ser dele.',
+    account: 'As próximas respostas saem pelo número escolhido. O cliente vai receber a mensagem de outro número.',
+  };
+  function transferItems() {
+    const c = current();
+    const q = normalize($('transfer-search').value.trim());
+    const match = (s) => !q || normalize(s).includes(q);
+    if (tr.tab === 'sector') {
+      return state.sectors.filter((s) => match(s.name)).map((s) => ({
+        id: s.id, name: s.name, icon: `<span class="t-icon" style="color:${esc(s.color)}">${T_ICON.sector}</span>`,
+        sub: s.is_default ? 'Setor padrão' : '', meta: s.open_count ? `${s.open_count} abertas` : 'sem abertas', metaCls: s.open_count ? '' : 'off', current: c?.sector_id === s.id,
+      }));
+    }
+    if (tr.tab === 'user') {
+      return state.users.filter((u) => u.active !== false && u.id !== state.me.id && match(u.name))
+        .sort((a, b) => (Number(state.presence.get(b.id)?.online) - Number(state.presence.get(a.id)?.online)) || a.name.localeCompare(b.name))
+        .map((u) => {
+          const p = state.presence.get(u.id);
+          const on = p?.online;
+          return { id: u.id, name: u.name, icon: `<span class="t-icon">${esc(initials(u.name))}${userImg(u.avatar_media_id)}${pdot(u.id)}</span>`,
+            sub: u.role === 'admin' ? 'Admin' : 'Atendente', meta: on ? (p.availability === 'away' ? 'ausente' : 'online') : 'offline', metaCls: on ? '' : 'off', current: c?.assigned_user_id === u.id };
+        });
+    }
+    return [...state.accounts.values()].filter((a) => match(a.name) || match(a.phone || '')).map((a) => ({
+      id: a.id, name: a.name, icon: `<span class="t-icon" style="color:var(--wa)">${T_ICON.account}</span>`,
+      sub: a.phone ? formatPhone(a.phone) : '', meta: a.status === 'connected' ? 'conectado' : 'desconectado', metaCls: a.status === 'connected' ? '' : 'off', current: c?.account_id === a.id,
+    }));
   }
-  $('btn-transfer').addEventListener('click', () => {
+  function renderTransfer() {
+    const items = transferItems();
+    $('transfer-search').placeholder = T_PLACEHOLDER[tr.tab];
+    $('transfer-hint').textContent = T_HINT[tr.tab];
+    $('transfer-list').innerHTML = items.length ? items.map((it) => `
+      <div class="t-item ${tr.sel === it.id ? 'sel' : ''} ${it.current ? 'current' : ''}" data-id="${it.id}" title="${it.current ? 'A conversa já está aqui' : ''}">
+        ${it.icon}
+        <div class="t-main"><div class="t-name">${esc(it.name)}${it.current ? ' <span class="muted small">(atual)</span>' : ''}</div>${it.sub ? `<div class="t-sub">${esc(it.sub)}</div>` : ''}</div>
+        <span class="t-meta ${it.metaCls}">${esc(it.meta)}</span>
+        <span class="t-radio"></span>
+      </div>`).join('') : '<div class="empty" style="height:auto;padding:24px">Nada encontrado</div>';
+    $('transfer-submit').disabled = !tr.sel;
+    $('transfer-submit').textContent = tr.sel ? `Transferir para ${esc(items.find((i) => i.id === tr.sel)?.name || '')}` : 'Transferir';
+  }
+  function openTransfer() {
     const c = current();
     if (!c) return;
-    const others = state.users.filter((u) => u.id !== state.me.id && u.active !== false);
-    const sorted = [...others].sort((a, b) => (Number(state.presence.get(b.id)?.online) - Number(state.presence.get(a.id)?.online)) || a.name.localeCompare(b.name));
-    $('transfer-user').innerHTML = sorted.map(userOption).join('') || '<option value="">Nenhum outro atendente</option>';
+    tr.tab = 'sector'; tr.sel = null;
+    document.querySelectorAll('#transfer-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.ttab === 'sector'));
+    $('transfer-search').value = '';
     $('transfer-note').value = '';
+    if (!state.multiAccount || state.accounts.size < 2) document.querySelector('#transfer-tabs [data-ttab="account"]').hidden = true;
+    renderTransfer();
     $('transfer-modal').hidden = false;
-    $('transfer-user').focus();
-  });
+    $('transfer-search').focus();
+  }
+  $('btn-transfer').addEventListener('click', openTransfer);
   $('transfer-cancel').addEventListener('click', () => { $('transfer-modal').hidden = true; });
+  $('transfer-modal').addEventListener('click', (e) => { if (e.target === $('transfer-modal')) $('transfer-modal').hidden = true; });
+  $('transfer-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-ttab]');
+    if (!b) return;
+    tr.tab = b.dataset.ttab; tr.sel = null;
+    document.querySelectorAll('#transfer-tabs button').forEach((x) => x.classList.toggle('active', x === b));
+    $('transfer-search').value = '';
+    renderTransfer();
+    $('transfer-search').focus();
+  });
+  $('transfer-search').addEventListener('input', renderTransfer);
+  $('transfer-list').addEventListener('click', (e) => {
+    const it = e.target.closest('.t-item');
+    if (!it || it.classList.contains('current')) return;
+    tr.sel = Number(it.dataset.id);
+    renderTransfer();
+  });
   $('transfer-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const c = current();
-    const uid = Number($('transfer-user').value);
-    if (!c || !uid) return;
+    if (!c || !tr.sel) return;
+    const body = { note: $('transfer-note').value };
+    body[tr.tab === 'sector' ? 'sector_id' : tr.tab === 'user' ? 'user_id' : 'account_id'] = tr.sel;
+    if (tr.tab === 'account' && !confirm('O cliente vai passar a receber as respostas de outro número. Continuar?')) return;
+    $('transfer-submit').disabled = true;
     try {
-      await api('POST', `/api/conversations/${c.id}/transfer`, { user_id: uid, note: $('transfer-note').value });
+      await api('POST', `/api/conversations/${c.id}/transfer`, body);
       $('transfer-modal').hidden = true;
       toast('Conversa transferida');
-    } catch (err) { toast(err.message, true); }
+    } catch (err) { toast(err.message, true); $('transfer-submit').disabled = false; }
   });
 
   // ---------- Gravação de áudio ----------
