@@ -10,7 +10,7 @@
     currentId: null,
     currentConv: null,
     messages: [],
-    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', q: '' },
+    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', q: '', hidden: 'none' },
     accounts: new Map(), // id -> status do número (só provedor baileys)
     multiAccount: false,
     composeMode: 'message', // message | note
@@ -80,6 +80,7 @@
     if (f.tag) qs.set('tag', f.tag);
     if (f.account) qs.set('account', f.account);
     if (f.q) qs.set('q', f.q);
+    if (f.hidden !== 'none') qs.set('hidden', f.hidden);
     const { conversations } = await api('GET', `/api/conversations?${qs}`);
     state.conversations = conversations;
     renderList();
@@ -89,6 +90,25 @@
     if (c.last_message_direction !== 'out') return '';
     return '<span class="tick">✓✓</span>';
   }
+  const PIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
+  const MUTE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  const BLOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>';
+  const HIDE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  function flagsHtml(c) {
+    const f = [];
+    if (c.pinned) f.push(`<span title="Fixada">${PIN_ICON}</span>`);
+    if (c.muted) f.push(`<span title="Notificações silenciadas">${MUTE_ICON}</span>`);
+    if (c.contact_blocked) f.push(`<span title="Contato bloqueado">${BLOCK_ICON}</span>`);
+    if (c.hidden) f.push(`<span title="Oculta">${HIDE_ICON}</span>`);
+    return f.length ? `<span class="flags">${f.join('')}</span>` : '';
+  }
+  /** Prévia da lista com ícone por tipo, como no WhatsApp. */
+  function previewText(c) {
+    const p = stripWa(c.last_message_preview || '');
+    const map = [[/^\[Imagem\]\s*/, '📷 '], [/^\[Vídeo\]\s*/, '🎥 '], [/^\[Áudio\]/, '🎤 Áudio'], [/^\[Figurinha\]/, '🩷 Figurinha'], [/^\[Arquivo\]\s*/, '📄 '], [/^\[Documento\]/, '📄 Documento'], [/^\[Localização\]/, '📍 Localização'], [/^\[Contato\]/, '👤 Contato']];
+    for (const [re, rep] of map) if (re.test(p)) return p.replace(re, rep);
+    return p;
+  }
 
   function renderList() {
     const list = state.conversations;
@@ -96,15 +116,16 @@
       els.items.innerHTML = '<div class="empty"><div>Nenhuma conversa aqui</div></div>';
     } else {
       els.items.innerHTML = list.map((c) => `
-        <div class="conv-item ${c.id === state.currentId ? 'active' : ''} ${c.unread_count > 0 ? 'unread' : ''}" data-id="${c.id}">
+        <div class="conv-item ${c.id === state.currentId ? 'active' : ''} ${c.unread_count > 0 ? 'unread' : ''} ${c.pinned ? 'pinned' : ''}" data-id="${c.id}">
           ${avatarHtml(c, 'lg')}
           <div class="body">
             <div class="top">
               <span class="name">${esc(contactName(c))}</span>
+              ${flagsHtml(c)}
               <span class="time">${esc(fmtTime(c.last_message_at))}</span>
             </div>
             <div class="mid">
-              <span class="preview">${tickHtml(c)}<span>${esc(stripWa(c.last_message_preview))}</span></span>
+              <span class="preview">${tickHtml(c)}<span>${esc(previewText(c))}</span></span>
               ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
               ${c.assigned_user_name
                 ? `<span class="agent" title="Responsável: ${esc(c.assigned_user_name)}">${esc(initials(c.assigned_user_name))}</span>`
@@ -118,6 +139,7 @@
               ${c.account_name && state.multiAccount ? `<span class="chip-soft ${accountOffline(c.account_id) ? 'off' : ''}">${esc(c.account_name)}</span>` : ''}
             </div>
           </div>
+          <button type="button" class="more" data-menu="${c.id}" title="Mais opções"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
         </div>`).join('');
     }
     els.cntActive.textContent = list.length ? list.length : '';
@@ -127,8 +149,103 @@
   }
 
   els.items.addEventListener('click', (e) => {
+    const more = e.target.closest('button[data-menu]');
+    if (more) { e.stopPropagation(); openConvMenu(Number(more.dataset.menu), more); return; }
     const item = e.target.closest('.conv-item');
     if (item) openConversation(Number(item.dataset.id));
+  });
+  els.items.addEventListener('contextmenu', (e) => {
+    const item = e.target.closest('.conv-item');
+    if (!item) return;
+    e.preventDefault();
+    openConvMenu(Number(item.dataset.id), null, { x: e.clientX, y: e.clientY });
+  });
+
+  // ---------- Menu de ações da conversa ----------
+  const MI = {
+    leave: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>',
+    take: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>',
+    tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+    unread: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    wait: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    pin: PIN_ICON, block: BLOCK_ICON, hide: HIDE_ICON, mute: MUTE_ICON,
+  };
+  let menuConvId = null;
+  function openConvMenu(id, anchor, at) {
+    const c = state.conversations.find((x) => x.id === id);
+    if (!c) return;
+    menuConvId = id;
+    const mine = c.assigned_user_id === state.me.id;
+    const items = [
+      mine ? ['leave', MI.leave, 'Sair da conversa'] : ['take', MI.take, 'Assumir conversa'],
+      ['tag', MI.tag, 'Adicionar etiqueta'],
+      ['mute', c.muted ? MI.bell : MI.mute, c.muted ? 'Ativar notificações' : 'Silenciar notificações'],
+      ['unread', MI.unread, c.unread_count > 0 ? 'Marcar como lida' : 'Marcar como não lida'],
+      'sep',
+      c.status === 'resolved' ? ['reopen', MI.check, 'Reabrir conversa'] : ['resolve', MI.check, 'Finalizar conversa'],
+      c.status === 'open' ? (c.last_message_direction === 'out' ? ['inbox', MI.wait, 'Voltar para Entrada'] : ['waiting', MI.wait, 'Marcar como esperando']) : null,
+      ['pin', MI.pin, c.pinned ? 'Desafixar conversa' : 'Fixar conversa'],
+      ['hide', MI.hide, c.hidden ? 'Mostrar conversa' : 'Ocultar conversa'],
+      'sep',
+      ['block', MI.block, c.contact_blocked ? 'Desbloquear contato' : 'Bloquear contato', 'danger'],
+      state.me.role === 'admin' ? ['delete', MI.hide, 'Excluir conversa', 'danger'] : null,
+    ].filter(Boolean);
+    const menu = $('conv-menu');
+    menu.innerHTML = items.map((it) => it === 'sep' ? '<div class="sep"></div>'
+      : `<button type="button" data-act="${it[0]}" class="${it[3] || ''}">${it[1]}${esc(it[2])}</button>`).join('');
+    menu.hidden = false;
+    const r = anchor ? anchor.getBoundingClientRect() : null;
+    let x = at ? at.x : r.right - menu.offsetWidth;
+    let y = at ? at.y : r.bottom + 4;
+    x = Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8));
+    y = Math.min(y, window.innerHeight - menu.offsetHeight - 8);
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    document.querySelectorAll('.conv-item.menu-open').forEach((el) => el.classList.remove('menu-open'));
+    anchor?.closest('.conv-item')?.classList.add('menu-open');
+  }
+  function closeConvMenu() {
+    $('conv-menu').hidden = true;
+    document.querySelectorAll('.conv-item.menu-open').forEach((el) => el.classList.remove('menu-open'));
+    menuConvId = null;
+  }
+  document.addEventListener('click', (e) => { if (!e.target.closest('#conv-menu')) closeConvMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeConvMenu(); });
+  window.addEventListener('resize', closeConvMenu);
+  $('conv-menu').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-act]');
+    const c = state.conversations.find((x) => x.id === menuConvId);
+    closeConvMenu();
+    if (!b || !c) return;
+    const patch = (body) => api('PATCH', `/api/conversations/${c.id}`, body);
+    try {
+      switch (b.dataset.act) {
+        case 'leave': await patch({ assigned_user_id: null }); toast('Você saiu da conversa'); break;
+        case 'take': await patch({ assigned_user_id: state.me.id }); toast('Conversa assumida'); break;
+        case 'tag': await openConversation(c.id); setDetailsOpen(true); els.dTags.scrollIntoView({ block: 'center' }); break;
+        case 'mute': await patch({ muted: !c.muted }); toast(c.muted ? 'Notificações ativadas' : 'Notificações silenciadas'); break;
+        case 'unread': await patch({ unread: !(c.unread_count > 0) }); break;
+        case 'resolve': await patch({ status: 'resolved' }); toast('Conversa finalizada'); break;
+        case 'reopen': await patch({ status: 'open' }); toast('Conversa reaberta'); break;
+        case 'waiting': await patch({ waiting: true }); toast('Movida para Esperando'); break;
+        case 'inbox': await patch({ waiting: false }); toast('Movida para Entrada'); break;
+        case 'pin': await patch({ pinned: !c.pinned }); break;
+        case 'hide': await patch({ hidden: !c.hidden }); toast(c.hidden ? 'Conversa visível de novo' : 'Conversa oculta. Use "Mostrar ocultas" nos filtros para ver.'); break;
+        case 'block':
+          if (!c.contact_blocked && !confirm(`Bloquear ${contactName(c)} no WhatsApp? Ele não conseguirá mais enviar mensagens para este número.`)) return;
+          await api('PATCH', `/api/conversations/${c.id}/contact`, { blocked: !c.contact_blocked });
+          toast(c.contact_blocked ? 'Contato desbloqueado' : 'Contato bloqueado');
+          break;
+        case 'delete':
+          if (!confirm(`Excluir a conversa com ${contactName(c)} e todo o histórico? Isso não pode ser desfeito.`)) return;
+          await api('DELETE', `/api/conversations/${c.id}`);
+          toast('Conversa excluída');
+          break;
+        default: break;
+      }
+    } catch (err) { toast(err.message, true); }
   });
 
   // Filtros
@@ -140,6 +257,11 @@
   }
   document.querySelectorAll('#status-filters button').forEach((b) => b.addEventListener('click', () => setStatusFilter(b.dataset.status)));
   $('filter-all-status').addEventListener('click', () => setStatusFilter(state.filters.status === 'all' ? 'inbox' : 'all'));
+  $('filter-hidden').addEventListener('click', () => {
+    state.filters.hidden = state.filters.hidden === 'none' ? 'only' : 'none';
+    $('filter-hidden').classList.toggle('active', state.filters.hidden === 'only');
+    loadConversations();
+  });
   document.querySelectorAll('#assigned-filters .chip').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('#assigned-filters .chip').forEach((x) => x.classList.remove('active'));
     b.classList.add('active');
@@ -907,6 +1029,8 @@
     if (f.assigned === 'unassigned' && c.assigned_user_id) return false;
     if (f.tag && !c.tags.some((t) => String(t.id) === String(f.tag))) return false;
     if (f.account && String(c.account_id) !== String(f.account)) return false;
+    if (f.hidden === 'none' && c.hidden) return false;
+    if (f.hidden === 'only' && !c.hidden) return false;
     if (f.q) {
       const q = f.q.toLowerCase();
       if (![c.wa_id, c.contact_name, c.profile_name].some((v) => (v || '').toLowerCase().includes(q))) return false;
@@ -918,7 +1042,7 @@
     const idx = state.conversations.findIndex((c) => c.id === conv.id);
     if (matchesFilters(conv)) {
       if (idx >= 0) state.conversations[idx] = conv; else state.conversations.push(conv);
-      state.conversations.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
+      state.conversations.sort((a, b) => (b.pinned - a.pinned) || (new Date(b.last_message_at) - new Date(a.last_message_at)));
     } else if (idx >= 0) {
       state.conversations.splice(idx, 1);
     }
@@ -960,6 +1084,15 @@
       renderList();
       if (current()) renderChat();
     });
+    socket.on('conversation:deleted', ({ id }) => {
+      state.conversations = state.conversations.filter((c) => c.id !== id);
+      if (state.currentId === id) { state.currentId = null; state.currentConv = null; els.chatPanel.hidden = true; els.chatEmpty.hidden = false; els.details.hidden = true; }
+      renderList();
+    });
+    socket.on('conversations:reload', () => {
+      loadConversations();
+      if (state.currentId) api('GET', `/api/conversations/${state.currentId}`).catch(() => { state.currentId = null; els.chatPanel.hidden = true; els.chatEmpty.hidden = false; });
+    });
     socket.on('schedule:updated', ({ conversation_id, pending }) => {
       const c = state.conversations.find((x) => x.id === conversation_id);
       if (c) { c.scheduled_count = pending; renderList(); }
@@ -979,6 +1112,7 @@
   }
 
   function notify(conv, message) {
+    if (conv.muted) return;
     if (!('Notification' in window) || Notification.permission !== 'granted' || document.hasFocus()) return;
     const n = new Notification(contactName(conv), { body: message.body || 'Nova mensagem', icon: '/img/logo.svg' });
     n.onclick = () => { window.focus(); openConversation(conv.id); n.close(); };

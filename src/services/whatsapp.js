@@ -36,5 +36,6 @@ module.exports = {
   logout: (id) => provider.logout(id),
   reconnect: (id) => provider.reconnect(id),
   getQr: (id) => provider.getQr(id),
+  setBlocked: (accountId, waId, blocked) => (isBaileys ? provider.setBlocked(accountId, waId, blocked) : provider.setBlocked(waId, blocked)),
   refreshAvatar: (accountId, waId) => (isBaileys && accountId ? provider.refreshAvatar(accountId, waId) : Promise.resolve()),
 };

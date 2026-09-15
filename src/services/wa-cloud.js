@@ -78,6 +78,15 @@ async function sendMedia(to, file) {
   return data?.messages?.[0]?.id || null;
 }
 
+/** Bloqueia/desbloqueia um número na Cloud API. */
+async function setBlocked(waId, blocked) {
+  if (!isConfigured()) { console.log(`[whatsapp:mock] ${blocked ? 'bloquear' : 'desbloquear'} ${waId}`); return; }
+  await graphRequest(`${wa.phoneNumberId}/block_users`, {
+    method: blocked ? 'POST' : 'DELETE',
+    body: JSON.stringify({ messaging_product: 'whatsapp', block_users: [{ user: waId }] }),
+  });
+}
+
 /** Marca uma mensagem recebida como lida. */
 async function markAsRead(waMessageId) {
   if (!isConfigured() || !waMessageId || waMessageId.startsWith('sim-')) return;
@@ -115,4 +124,4 @@ function getStatus() {
   return { provider: 'cloud', status: isConfigured() ? 'connected' : 'mock', me: wa.phoneNumberId || null };
 }
 
-module.exports = { isConfigured, sendText, sendMedia, markAsRead, fetchMedia, verifySignature, getStatus };
+module.exports = { isConfigured, sendText, sendMedia, setBlocked, markAsRead, fetchMedia, verifySignature, getStatus };

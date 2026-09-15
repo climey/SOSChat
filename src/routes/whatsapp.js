@@ -1,6 +1,8 @@
 const express = require('express');
 const QRCode = require('qrcode');
 const whatsapp = require('../services/whatsapp');
+const conversations = require('../services/conversations');
+const realtime = require('../realtime');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
@@ -47,8 +49,29 @@ router.delete('/accounts/:id', requireAdmin, requireMulti, async (req, res, next
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Número não encontrado' });
+    let deleted = 0;
+    if (req.query.delete_conversations === '1') deleted = await conversations.deleteByAccount(id);
     await whatsapp.removeAccount(id);
-    res.json({ ok: true });
+    res.json({ ok: true, deleted_conversations: deleted });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Conversas de números que já foram removidos (ficam sem número associado)
+router.get('/orphans', requireAdmin, async (req, res, next) => {
+  try {
+    res.json({ count: await conversations.countOrphans() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/orphans', requireAdmin, async (req, res, next) => {
+  try {
+    const deleted = await conversations.deleteOrphans();
+    realtime.broadcast('conversations:reload', { reason: 'orphans-deleted' });
+    res.json({ deleted });
   } catch (err) {
     next(err);
   }

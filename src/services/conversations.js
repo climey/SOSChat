@@ -3,7 +3,8 @@ const db = require('../db');
 const CONVERSATION_SELECT = `
   SELECT c.id, c.status, c.assigned_user_id, c.unread_count, c.last_message_at,
          c.last_message_preview, c.last_message_direction, c.first_response_at, c.resolved_at, c.created_at,
-         ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id,
+         c.pinned, c.muted, c.hidden,
+         ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id, ct.blocked AS contact_blocked,
          u.name AS assigned_user_name,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone,
          COALESCE(sc.n, 0) AS scheduled_count
@@ -60,6 +61,8 @@ async function list(filters = {}) {
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
   if (filters.accountId) add('c.account_id = ?', filters.accountId);
+  if (filters.hidden === 'only') where.push('c.hidden = TRUE');
+  else if (filters.hidden !== 'all') where.push('c.hidden = FALSE');
   if (filters.tagId) {
     params.push(filters.tagId);
     // (conversation_id, tag_id) é chave primária, então o JOIN não duplica linhas
@@ -77,10 +80,38 @@ async function list(filters = {}) {
 
   const sql = `${CONVERSATION_SELECT} ${joins}
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY c.last_message_at DESC
+    ORDER BY c.pinned DESC, c.last_message_at DESC
     LIMIT $${params.length - 1} OFFSET $${params.length}`;
   const { rows } = await db.query(sql, params);
   return attachTags(rows, db);
 }
 
-module.exports = { getById, list };
+/** Remove arquivos de mídia que nenhuma mensagem nem contato referencia mais. */
+async function purgeOrphanMedia() {
+  const { rowCount } = await db.query(
+    `DELETE FROM media_files mf
+      WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.media_id = mf.id)
+        AND NOT EXISTS (SELECT 1 FROM contacts c WHERE c.avatar_media_id = mf.id)`
+  );
+  return rowCount;
+}
+
+/** Conversas de números que foram removidos (account_id nulo). */
+async function countOrphans() {
+  const { rows } = await db.query('SELECT COUNT(*)::int AS n FROM conversations WHERE account_id IS NULL');
+  return rows[0].n;
+}
+
+async function deleteOrphans() {
+  const { rowCount } = await db.query('DELETE FROM conversations WHERE account_id IS NULL');
+  await purgeOrphanMedia();
+  return rowCount;
+}
+
+async function deleteByAccount(accountId) {
+  const { rowCount } = await db.query('DELETE FROM conversations WHERE account_id = $1', [accountId]);
+  await purgeOrphanMedia();
+  return rowCount;
+}
+
+module.exports = { getById, list, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };

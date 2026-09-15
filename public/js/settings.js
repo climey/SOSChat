@@ -166,6 +166,7 @@
     $('wa-accounts').innerHTML = waAccounts.length
       ? waAccounts.map((a) => accountCard(a, isAdmin, multi)).join('')
       : '<div class="muted small">Nenhum número cadastrado. Adicione um acima para gerar o QR code.</div>';
+    if (isAdmin) loadOrphans();
 
     // Carrega as imagens de QR dos números aguardando leitura
     await Promise.all([...document.querySelectorAll('img[data-qr]')].map(async (img) => {
@@ -178,6 +179,24 @@
     clearTimeout(waTimer);
     if (multi && waAccounts.some((a) => a.status !== 'connected')) waTimer = setTimeout(loadIntegration, 3000);
   }
+
+  async function loadOrphans() {
+    try {
+      const { count } = await api('GET', '/api/whatsapp/orphans');
+      const box = $('wa-orphans');
+      box.hidden = count === 0;
+      $('wa-orphans-count').textContent = count;
+    } catch { /* ignora */ }
+  }
+  $('wa-orphans-delete').addEventListener('click', async () => {
+    const n = $('wa-orphans-count').textContent;
+    if (!confirm(`Apagar ${n} conversa(s) de números removidos, com todo o histórico de mensagens e arquivos? Isso não pode ser desfeito.`)) return;
+    try {
+      const { deleted } = await api('DELETE', '/api/whatsapp/orphans');
+      toast(`${deleted} conversa(s) apagada(s)`);
+      loadOrphans();
+    } catch (err) { toast(err.message, true); }
+  });
 
   $('wa-add-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -209,9 +228,10 @@
         await api('POST', `/api/whatsapp/accounts/${id}/logout`);
         toast('Sessão encerrada');
       } else if (btn.dataset.act === 'remove') {
-        if (!confirm(`Remover "${acc?.name}"? As conversas ficam no histórico, mas sem número associado.`)) return;
-        await api('DELETE', `/api/whatsapp/accounts/${id}`);
-        toast('Número removido');
+        if (!confirm(`Remover o número "${acc?.name}"?`)) return;
+        const wipe = confirm('Apagar também todas as conversas e mensagens desse número?\n\nOK = apagar tudo · Cancelar = manter o histórico (fica marcado como "sem número")');
+        const r = await api('DELETE', `/api/whatsapp/accounts/${id}${wipe ? '?delete_conversations=1' : ''}`);
+        toast(wipe ? `Número removido e ${r.deleted_conversations} conversa(s) apagada(s)` : 'Número removido');
       }
       setTimeout(loadIntegration, 1000);
     } catch (err) { toast(err.message, true); }

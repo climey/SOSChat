@@ -4,7 +4,7 @@ const db = require('../db');
 const realtime = require('../realtime');
 const whatsapp = require('../services/whatsapp');
 const conversations = require('../services/conversations');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 const outbound = require('../services/outbound');
 const schedules = require('../services/schedules');
 
@@ -40,6 +40,7 @@ router.get('/', async (req, res, next) => {
       userId: req.user.id,
       tagId: parseId(req.query.tag),
       accountId: parseId(req.query.account),
+      hidden: ['only', 'all'].includes(req.query.hidden) ? req.query.hidden : 'none',
       q: String(req.query.q || '').trim().slice(0, 100) || null,
       limit: req.query.limit,
       offset: req.query.offset,
@@ -194,9 +195,19 @@ router.patch('/:id', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
-    const { status, assigned_user_id } = req.body || {};
+    const { status, assigned_user_id, pinned, muted, hidden, unread, waiting } = req.body || {};
     const sets = [];
     const params = [id];
+
+    for (const [name, value] of [['pinned', pinned], ['muted', muted], ['hidden', hidden]]) {
+      if (value !== undefined) { params.push(Boolean(value)); sets.push(`${name} = $${params.length}`); }
+    }
+    // "Marcar como não lida": garante ao menos 1 não lida; "marcar como lida": zera
+    if (unread === true) sets.push('unread_count = GREATEST(unread_count, 1)');
+    if (unread === false) sets.push('unread_count = 0');
+    // "Marcar como esperando": sai da Entrada sem precisar responder
+    if (waiting === true) sets.push(`last_message_direction = 'out'`);
+    if (waiting === false) sets.push(`last_message_direction = 'in'`);
 
     if (status !== undefined) {
       if (!['open', 'resolved'].includes(status)) return res.status(400).json({ error: 'Status inválido' });
@@ -258,19 +269,46 @@ router.put('/:id/tags', async (req, res, next) => {
   }
 });
 
-// Atualiza nome do contato
+// Atualiza nome do contato e/ou bloqueio
 router.patch('/:id/contact', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const name = String(req.body?.name || '').trim().slice(0, 120);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
-    await db.query(
-      `UPDATE contacts SET name = $2 WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)`,
-      [id, name || null]
-    );
+    const before = await conversations.getById(id);
+    if (!before) return res.status(404).json({ error: 'Conversa não encontrada' });
+
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name || '').trim().slice(0, 120);
+      await db.query('UPDATE contacts SET name = $2 WHERE id = $1', [before.contact_id, name || null]);
+    }
+    if (req.body?.blocked !== undefined) {
+      const blocked = Boolean(req.body.blocked);
+      const accountId = before.account_id || whatsapp.pickAccount();
+      try {
+        await whatsapp.setBlocked(accountId, before.wa_id, blocked);
+      } catch (err) {
+        return res.status(502).json({ error: `Não foi possível ${blocked ? 'bloquear' : 'desbloquear'} no WhatsApp: ${err.message}` });
+      }
+      await db.query('UPDATE contacts SET blocked = $2 WHERE id = $1', [before.contact_id, blocked]);
+    }
     const conv = await conversations.getById(id);
     realtime.broadcast('conversation:updated', conv);
     res.json({ conversation: conv });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Exclui a conversa e todo o histórico dela (só admin). Mídias órfãs são limpas junto.
+router.delete('/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const r = await db.query('DELETE FROM conversations WHERE id = $1', [id]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Conversa não encontrada' });
+    await conversations.purgeOrphanMedia();
+    realtime.broadcast('conversation:deleted', { id });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

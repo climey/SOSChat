@@ -390,6 +390,12 @@ class Session {
     return sent?.key?.id || null;
   }
 
+  /** Bloqueia ou desbloqueia o contato no WhatsApp (o cliente deixa de conseguir enviar mensagens). */
+  async setBlocked(waId, blocked) {
+    if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado`);
+    await this.sock.updateBlockStatus(toJid(waId), blocked ? 'block' : 'unblock');
+  }
+
   async markAsRead(waMessageId, waId) {
     if (!this.isConnected() || !waMessageId || !waId || waMessageId.startsWith('sim-')) return;
     try {
@@ -513,6 +519,11 @@ function sendMedia(accountId, to, file) {
   return getSession(accountId).sendMedia(to, file);
 }
 
+function setBlocked(accountId, waId, blocked) {
+  if (!accountId) throw new Error('Nenhum número conectado');
+  return getSession(accountId).setBlocked(waId, blocked);
+}
+
 function markAsRead(accountId, waMessageId, waId) {
   if (!accountId) return Promise.resolve();
   return getSession(accountId).markAsRead(waMessageId, waId);
@@ -534,5 +545,5 @@ module.exports = {
   refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
-  isConfigured, sendText, sendMedia, markAsRead, fetchMedia, verifySignature,
+  isConfigured, sendText, sendMedia, setBlocked, markAsRead, fetchMedia, verifySignature,
 };
