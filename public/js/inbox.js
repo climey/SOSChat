@@ -1877,6 +1877,9 @@
     renderPrefsAvatar();
     renderDevices();
     showPrefsTab(tab);
+    $('pref-signature').value = state.me.signature || '';
+    $('pref-signature-name').textContent = state.me.name;
+    $('pref-signature-preview').textContent = `${signText()}:`;
     const av = state.presence.get(state.me.id)?.availability || 'available';
     document.querySelectorAll('#pref-availability .chip').forEach((c) => c.classList.toggle('active', c.dataset.availability === av));
     $('sound-list').innerHTML = Object.entries(SOS.sound.SOUNDS).map(([id, s]) => `
@@ -1952,8 +1955,20 @@
     const lab = e.target.closest('label');
     if (lab) document.querySelectorAll('#sound-list label').forEach((l) => l.classList.toggle('on', l === lab));
   });
+  $('pref-signature').addEventListener('input', () => {
+    $('pref-signature-preview').textContent = `${($('pref-signature').value.trim() || state.me.name)}:`;
+  });
   $('prefs-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    // Assinatura (mesma do lápis no compositor) fica na conta
+    const sig = $('pref-signature').value.trim();
+    if (sig !== (state.me.signature || '')) {
+      try {
+        const { user } = await api('PATCH', '/api/users/me/profile', { signature: sig });
+        state.me.signature = user.signature;
+        refreshSignatureLabels();
+      } catch (err) { toast(err.message, true); return; }
+    }
     const prefs = {
       sound: document.querySelector('#sound-list input:checked')?.value || 'ding',
       volume: Number($('pref-volume').value),
