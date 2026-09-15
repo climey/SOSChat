@@ -1876,9 +1876,6 @@
     renderPrefsAvatar();
     renderDevices();
     showPrefsTab(tab);
-    $('pref-signature').value = state.me.signature || '';
-    $('pref-signature-name').textContent = state.me.name;
-    $('pref-signature-preview').textContent = `${signText()}:`;
     const av = state.presence.get(state.me.id)?.availability || 'available';
     document.querySelectorAll('#pref-availability .chip').forEach((c) => c.classList.toggle('active', c.dataset.availability === av));
     $('sound-list').innerHTML = Object.entries(SOS.sound.SOUNDS).map(([id, s]) => `
@@ -1908,9 +1905,35 @@
     $('presence-menu').hidden = true;
     openPrefs(b.dataset.prefs);
   });
-  $('pref-signature').addEventListener('input', () => {
-    $('pref-signature-preview').textContent = `${($('pref-signature').value.trim() || state.me.name)}:`;
+  // Edição da assinatura direto no interruptor do compositor (lápis)
+  function openSignEdit() {
+    $('sign-input').value = state.me.signature || '';
+    $('sign-input').hidden = false;
+    $('sign-edit').hidden = true;
+    $('sign-input').focus();
+    $('sign-input').select();
+  }
+  async function saveSignEdit(cancel = false) {
+    const input = $('sign-input');
+    if (input.hidden) return;
+    input.hidden = true;
+    $('sign-edit').hidden = false;
+    if (cancel) return;
+    const sig = input.value.trim();
+    if (sig === (state.me.signature || '')) return;
+    try {
+      const { user } = await api('PATCH', '/api/users/me/profile', { signature: sig });
+      state.me.signature = user.signature;
+      refreshSignatureLabels();
+      toast(user.signature ? `Assinatura: ${user.signature}` : 'Assinatura voltou a ser seu nome');
+    } catch (err) { toast(err.message, true); }
+  }
+  $('sign-edit').addEventListener('click', openSignEdit);
+  $('sign-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveSignEdit(); }
+    if (e.key === 'Escape') saveSignEdit(true);
   });
+  $('sign-input').addEventListener('blur', () => saveSignEdit());
   $('pref-availability').addEventListener('click', async (e) => {
     const b = e.target.closest('button[data-availability]');
     if (!b) return;
@@ -1930,15 +1953,6 @@
   });
   $('prefs-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    // Assinatura fica na conta (vale em qualquer computador)
-    const sig = $('pref-signature').value.trim();
-    if (sig !== (state.me.signature || '')) {
-      try {
-        const { user } = await api('PATCH', '/api/users/me/profile', { signature: sig });
-        state.me.signature = user.signature;
-        refreshSignatureLabels();
-      } catch (err) { toast(err.message, true); return; }
-    }
     const prefs = {
       sound: document.querySelector('#sound-list input:checked')?.value || 'ding',
       volume: Number($('pref-volume').value),

@@ -655,3 +655,8 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 @media (max-width: 560px) { .dtp-pop { flex-direction: column; } .dtp-cal { border-right: none; border-bottom: 1px solid var(--border); width: 100%; } .dtp-time { width: 100%; } }
 .prefs-section { min-height: 260px; }
 #pref-availability .chip { display: inline-flex; align-items: center; gap: 6px; }
+.composer-top .switch-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.sign-edit { width: 24px; height: 24px; border: none; border-radius: 6px; background: transparent; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.sign-edit:hover { background: var(--surface-2); color: var(--text); }
+.sign-edit svg { width: 13px; height: 13px; }
+.sign-input { width: 220px; padding: 5px 10px; font-size: 13px; }
