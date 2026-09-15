@@ -43,48 +43,118 @@
   <!--/RAIL-->
 
   <main class="main">
-    <div class="page">
+    <div class="page reports-page">
       <div class="page-header">
-        <div><h1>Relatórios</h1><p>Desempenho do atendimento no período</p></div>
-        <form class="filters-row" id="filters">
-          <div class="field"><label class="label">De</label><input class="input" type="date" id="from"></div>
-          <div class="field"><label class="label">Até</label><input class="input" type="date" id="to"></div>
-          <div class="field"><label class="label">Agrupar</label>
-            <select class="select" id="group"><option value="day">Por dia</option><option value="week">Por semana</option><option value="month">Por mês</option></select>
+        <div><h1>Relatórios</h1><p>Volume, tempos de resposta, equipe, mensagens e origem dos clientes, com comparativo do período anterior.</p></div>
+        <button class="btn" id="btn-export" title="Baixar os dados desta aba em CSV">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Exportar CSV
+        </button>
+      </div>
+
+      <div class="report-tabs" id="report-tabs">
+        <button class="active" data-tab="overview">Visão geral</button>
+        <button data-tab="now">Agora <span class="live-dot"></span></button>
+        <button data-tab="agents">Atendentes</button>
+        <button data-tab="messages">Mensagens</button>
+        <button data-tab="origin">Origem</button>
+      </div>
+
+      <form class="report-filters card" id="filters">
+        <div class="chips" id="period-presets">
+          <button type="button" class="chip" data-preset="today">Hoje</button>
+          <button type="button" class="chip active" data-preset="7">7 dias</button>
+          <button type="button" class="chip" data-preset="30">30 dias</button>
+          <button type="button" class="chip" data-preset="90">90 dias</button>
+        </div>
+        <div class="field"><label class="label">De</label><input class="input" type="date" id="from"></div>
+        <div class="field"><label class="label">Até</label><input class="input" type="date" id="to"></div>
+        <div class="field"><label class="label">Agrupar</label>
+          <select class="select" id="group"><option value="day">Por dia</option><option value="week">Por semana</option><option value="month">Por mês</option></select>
+        </div>
+        <div class="field" id="f-account-wrap" hidden><label class="label">Número</label><select class="select" id="f-account"><option value="">Todos</option></select></div>
+        <div class="field"><label class="label">Setor</label><select class="select" id="f-sector"><option value="">Todos</option></select></div>
+        <div class="field"><label class="label">Atendente</label><select class="select" id="f-agent"><option value="">Todos</option></select></div>
+        <button class="btn btn-primary" type="submit">Aplicar</button>
+      </form>
+
+      <!-- Visão geral -->
+      <section class="report-tab" data-tab="overview">
+        <div class="stats" id="ov-stats"></div>
+        <div class="grid-2">
+          <div class="card"><h3>Conversas iniciadas e finalizadas</h3><div class="chart-legend"><span><i style="background:#E03131"></i>Iniciadas</span><span><i style="background:#339af0"></i>Finalizadas</span></div><div class="chart" id="ov-volume"></div></div>
+          <div class="card"><h3>Tempo de primeira resposta</h3><div class="chart-legend"><span><i style="background:#E03131"></i>Média</span><span><i style="background:#339af0"></i>Mediana</span></div><div class="chart" id="ov-first"></div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card"><h3>Tempo até finalizar</h3><div class="chart-legend"><span><i style="background:#E03131"></i>Média</span><span><i style="background:#339af0"></i>Mediana</span></div><div class="chart" id="ov-res"></div></div>
+          <div class="card"><h3>Quando os clientes chamam</h3><p class="small muted" style="margin:-6px 0 8px">Conversas iniciadas por dia da semana e hora. Mostra o horário de pico da operação.</p><div class="chart" id="ov-heat"></div></div>
+        </div>
+        <div class="grid-3">
+          <div class="card"><h3>Por etiqueta</h3><div class="chart" id="ov-tags"></div></div>
+          <div class="card"><h3>Por setor</h3><div class="chart" id="ov-sectors"></div></div>
+          <div class="card"><h3>Por número</h3><div class="chart" id="ov-accounts"></div></div>
+        </div>
+      </section>
+
+      <!-- Agora -->
+      <section class="report-tab" data-tab="now" hidden>
+        <div class="stats" id="now-stats"></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Aguardando há mais tempo</h3>
+            <p class="small muted" style="margin:-6px 0 8px">Clientes sem resposta, do mais antigo para o mais recente. Clique para abrir.</p>
+            <div id="now-oldest"></div>
           </div>
-          <button class="btn btn-primary" type="submit">Aplicar</button>
-        </form>
-      </div>
-
-      <div class="stats" id="stats"></div>
-
-      <div class="grid-2">
-        <div class="card">
-          <h3>Conversas iniciadas</h3>
-          <div class="chart" id="chart-conv"></div>
+          <div class="card">
+            <h3>Conversas iniciadas na última hora</h3>
+            <p class="small muted" style="margin:-6px 0 8px">Em blocos de 5 minutos.</p>
+            <div class="chart" id="now-opened"></div>
+          </div>
         </div>
         <div class="card">
-          <h3>Mensagens recebidas e enviadas</h3>
-          <div class="chart-legend"><span><i style="background:#339af0"></i>Recebidas</span><span><i style="background:#E03131"></i>Enviadas</span></div>
-          <div class="chart" id="chart-msg"></div>
+          <h3>Equipe</h3>
+          <div id="now-agents" class="now-agents"></div>
         </div>
-      </div>
+      </section>
 
-      <div class="grid-2">
-        <div class="card">
-          <h3>Por atendente</h3>
-          <div style="overflow-x:auto"><table class="table" id="agents-table"></table></div>
+      <!-- Atendentes -->
+      <section class="report-tab" data-tab="agents" hidden>
+        <div class="grid-2">
+          <div class="card"><h3>Conversas por atendente</h3><div class="chart" id="ag-conv"></div></div>
+          <div class="card"><h3>Mensagens enviadas por atendente</h3><div class="chart" id="ag-msgs"></div></div>
         </div>
         <div class="card">
-          <h3>Por tag</h3>
-          <table class="table" id="tags-table"></table>
+          <h3>Desempenho individual</h3>
+          <p class="small muted" style="margin:-6px 0 10px">Tempo de resposta: quanto o atendente demora para responder cada mensagem do cliente. Mediana ignora casos extremos.</p>
+          <div style="overflow-x:auto"><table class="table" id="ag-table"></table></div>
         </div>
-      </div>
+      </section>
 
-      <div class="card">
-        <h3>Volume por período</h3>
-        <div style="overflow-x:auto"><table class="table" id="volume-table"></table></div>
-      </div>
+      <!-- Mensagens -->
+      <section class="report-tab" data-tab="messages" hidden>
+        <div class="stats" id="msg-stats"></div>
+        <div class="grid-2">
+          <div class="card"><h3>Mensagens por período</h3><div class="chart-legend"><span><i style="background:#339af0"></i>Recebidas</span><span><i style="background:#E03131"></i>Enviadas</span></div><div class="chart" id="msg-volume"></div></div>
+          <div class="card"><h3>Por número</h3><div class="chart" id="msg-accounts"></div></div>
+        </div>
+        <div class="card">
+          <h3>Volume por período</h3>
+          <div style="overflow-x:auto"><table class="table" id="msg-table"></table></div>
+        </div>
+      </section>
+
+      <!-- Origem -->
+      <section class="report-tab" data-tab="origin" hidden>
+        <div class="grid-3">
+          <div class="card"><h3>Por região</h3><div class="chart" id="or-region"></div></div>
+          <div class="card"><h3>Por estado (top 10)</h3><div class="chart" id="or-state"></div></div>
+          <div class="card"><h3>Por DDD (top 15)</h3><div class="chart" id="or-ddd"></div></div>
+        </div>
+        <div class="card">
+          <h3>Todos os DDDs</h3>
+          <div style="overflow-x:auto"><table class="table" id="or-table"></table></div>
+        </div>
+      </section>
     </div>
   </main>
 </div>

@@ -1,157 +1,317 @@
 const express = require('express');
 const db = require('../db');
+const realtime = require('../realtime');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
 
-/** Período: ?from=YYYY-MM-DD&to=YYYY-MM-DD (padrão: últimos 30 dias). */
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const parseId = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
+
+/** Período (?from&to, padrão 30 dias) e o período imediatamente anterior, do mesmo tamanho. */
 function period(query) {
-  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
   const to = DATE_RE.test(query.to) ? new Date(`${query.to}T23:59:59.999`) : new Date();
-  const from = DATE_RE.test(query.from)
-    ? new Date(`${query.from}T00:00:00`)
-    : new Date(to.getTime() - 29 * 24 * 3600 * 1000);
-  return { from, to };
+  const from = DATE_RE.test(query.from) ? new Date(`${query.from}T00:00:00`) : new Date(to.getTime() - 29 * 24 * 3600 * 1000);
+  const span = to.getTime() - from.getTime();
+  return { from, to, prevFrom: new Date(from.getTime() - span - 1), prevTo: new Date(from.getTime() - 1) };
 }
 
-// Resumo: totais e tempos médios
+/**
+ * Filtros de conversa (número, setor, atendente) como fragmento SQL sobre o alias `c`.
+ * Os valores entram em `params`; devolve o texto a anexar ao WHERE.
+ */
+function convFilter(query, params) {
+  const parts = [];
+  const account = parseId(query.account), sector = parseId(query.sector), agent = parseId(query.agent);
+  if (account) { params.push(account); parts.push(`c.account_id = $${params.length}`); }
+  if (sector) { params.push(sector); parts.push(`c.sector_id = $${params.length}`); }
+  if (agent) { params.push(agent); parts.push(`c.assigned_user_id = $${params.length}`); }
+  return parts.length ? ' AND ' + parts.join(' AND ') : '';
+}
+
+/** Métricas principais de um intervalo (usado para o período atual e o anterior). */
+async function metrics(from, to, query) {
+  const params = [from, to];
+  const f = convFilter(query, params);
+  const totals = await db.query(
+    `SELECT
+       (SELECT COUNT(*)::int FROM conversations c WHERE c.created_at BETWEEN $1 AND $2 ${f}) AS conversations_total,
+       (SELECT COUNT(*)::int FROM conversations c WHERE c.resolved_at BETWEEN $1 AND $2 ${f}) AS resolved_total,
+       (SELECT COUNT(DISTINCT c.contact_id)::int FROM conversations c WHERE c.created_at BETWEEN $1 AND $2 ${f}) AS contacts_total,
+       (SELECT COUNT(*)::int FROM conversations c WHERE c.created_at BETWEEN $1 AND $2 AND c.first_response_at IS NOT NULL ${f}) AS answered_total,
+       (SELECT COUNT(*)::int FROM messages m JOIN conversations c ON c.id = m.conversation_id
+         WHERE m.direction = 'in' AND m.created_at BETWEEN $1 AND $2 ${f}) AS messages_in,
+       (SELECT COUNT(*)::int FROM messages m JOIN conversations c ON c.id = m.conversation_id
+         WHERE m.direction = 'out' AND m.type <> 'note' AND m.created_at BETWEEN $1 AND $2 ${f}) AS messages_out,
+       (SELECT EXTRACT(EPOCH FROM AVG(c.first_response_at - c.created_at))::int FROM conversations c
+         WHERE c.first_response_at IS NOT NULL AND c.created_at BETWEEN $1 AND $2 ${f}) AS avg_first_response_seconds,
+       (SELECT EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY c.first_response_at - c.created_at))::int FROM conversations c
+         WHERE c.first_response_at IS NOT NULL AND c.created_at BETWEEN $1 AND $2 ${f}) AS median_first_response_seconds,
+       (SELECT EXTRACT(EPOCH FROM AVG(c.resolved_at - c.created_at))::int FROM conversations c
+         WHERE c.resolved_at BETWEEN $1 AND $2 ${f}) AS avg_resolution_seconds,
+       (SELECT EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY c.resolved_at - c.created_at))::int FROM conversations c
+         WHERE c.resolved_at BETWEEN $1 AND $2 ${f}) AS median_resolution_seconds`,
+    params
+  );
+  // Tempo de resposta: cada resposta do atendente medida desde a última mensagem do cliente
+  const resp = await db.query(
+    `WITH seq AS (
+       SELECT m.direction, m.created_at,
+              LAG(m.direction) OVER (PARTITION BY m.conversation_id ORDER BY m.created_at, m.id) AS prev_dir,
+              LAG(m.created_at) OVER (PARTITION BY m.conversation_id ORDER BY m.created_at, m.id) AS prev_at
+         FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.type <> 'note' ${f}
+     )
+     SELECT EXTRACT(EPOCH FROM AVG(created_at - prev_at))::int AS avg_response_seconds,
+            EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY created_at - prev_at))::int AS median_response_seconds
+       FROM seq WHERE direction = 'out' AND prev_dir = 'in' AND created_at BETWEEN $1 AND $2`,
+    params
+  );
+  return { ...totals.rows[0], ...resp.rows[0] };
+}
+
+// Resumo com comparativo do período anterior
 router.get('/summary', async (req, res, next) => {
   try {
-    const { from, to } = period(req.query);
-    const p = [from, to];
-
-    const totals = await db.query(
-      `SELECT
-         (SELECT COUNT(*)::int FROM conversations WHERE created_at BETWEEN $1 AND $2) AS conversations_total,
-         (SELECT COUNT(*)::int FROM conversations WHERE resolved_at BETWEEN $1 AND $2) AS resolved_total,
-         (SELECT COUNT(*)::int FROM conversations WHERE status = 'open') AS open_now,
-         (SELECT COUNT(*)::int FROM messages WHERE direction = 'in'  AND created_at BETWEEN $1 AND $2) AS messages_in,
-         (SELECT COUNT(*)::int FROM messages WHERE direction = 'out' AND type <> 'note' AND created_at BETWEEN $1 AND $2) AS messages_out,
-         (SELECT COUNT(DISTINCT contact_id)::int FROM conversations WHERE created_at BETWEEN $1 AND $2) AS contacts_total,
-         (SELECT EXTRACT(EPOCH FROM AVG(first_response_at - created_at))::int
-            FROM conversations WHERE first_response_at IS NOT NULL AND created_at BETWEEN $1 AND $2) AS avg_first_response_seconds,
-         (SELECT EXTRACT(EPOCH FROM AVG(resolved_at - created_at))::int
-            FROM conversations WHERE resolved_at BETWEEN $1 AND $2) AS avg_resolution_seconds`,
-      p
-    );
-
-    // Tempo médio de resposta: para cada resposta do atendente, o tempo desde a última mensagem do cliente
-    const resp = await db.query(
-      `WITH seq AS (
-         SELECT direction, created_at,
-                LAG(direction) OVER (PARTITION BY conversation_id ORDER BY created_at, id) AS prev_dir,
-                LAG(created_at) OVER (PARTITION BY conversation_id ORDER BY created_at, id) AS prev_at
-           FROM messages WHERE type <> 'note'
-       )
-       SELECT EXTRACT(EPOCH FROM AVG(created_at - prev_at))::int AS avg_response_seconds,
-              EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY created_at - prev_at))::int AS median_response_seconds
-         FROM seq
-        WHERE direction = 'out' AND prev_dir = 'in' AND created_at BETWEEN $1 AND $2`,
-      p
-    );
-
-    res.json({ from, to, ...totals.rows[0], ...resp.rows[0] });
-  } catch (err) {
-    next(err);
-  }
+    const p = period(req.query);
+    const [current, previous] = await Promise.all([metrics(p.from, p.to, req.query), metrics(p.prevFrom, p.prevTo, req.query)]);
+    const params = [];
+    const f = convFilter(req.query, params);
+    const open = await db.query(`SELECT COUNT(*)::int AS n FROM conversations c WHERE c.status = 'open' ${f}`, params);
+    res.json({ from: p.from, to: p.to, prev_from: p.prevFrom, prev_to: p.prevTo, current: { ...current, open_now: open.rows[0].n }, previous });
+  } catch (err) { next(err); }
 });
 
-// Volume de conversas e mensagens por dia/semana/mês
+// Volume por dia/semana/mês: conversas, mensagens recebidas/enviadas, finalizadas
 router.get('/volume', async (req, res, next) => {
   try {
     const { from, to } = period(req.query);
     const group = ['day', 'week', 'month'].includes(req.query.group) ? req.query.group : 'day';
-    // group é validado contra lista fixa acima antes de entrar no SQL
+    const params = [from, to];
+    const f = convFilter(req.query, params);
     const { rows } = await db.query(
       `WITH buckets AS (
-         SELECT date_trunc('${group}', created_at) AS bucket, 'conv' AS kind FROM conversations WHERE created_at BETWEEN $1 AND $2
+         SELECT date_trunc('${group}', c.created_at) AS bucket, 'conv' AS kind FROM conversations c WHERE c.created_at BETWEEN $1 AND $2 ${f}
          UNION ALL
-         SELECT date_trunc('${group}', created_at), 'in'  FROM messages WHERE direction = 'in'  AND created_at BETWEEN $1 AND $2
+         SELECT date_trunc('${group}', c.resolved_at), 'resolved' FROM conversations c WHERE c.resolved_at BETWEEN $1 AND $2 ${f}
          UNION ALL
-         SELECT date_trunc('${group}', created_at), 'out' FROM messages WHERE direction = 'out' AND type <> 'note' AND created_at BETWEEN $1 AND $2
+         SELECT date_trunc('${group}', m.created_at), 'in' FROM messages m JOIN conversations c ON c.id = m.conversation_id
+          WHERE m.direction = 'in' AND m.created_at BETWEEN $1 AND $2 ${f}
+         UNION ALL
+         SELECT date_trunc('${group}', m.created_at), 'out' FROM messages m JOIN conversations c ON c.id = m.conversation_id
+          WHERE m.direction = 'out' AND m.type <> 'note' AND m.created_at BETWEEN $1 AND $2 ${f}
        )
        SELECT bucket,
               COUNT(*) FILTER (WHERE kind = 'conv')::int AS conversations,
-              COUNT(*) FILTER (WHERE kind = 'in')::int  AS messages_in,
+              COUNT(*) FILTER (WHERE kind = 'resolved')::int AS resolved,
+              COUNT(*) FILTER (WHERE kind = 'in')::int AS messages_in,
               COUNT(*) FILTER (WHERE kind = 'out')::int AS messages_out
          FROM buckets GROUP BY bucket ORDER BY bucket`,
-      [from, to]
+      params
     );
     res.json({ from, to, group, series: rows });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
+});
+
+// Tendência diária de tempo de primeira resposta e de resolução (média e mediana)
+router.get('/trend', async (req, res, next) => {
+  try {
+    const { from, to } = period(req.query);
+    const params = [from, to];
+    const f = convFilter(req.query, params);
+    const { rows } = await db.query(
+      `SELECT d.bucket,
+              fr.avg_first, fr.median_first, rs.avg_res, rs.median_res
+         FROM (SELECT DISTINCT date_trunc('day', c.created_at) AS bucket FROM conversations c WHERE c.created_at BETWEEN $1 AND $2 ${f}
+               UNION SELECT DISTINCT date_trunc('day', c.resolved_at) FROM conversations c WHERE c.resolved_at BETWEEN $1 AND $2 ${f}) d
+         LEFT JOIN (
+           SELECT date_trunc('day', c.created_at) AS bucket,
+                  EXTRACT(EPOCH FROM AVG(c.first_response_at - c.created_at))::int AS avg_first,
+                  EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY c.first_response_at - c.created_at))::int AS median_first
+             FROM conversations c WHERE c.first_response_at IS NOT NULL AND c.created_at BETWEEN $1 AND $2 ${f} GROUP BY 1
+         ) fr ON fr.bucket = d.bucket
+         LEFT JOIN (
+           SELECT date_trunc('day', c.resolved_at) AS bucket,
+                  EXTRACT(EPOCH FROM AVG(c.resolved_at - c.created_at))::int AS avg_res,
+                  EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY c.resolved_at - c.created_at))::int AS median_res
+             FROM conversations c WHERE c.resolved_at BETWEEN $1 AND $2 ${f} GROUP BY 1
+         ) rs ON rs.bucket = d.bucket
+        ORDER BY d.bucket`,
+      params
+    );
+    res.json({ from, to, series: rows });
+  } catch (err) { next(err); }
 });
 
 // Desempenho por atendente
 router.get('/agents', async (req, res, next) => {
   try {
     const { from, to } = period(req.query);
+    const params = [from, to];
+    const f = convFilter({ account: req.query.account, sector: req.query.sector }, params);
     const { rows } = await db.query(
       `WITH seq AS (
-         SELECT sender_user_id, direction, created_at,
-                LAG(direction) OVER (PARTITION BY conversation_id ORDER BY created_at, id) AS prev_dir,
-                LAG(created_at) OVER (PARTITION BY conversation_id ORDER BY created_at, id) AS prev_at
-           FROM messages WHERE type <> 'note'
+         SELECT m.sender_user_id, m.direction, m.created_at,
+                LAG(m.direction) OVER (PARTITION BY m.conversation_id ORDER BY m.created_at, m.id) AS prev_dir,
+                LAG(m.created_at) OVER (PARTITION BY m.conversation_id ORDER BY m.created_at, m.id) AS prev_at
+           FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.type <> 'note' ${f}
        ),
        resp AS (
-         SELECT sender_user_id,
-                EXTRACT(EPOCH FROM AVG(created_at - prev_at))::int AS avg_response_seconds
-           FROM seq
-          WHERE direction = 'out' AND prev_dir = 'in' AND created_at BETWEEN $1 AND $2
-          GROUP BY sender_user_id
+         SELECT sender_user_id AS uid,
+                EXTRACT(EPOCH FROM AVG(created_at - prev_at))::int AS avg_response_seconds,
+                EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY created_at - prev_at))::int AS median_response_seconds
+           FROM seq WHERE direction = 'out' AND prev_dir = 'in' AND created_at BETWEEN $1 AND $2 GROUP BY sender_user_id
        ),
        assigned AS (
-         SELECT assigned_user_id AS uid, COUNT(*)::int AS conversations
-           FROM conversations WHERE created_at BETWEEN $1 AND $2 GROUP BY assigned_user_id
+         SELECT c.assigned_user_id AS uid, COUNT(*)::int AS conversations,
+                COUNT(*) FILTER (WHERE c.status = 'open')::int AS open_now
+           FROM conversations c WHERE c.created_at BETWEEN $1 AND $2 ${f} GROUP BY c.assigned_user_id
        ),
        resolved AS (
-         SELECT resolved_by_user_id AS uid, COUNT(*)::int AS resolved,
-                EXTRACT(EPOCH FROM AVG(resolved_at - created_at))::int AS avg_resolution_seconds
-           FROM conversations WHERE resolved_at BETWEEN $1 AND $2 GROUP BY resolved_by_user_id
+         SELECT c.resolved_by_user_id AS uid, COUNT(*)::int AS resolved,
+                EXTRACT(EPOCH FROM AVG(c.resolved_at - c.created_at))::int AS avg_resolution_seconds,
+                EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY c.resolved_at - c.created_at))::int AS median_resolution_seconds
+           FROM conversations c WHERE c.resolved_at BETWEEN $1 AND $2 ${f} GROUP BY c.resolved_by_user_id
        ),
        sent AS (
-         SELECT sender_user_id AS uid, COUNT(*)::int AS messages_sent
-           FROM messages WHERE direction = 'out' AND type <> 'note' AND created_at BETWEEN $1 AND $2 GROUP BY sender_user_id
+         SELECT m.sender_user_id AS uid, COUNT(*)::int AS messages_sent
+           FROM messages m JOIN conversations c ON c.id = m.conversation_id
+          WHERE m.direction = 'out' AND m.type <> 'note' AND m.created_at BETWEEN $1 AND $2 ${f} GROUP BY m.sender_user_id
        )
-       SELECT u.id, u.name, u.active,
-              COALESCE(a.conversations, 0) AS conversations,
-              COALESCE(rs.resolved, 0) AS resolved,
-              COALESCE(s.messages_sent, 0) AS messages_sent,
-              rs.avg_resolution_seconds,
-              r.avg_response_seconds
+       SELECT u.id, u.name, u.active, u.availability,
+              COALESCE(a.conversations, 0) AS conversations, COALESCE(a.open_now, 0) AS open_now,
+              COALESCE(rs.resolved, 0) AS resolved, COALESCE(s.messages_sent, 0) AS messages_sent,
+              rs.avg_resolution_seconds, rs.median_resolution_seconds,
+              r.avg_response_seconds, r.median_response_seconds
          FROM users u
          LEFT JOIN assigned a ON a.uid = u.id
          LEFT JOIN resolved rs ON rs.uid = u.id
          LEFT JOIN sent s ON s.uid = u.id
-         LEFT JOIN resp r ON r.sender_user_id = u.id
+         LEFT JOIN resp r ON r.uid = u.id
+        WHERE u.active = TRUE OR a.conversations > 0 OR s.messages_sent > 0
         ORDER BY conversations DESC, u.name`,
-      [from, to]
+      params
     );
-    res.json({ from, to, agents: rows });
-  } catch (err) {
-    next(err);
-  }
+    res.json({ from, to, agents: rows.map((r) => ({ ...r, online: realtime.isOnline(r.id) })) });
+  } catch (err) { next(err); }
 });
 
-// Conversas por tag
-router.get('/tags', async (req, res, next) => {
+// Distribuições: tags, setores, números
+router.get('/breakdown', async (req, res, next) => {
   try {
     const { from, to } = period(req.query);
+    const params = [from, to];
+    const f = convFilter(req.query, params);
+    const [tags, sectors, accounts] = await Promise.all([
+      db.query(
+        `SELECT t.id, t.name, t.color, COUNT(c.id)::int AS conversations
+           FROM tags t LEFT JOIN conversation_tags ct ON ct.tag_id = t.id
+           LEFT JOIN conversations c ON c.id = ct.conversation_id AND c.created_at BETWEEN $1 AND $2 ${f}
+          GROUP BY t.id ORDER BY conversations DESC, t.name`, params),
+      db.query(
+        `SELECT s.id, s.name, s.color, COUNT(c.id)::int AS conversations
+           FROM sectors s LEFT JOIN conversations c ON c.sector_id = s.id AND c.created_at BETWEEN $1 AND $2 ${f}
+          GROUP BY s.id ORDER BY conversations DESC, s.name`, params),
+      db.query(
+        `SELECT wa.id, wa.name, wa.phone, COUNT(c.id)::int AS conversations
+           FROM wa_accounts wa LEFT JOIN conversations c ON c.account_id = wa.id AND c.created_at BETWEEN $1 AND $2 ${f}
+          GROUP BY wa.id ORDER BY conversations DESC, wa.name`, params),
+    ]);
+    res.json({ from, to, tags: tags.rows, sectors: sectors.rows, accounts: accounts.rows });
+  } catch (err) { next(err); }
+});
+
+// Mapa de calor: conversas iniciadas por dia da semana × hora (fuso de São Paulo)
+router.get('/hours', async (req, res, next) => {
+  try {
+    const { from, to } = period(req.query);
+    const params = [from, to];
+    const f = convFilter(req.query, params);
     const { rows } = await db.query(
-      `SELECT t.id, t.name, t.color,
-              COUNT(c.id)::int AS conversations
-         FROM tags t
-         LEFT JOIN conversation_tags ct ON ct.tag_id = t.id
-         LEFT JOIN conversations c ON c.id = ct.conversation_id AND c.created_at BETWEEN $1 AND $2
-        GROUP BY t.id ORDER BY conversations DESC, t.name`,
-      [from, to]
+      `SELECT EXTRACT(DOW FROM c.created_at AT TIME ZONE 'America/Sao_Paulo')::int AS dow,
+              EXTRACT(HOUR FROM c.created_at AT TIME ZONE 'America/Sao_Paulo')::int AS hour,
+              COUNT(*)::int AS conversations
+         FROM conversations c WHERE c.created_at BETWEEN $1 AND $2 ${f}
+        GROUP BY 1, 2 ORDER BY 1, 2`,
+      params
     );
-    res.json({ from, to, tags: rows });
-  } catch (err) {
-    next(err);
-  }
+    res.json({ from, to, cells: rows });
+  } catch (err) { next(err); }
+});
+
+// Origem por DDD (o front agrupa em estado e região)
+router.get('/origin', async (req, res, next) => {
+  try {
+    const { from, to } = period(req.query);
+    const params = [from, to];
+    const f = convFilter(req.query, params);
+    const { rows } = await db.query(
+      `SELECT CASE WHEN ct.wa_id ~ '^55[1-9][0-9]' THEN substring(ct.wa_id from 3 for 2) ELSE 'intl' END AS ddd,
+              COUNT(*)::int AS conversations, COUNT(DISTINCT c.contact_id)::int AS contacts
+         FROM conversations c JOIN contacts ct ON ct.id = c.contact_id
+        WHERE c.created_at BETWEEN $1 AND $2 ${f}
+        GROUP BY 1 ORDER BY conversations DESC`,
+      params
+    );
+    res.json({ from, to, ddd: rows });
+  } catch (err) { next(err); }
+});
+
+// Agora: situação em tempo real
+router.get('/now', async (req, res, next) => {
+  try {
+    const params = [];
+    const f = convFilter(req.query, params);
+    const settings = await db.query(`SELECT key, value FROM app_settings WHERE key IN ('sla_warn_minutes', 'sla_alert_minutes')`);
+    const sla = Object.fromEntries(settings.rows.map((r) => [r.key, Number(r.value)]));
+    const alertMin = sla.sla_alert_minutes || 15;
+    params.push(alertMin);
+    const alertParam = params.length;
+    const [state, oldest, lastHour, opened, inbound] = await Promise.all([
+      db.query(
+        `SELECT COUNT(*) FILTER (WHERE c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out')::int AS waiting,
+                COUNT(*) FILTER (WHERE c.status = 'open' AND c.last_message_direction = 'out')::int AS in_progress,
+                COUNT(*) FILTER (WHERE c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out'
+                                   AND c.last_message_at < NOW() - ($${alertParam} || ' minutes')::interval)::int AS overdue,
+                COUNT(*) FILTER (WHERE c.status = 'open' AND c.assigned_user_id IS NULL)::int AS unassigned
+           FROM conversations c WHERE TRUE ${f}`, params),
+      db.query(
+        `SELECT c.id, ct.name AS contact_name, ct.profile_name, ct.wa_id, c.last_message_at, u.name AS assigned_user_name,
+                EXTRACT(EPOCH FROM (NOW() - c.last_message_at))::int AS waiting_seconds
+           FROM conversations c JOIN contacts ct ON ct.id = c.contact_id LEFT JOIN users u ON u.id = c.assigned_user_id
+          WHERE c.status = 'open' AND c.last_message_direction IS DISTINCT FROM 'out' ${f}
+          ORDER BY c.last_message_at ASC LIMIT 8`, params.slice(0, params.length - 1)),
+      db.query(
+        `WITH seq AS (
+           SELECT m.direction, m.created_at,
+                  LAG(m.direction) OVER (PARTITION BY m.conversation_id ORDER BY m.created_at, m.id) AS prev_dir,
+                  LAG(m.created_at) OVER (PARTITION BY m.conversation_id ORDER BY m.created_at, m.id) AS prev_at
+             FROM messages m JOIN conversations c ON c.id = m.conversation_id
+            WHERE m.type <> 'note' AND m.created_at > NOW() - INTERVAL '2 hours' ${f}
+         )
+         SELECT EXTRACT(EPOCH FROM AVG(created_at - prev_at))::int AS avg_response_seconds,
+                EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY created_at - prev_at))::int AS median_response_seconds,
+                COUNT(*)::int AS replies
+           FROM seq WHERE direction = 'out' AND prev_dir = 'in' AND created_at > NOW() - INTERVAL '1 hour'`, params.slice(0, params.length - 1)),
+      db.query(
+        `SELECT date_trunc('hour', c.created_at) + (floor(EXTRACT(MINUTE FROM c.created_at) / 5) * 5) * INTERVAL '1 minute' AS bucket,
+                COUNT(*)::int AS conversations
+           FROM conversations c WHERE c.created_at > NOW() - INTERVAL '1 hour' ${f}
+          GROUP BY 1 ORDER BY 1`, params.slice(0, params.length - 1)),
+      db.query(
+        `SELECT COUNT(*)::int AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id
+          WHERE m.direction = 'in' AND m.created_at > NOW() - INTERVAL '1 hour' ${f}`, params.slice(0, params.length - 1)),
+    ]);
+    const agents = await db.query(`SELECT id, name, availability FROM users WHERE active = TRUE ORDER BY name`);
+    res.json({
+      at: new Date(),
+      sla,
+      ...state.rows[0],
+      oldest_waiting: oldest.rows,
+      last_hour: { ...lastHour.rows[0], opened: opened.rows, messages_in: inbound.rows[0].n },
+      agents: agents.rows.map((a) => ({ ...a, online: realtime.isOnline(a.id) })),
+    });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;
