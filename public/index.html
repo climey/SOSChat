@@ -231,9 +231,28 @@
 </div>
 
 <div class="modal-bg" id="prefs-modal" hidden>
-  <form class="modal" id="prefs-form">
-    <h3>Notificações e som</h3>
-    <p class="small muted" style="margin:-6px 0 14px">Preferências só suas, salvas neste navegador.</p>
+  <form class="modal wide" id="prefs-form">
+    <h3>Meu perfil, notificações e som</h3>
+    <p class="small muted" style="margin:-6px 0 14px">A foto vale para toda a equipe; o resto é só seu, salvo neste navegador.</p>
+    <div class="field">
+      <label class="label">Foto de perfil</label>
+      <div class="profile-row">
+        <div class="avatar lg" id="prefs-avatar"></div>
+        <div class="profile-actions">
+          <button type="button" class="btn btn-sm" id="prefs-avatar-pick">Escolher foto</button>
+          <button type="button" class="btn btn-sm btn-ghost" id="prefs-avatar-remove">Remover</button>
+          <input type="file" id="prefs-avatar-file" accept="image/jpeg,image/png,image/webp" hidden>
+          <div class="small muted">JPG, PNG ou WebP até 2 MB. Aparece na lista e ao lado das suas mensagens.</div>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label class="label">Dispositivos de áudio</label>
+      <div class="device-row"><span class="small">Saída (alto-falante ou fone)</span><select class="select" id="pref-output"><option value="">Padrão do sistema</option></select><button type="button" class="btn btn-sm" id="pref-output-test">Testar</button></div>
+      <div class="device-row"><span class="small">Microfone</span><select class="select" id="pref-input"><option value="">Padrão do sistema</option></select><button type="button" class="btn btn-sm" id="pref-input-test">Testar</button></div>
+      <div class="small muted" id="pref-device-help"></div>
+      <div class="mic-meter" id="mic-meter" hidden><div class="mic-fill" id="mic-fill"></div></div>
+    </div>
     <div class="field">
       <label class="label">Som de nova mensagem</label>
       <div class="sound-list" id="sound-list"></div>

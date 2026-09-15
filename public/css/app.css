@@ -611,3 +611,17 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .tag.new { background: rgba(224, 49, 49, 0.18); color: #ff8787; }
 .seg button.has-queue .cnt { background: var(--primary); color: #fff; padding: 0 6px; border-radius: 999px; opacity: 1; }
 .seg button.active.has-queue .cnt { background: #fff; color: var(--primary); }
+
+/* ---------- Perfil e dispositivos ---------- */
+.rail-user .av-img, .conv-item .agent img, .msg-row .agent-avatar img, .mini-av img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.conv-item .agent, .msg-row .agent-avatar, .mini-av { overflow: visible; }
+.conv-item .agent img, .msg-row .agent-avatar img, .mini-av img { z-index: 0; }
+.conv-item .agent .pdot, .mini-av .pdot { z-index: 1; }
+.profile-row { display: flex; align-items: center; gap: 14px; }
+.profile-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.profile-actions .btn + .btn { margin-top: 0; }
+.device-row { display: grid; grid-template-columns: 1fr 1.6fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+.device-row .select { width: 100%; padding: 6px 30px 6px 10px; font-size: 13px; }
+.mic-meter { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-top: 6px; }
+.mic-fill { height: 100%; width: 0; background: var(--green); transition: width 0.08s; }
+.modal.wide { max-width: 520px; }

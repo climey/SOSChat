@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const realtime = require('../realtime');
@@ -14,10 +15,52 @@ router.get('/', async (req, res, next) => {
   try {
     const includeInactive = req.user.role === 'admin' && req.query.all === '1';
     const { rows } = await db.query(
-      `SELECT id, name, email, role, active, availability, created_at FROM users
+      `SELECT id, name, email, role, active, availability, avatar_media_id, created_at FROM users
         ${includeInactive ? '' : 'WHERE active = TRUE'} ORDER BY name`
     );
     res.json({ users: rows.map((u) => ({ ...u, online: realtime.isOnline(u.id) })) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Foto de perfil (própria; admin pode definir a de qualquer atendente). multipart: file (imagem até 2 MB)
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024, files: 1 } });
+async function setAvatar(req, res, next, targetId) {
+  try {
+    const file = req.file;
+    if (!file || !file.buffer?.length) return res.status(400).json({ error: 'Envie uma imagem' });
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) return res.status(400).json({ error: 'Use JPG, PNG ou WebP' });
+    const mediaId = `uavatar-${targetId}`;
+    await db.query(
+      `INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET mime = EXCLUDED.mime, size = EXCLUDED.size, data = EXCLUDED.data, created_at = NOW()`,
+      [mediaId, file.mimetype, file.size, file.buffer]
+    );
+    // Sufixo de versão para o navegador não usar a foto antiga em cache
+    const versioned = `${mediaId}`;
+    const { rows } = await db.query('UPDATE users SET avatar_media_id = $2 WHERE id = $1 RETURNING id, name, avatar_media_id', [targetId, versioned]);
+    if (!rows.length) return res.status(404).json({ error: 'Usuário não encontrado' });
+    realtime.broadcast('user:avatar', { user_id: targetId, avatar_media_id: mediaId, version: Date.now() });
+    res.json({ user: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+}
+function multerImage(req, res, next) {
+  avatarUpload.single('file')(req, res, (err) => {
+    if (!err) return next();
+    res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Imagem acima de 2 MB' : err.message });
+  });
+}
+router.post('/me/avatar', multerImage, (req, res, next) => setAvatar(req, res, next, req.user.id));
+router.post('/:id/avatar', requireAdmin, multerImage, (req, res, next) => setAvatar(req, res, next, Number(req.params.id)));
+router.delete('/me/avatar', async (req, res, next) => {
+  try {
+    await db.query('UPDATE users SET avatar_media_id = NULL WHERE id = $1', [req.user.id]);
+    await db.query('DELETE FROM media_files WHERE id = $1', [`uavatar-${req.user.id}`]);
+    realtime.broadcast('user:avatar', { user_id: req.user.id, avatar_media_id: null });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

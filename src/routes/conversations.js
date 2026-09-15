@@ -87,7 +87,7 @@ router.get('/:id/messages', async (req, res, next) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
     const { rows } = await db.query(
-      `SELECT m.*, u.name AS sender_name, mf.size AS media_size,
+      `SELECT m.*, u.name AS sender_name, u.avatar_media_id AS sender_avatar, mf.size AS media_size,
               CASE WHEN q.id IS NULL THEN NULL ELSE json_build_object(
                 'id', q.id, 'body', q.body, 'type', q.type, 'direction', q.direction, 'media_id', q.media_id, 'sender_name', qu.name
               ) END AS quoted
@@ -173,6 +173,7 @@ router.post('/:id/media', (req, res, next) => {
 
     const updated = await touchConversationAfterSend(id, kind === 'document' ? `[Arquivo] ${filename}` : (caption ? `${label} ${caption}` : label), req.user.id);
     message.sender_name = req.user.name;
+    message.sender_avatar = req.user.avatar_media_id || null;
     realtime.broadcast('message:new', { message, conversation: updated });
     realtime.broadcast('conversation:updated', updated);
     schedules.cancelFor(id, 'agent').catch(() => {});
@@ -226,6 +227,7 @@ router.post('/:id/audio', (req, res, next) => {
     }
     const updated = await touchConversationAfterSend(id, '[Áudio]', req.user.id);
     message.sender_name = req.user.name;
+    message.sender_avatar = req.user.avatar_media_id || null;
     message.media_size = voice.buffer.length;
     realtime.broadcast('message:new', { message, conversation: updated });
     realtime.broadcast('conversation:updated', updated);

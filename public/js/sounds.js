@@ -9,14 +9,24 @@
     marimba: { name: 'Marimba', play: (ctx, t, vol) => tone(ctx, t, vol, 'triangle', [[659, 0, 0.18], [784, 0.12, 0.18], [988, 0.24, 0.3]]) },
     none: { name: 'Nenhum (silencioso)', play: () => {} },
   };
-  const DEFAULTS = { sound: 'ding', volume: 0.6, whenFocused: false, whenBackground: true, desktop: true, flashTitle: true };
+  const DEFAULTS = { sound: 'ding', volume: 0.6, whenFocused: false, whenBackground: true, desktop: true, flashTitle: true, outputId: '', inputId: '' };
 
   let ctx = null;
+  let appliedSink = null;
   function audio() {
     if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; } }
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    applySink();
     return ctx;
   }
+  /** Direciona os sons para o dispositivo de saída escolhido (Chrome/Edge; outros ignoram). */
+  function applySink() {
+    const id = load().outputId || '';
+    if (!ctx || typeof ctx.setSinkId !== 'function' || appliedSink === id) return;
+    appliedSink = id;
+    ctx.setSinkId(id === 'default' ? '' : id).catch(() => { appliedSink = null; });
+  }
+  const supportsOutputSelect = () => typeof HTMLMediaElement.prototype.setSinkId === 'function';
   function tone(c, t, vol, type, notes, attack = 0.005) {
     for (const [freq, delay, dur] of notes) {
       const o = c.createOscillator(); const g = c.createGain();
@@ -40,6 +50,28 @@
   }
   function save(prefs) {
     try { localStorage.setItem('sos.notify', JSON.stringify(prefs)); } catch { /* ignora */ }
+    appliedSink = null;
+    if (ctx) applySink();
+  }
+  /** Lista microfones e saídas. Os nomes só aparecem depois que o navegador libera o microfone. */
+  async function listDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) return { inputs: [], outputs: [], labeled: false };
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const inputs = all.filter((d) => d.kind === 'audioinput');
+    const outputs = all.filter((d) => d.kind === 'audiooutput');
+    const labeled = inputs.some((d) => d.label) || outputs.some((d) => d.label);
+    return { inputs, outputs, labeled };
+  }
+  /** Pede permissão do microfone uma vez, só para liberar os nomes dos dispositivos. */
+  async function requestDeviceAccess() {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach((t) => t.stop());
+  }
+  /** Aplica a saída escolhida a um elemento de áudio/vídeo (players de mensagens). */
+  function applyOutputTo(el) {
+    const id = load().outputId || '';
+    if (!supportsOutputSelect() || !el || typeof el.setSinkId !== 'function') return;
+    el.setSinkId(id === 'default' ? '' : id).catch(() => {});
   }
   function play(id, volume) {
     const s = SOUNDS[id || load().sound];
@@ -51,5 +83,5 @@
   document.addEventListener('click', () => audio(), { once: true, capture: true });
 
   window.SOS = window.SOS || {};
-  window.SOS.sound = { SOUNDS, DEFAULTS, load, save, play };
+  window.SOS.sound = { SOUNDS, DEFAULTS, load, save, play, listDevices, requestDeviceAccess, applyOutputTo, supportsOutputSelect };
 })();

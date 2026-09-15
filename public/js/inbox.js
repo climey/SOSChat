@@ -144,6 +144,13 @@
     if (c.hidden) f.push(`<span title="Oculta">${HIDE_ICON}</span>`);
     return f.length ? `<span class="flags">${f.join('')}</span>` : '';
   }
+  /** Foto de perfil de um atendente (ou nada, mantendo as iniciais). */
+  const avatarVersion = new Map();
+  function userImg(mediaId) {
+    if (!mediaId) return '';
+    const v = avatarVersion.get(mediaId) || '';
+    return `<img src="/api/media/${esc(mediaId)}${v ? `?v=${v}` : ''}" alt="" loading="lazy">`;
+  }
   /** Bolinha de presença de um atendente (verde online, amarelo ausente, cinza offline). */
   function pdot(userId) {
     const p = state.presence.get(Number(userId));
@@ -187,7 +194,7 @@
               ${waitHtml(c)}
               ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
               ${c.assigned_user_name
-                ? `<span class="agent" title="Responsável: ${esc(c.assigned_user_name)}">${esc(initials(c.assigned_user_name))}${pdot(c.assigned_user_id)}</span>`
+                ? `<span class="agent" title="Responsável: ${esc(c.assigned_user_name)}">${esc(initials(c.assigned_user_name))}${userImg(c.assigned_user_avatar)}${pdot(c.assigned_user_id)}</span>`
                 : '<span class="agent none" title="Sem responsável">?</span>'}
             </div>
             <div class="meta">
@@ -464,7 +471,7 @@
       const rowCls = isNote ? 'note' : m.direction;
       const showBody = m.deleted_at || !m.media_id || !(isPlaceholder(m.body) || m.type === 'document');
       const agent = m.direction === 'out'
-        ? `<span class="agent-avatar" title="${esc(m.sender_name || 'Sistema')}">${esc(initials(m.sender_name || 'S'))}</span>` : '';
+        ? `<span class="agent-avatar" title="${esc(m.sender_name || 'Sistema')}">${esc(initials(m.sender_name || 'S'))}${userImg(m.sender_avatar)}</span>` : '';
       const sender = m.direction === 'out' && m.sender_name
         ? `<div class="sender">${isNote ? 'Nota interna · ' : ''}${esc(m.sender_name)}</div>` : '';
       const dimmed = state.search.q && !state.search.hits.includes(m.id) ? 'dimmed' : '';
@@ -849,7 +856,9 @@
   async function startRecording() {
     if (!recSupported()) { toast('Seu navegador não permite gravar áudio', true); return; }
     try {
-      rec.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const inputId = SOS.sound.load().inputId;
+      rec.stream = await navigator.mediaDevices.getUserMedia({ audio: inputId ? { deviceId: { exact: inputId } } : true })
+        .catch(() => navigator.mediaDevices.getUserMedia({ audio: true })); // microfone escolhido sumiu: usa o padrão
     } catch { toast('Permita o uso do microfone para gravar', true); return; }
     rec.chunks = []; rec.cancelled = false; rec.start = Date.now();
     rec.recorder = new MediaRecorder(rec.stream, recMime() ? { mimeType: recMime() } : undefined);
@@ -1066,6 +1075,7 @@
     if (players.has(id)) return players.get(id);
     const a = new Audio(src);
     a.preload = 'metadata';
+    SOS.sound.applyOutputTo(a);
     a.addEventListener('timeupdate', () => syncPlayer(id));
     a.addEventListener('loadedmetadata', () => {
       // alguns áudios do WhatsApp chegam sem duração; força o cálculo
@@ -1597,6 +1607,15 @@
     });
     socket.on('settings:updated', (s) => { Object.assign(state.settings, s); renderList(); });
     socket.on('sectors:updated', () => loadSectors());
+    socket.on('user:avatar', ({ user_id, avatar_media_id, version }) => {
+      if (avatar_media_id && version) avatarVersion.set(avatar_media_id, version);
+      for (const u of state.users) if (u.id === user_id) u.avatar_media_id = avatar_media_id;
+      for (const c of state.conversations) if (c.assigned_user_id === user_id) c.assigned_user_avatar = avatar_media_id;
+      for (const m of state.messages) if (m.sender_user_id === user_id) m.sender_avatar = avatar_media_id;
+      if (user_id === state.me.id) { state.me.avatar_media_id = avatar_media_id; renderRailAvatar(); }
+      renderList();
+      if (state.currentId) renderMessages(false);
+    });
     socket.on('contact:updated', (contact) => {
       let touched = false;
       for (const c of state.conversations) if (c.contact_id === contact.id) { c.contact_name = contact.name; touched = true; }
@@ -1704,9 +1723,95 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) stopTitleFlash(); });
   window.addEventListener('focus', stopTitleFlash);
 
+  // Foto de perfil e dispositivos de áudio (dentro do modal de preferências)
+  function renderRailAvatar() {
+    const el = $('me-avatar');
+    el.querySelector('.av-img')?.remove();
+    if (state.me.avatar_media_id) el.insertAdjacentHTML('afterbegin', `<img class="av-img" src="/api/media/${esc(state.me.avatar_media_id)}?v=${Date.now()}" alt="">`);
+  }
+  function renderPrefsAvatar() {
+    $('prefs-avatar').innerHTML = esc(initials(state.me.name)) + (state.me.avatar_media_id ? `<img src="/api/media/${esc(state.me.avatar_media_id)}?v=${Date.now()}" alt="">` : '');
+    $('prefs-avatar-remove').hidden = !state.me.avatar_media_id;
+  }
+  $('prefs-avatar-pick').addEventListener('click', () => { $('prefs-avatar-file').value = ''; $('prefs-avatar-file').click(); });
+  $('prefs-avatar-file').addEventListener('change', async () => {
+    const f = $('prefs-avatar-file').files[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('file', f, f.name);
+    try {
+      const { user } = await SOS.upload('/api/users/me/avatar', fd);
+      state.me.avatar_media_id = user.avatar_media_id;
+      avatarVersion.set(user.avatar_media_id, Date.now());
+      renderPrefsAvatar(); renderRailAvatar(); renderList();
+      toast('Foto atualizada');
+    } catch (err) { toast(err.message, true); }
+  });
+  $('prefs-avatar-remove').addEventListener('click', async () => {
+    try {
+      await api('DELETE', '/api/users/me/avatar');
+      state.me.avatar_media_id = null;
+      renderPrefsAvatar(); renderRailAvatar(); renderList();
+      toast('Foto removida');
+    } catch (err) { toast(err.message, true); }
+  });
+
+  let micTest = null;
+  async function renderDevices() {
+    const prefs = SOS.sound.load();
+    const { inputs, outputs, labeled } = await SOS.sound.listDevices().catch(() => ({ inputs: [], outputs: [], labeled: false }));
+    const opt = (d, i, kind) => `<option value="${esc(d.deviceId)}">${esc(d.label || `${kind} ${i + 1}`)}</option>`;
+    $('pref-output').innerHTML = '<option value="">Padrão do sistema</option>' + outputs.filter((d) => d.deviceId !== 'default').map((d, i) => opt(d, i, 'Saída')).join('');
+    $('pref-input').innerHTML = '<option value="">Padrão do sistema</option>' + inputs.filter((d) => d.deviceId !== 'default').map((d, i) => opt(d, i, 'Microfone')).join('');
+    $('pref-output').value = [...$('pref-output').options].some((o) => o.value === prefs.outputId) ? prefs.outputId : '';
+    $('pref-input').value = [...$('pref-input').options].some((o) => o.value === prefs.inputId) ? prefs.inputId : '';
+    $('pref-output').disabled = !SOS.sound.supportsOutputSelect();
+    const help = [];
+    if (!SOS.sound.supportsOutputSelect()) help.push('Este navegador não permite escolher a saída (funciona no Chrome e no Edge).');
+    if (!labeled) help.push('<a href="#" id="pref-device-allow">Permitir o microfone</a> para mostrar os nomes dos dispositivos.');
+    $('pref-device-help').innerHTML = help.join(' ');
+    $('pref-device-allow')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await SOS.sound.requestDeviceAccess(); await renderDevices(); } catch { toast('Permissão do microfone negada', true); }
+    });
+  }
+  $('pref-output-test').addEventListener('click', () => {
+    const prefs = SOS.sound.load();
+    SOS.sound.save({ ...prefs, outputId: $('pref-output').value });
+    SOS.sound.play(document.querySelector('#sound-list input:checked')?.value || prefs.sound, Number($('pref-volume').value));
+  });
+  $('pref-input-test').addEventListener('click', async () => {
+    if (micTest) { stopMicTest(); return; }
+    try {
+      const id = $('pref-input').value;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { deviceId: { exact: id } } : true });
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(stream);
+      const an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an);
+      const buf = new Uint8Array(an.frequencyBinCount);
+      $('mic-meter').hidden = false;
+      $('pref-input-test').textContent = 'Parar';
+      micTest = { stream, ctx, timer: setInterval(() => { an.getByteTimeDomainData(buf); let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v - 128)); $('mic-fill').style.width = `${Math.min(100, (peak / 128) * 160)}%`; }, 80) };
+      setTimeout(() => micTest && stopMicTest(), 10000);
+    } catch { toast('Não foi possível acessar esse microfone', true); }
+  });
+  function stopMicTest() {
+    if (!micTest) return;
+    clearInterval(micTest.timer);
+    micTest.stream.getTracks().forEach((t) => t.stop());
+    micTest.ctx.close().catch(() => {});
+    micTest = null;
+    $('mic-meter').hidden = true;
+    $('mic-fill').style.width = '0';
+    $('pref-input-test').textContent = 'Testar';
+  }
+  navigator.mediaDevices?.addEventListener?.('devicechange', () => { if (!$('prefs-modal').hidden) renderDevices(); });
+
   // Preferências (modal)
   function openPrefs() {
     const prefs = SOS.sound.load();
+    renderPrefsAvatar();
+    renderDevices();
     $('sound-list').innerHTML = Object.entries(SOS.sound.SOUNDS).map(([id, s]) => `
       <label class="${prefs.sound === id ? 'on' : ''}"><input type="radio" name="sound" value="${id}" ${prefs.sound === id ? 'checked' : ''}><span class="name">${esc(s.name)}</span>
         ${id !== 'none' ? `<button type="button" class="play" data-play="${id}" title="Ouvir"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>` : ''}</label>`).join('');
@@ -1718,7 +1823,7 @@
     $('prefs-modal').hidden = false;
   }
   $('open-prefs').addEventListener('click', () => { $('presence-menu').hidden = true; openPrefs(); });
-  $('prefs-cancel').addEventListener('click', () => { $('prefs-modal').hidden = true; });
+  $('prefs-cancel').addEventListener('click', () => { stopMicTest(); $('prefs-modal').hidden = true; });
   $('sound-list').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-play]');
     if (b) { e.preventDefault(); SOS.sound.play(b.dataset.play, Number($('pref-volume').value)); return; }
@@ -1734,8 +1839,12 @@
       whenFocused: $('pref-focused').checked,
       desktop: $('pref-desktop').checked,
       flashTitle: $('pref-flash').checked,
+      outputId: $('pref-output').value,
+      inputId: $('pref-input').value,
     };
+    stopMicTest();
     SOS.sound.save(prefs);
+    for (const a of players.values()) SOS.sound.applyOutputTo(a);
     if (prefs.desktop && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
     $('prefs-modal').hidden = true;
     toast('Preferências salvas');

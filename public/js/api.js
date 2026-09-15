@@ -135,7 +135,10 @@
     const avEl = document.getElementById('me-avatar');
     if (nameEl) nameEl.textContent = user.name;
     if (roleEl) roleEl.textContent = user.role === 'admin' ? 'Administrador' : 'Atendente';
-    if (avEl) avEl.textContent = initials(user.name);
+    if (avEl) {
+      avEl.textContent = initials(user.name);
+      if (user.avatar_media_id) avEl.insertAdjacentHTML('beforeend', `<img class="av-img" src="/api/media/${esc(user.avatar_media_id)}?v=${Date.now()}" alt="">`);
+    }
     document.querySelectorAll('[data-admin-only]').forEach((el) => { el.hidden = user.role !== 'admin'; });
     const logout = document.getElementById('logout');
     if (logout) logout.addEventListener('click', async () => { await api('POST', '/api/auth/logout'); location.href = '/login.html'; });

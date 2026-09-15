@@ -80,6 +80,7 @@ async function sendText(conversationId, user, body, { scheduled = false, quotedI
   const updated = await touchAfterSend(conversationId, body, user.id);
   message = await require('./inbound').withQuoted(message);
   message.sender_name = user.name;
+  message.sender_avatar = user.avatar_media_id || null;
   realtime.broadcast('message:new', { message, conversation: updated });
   realtime.broadcast('conversation:updated', updated);
   if (!scheduled) require('./schedules').cancelFor(conversationId, 'agent').catch(() => {});
@@ -148,7 +149,7 @@ async function addNote(conversationId, user, body) {
      VALUES ($1, 'out', 'note', $2, 'sent', $3) RETURNING *`,
     [conversationId, body, user.id]
   );
-  const message = { ...rows[0], sender_name: user.name };
+  const message = { ...rows[0], sender_name: user.name, sender_avatar: user.avatar_media_id || null };
   realtime.broadcast('message:new', { message, conversation: conv });
   return { message, conversation: conv };
 }

@@ -13,7 +13,7 @@ function selectSql(userParam) {
          c.last_message_preview, c.last_message_direction, c.first_response_at, c.resolved_at, c.created_at, c.attended,
          COALESCE(cp.pinned, FALSE) AS pinned, COALESCE(cp.muted, FALSE) AS muted, COALESCE(cp.hidden, FALSE) AS hidden,
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id, ct.blocked AS contact_blocked,
-         u.name AS assigned_user_name,
+         u.name AS assigned_user_name, u.avatar_media_id AS assigned_user_avatar,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone,
          c.sector_id, se.name AS sector_name, se.color AS sector_color,
          COALESCE(sc.n, 0) AS scheduled_count
