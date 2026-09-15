@@ -74,6 +74,7 @@
         </div>
         <select class="select" id="tag-filter"><option value="">Todas as tags</option></select>
         <select class="select" id="account-filter" hidden><option value="">Todos os números</option></select>
+        <select class="select" id="sector-filter"><option value="">Todos os setores</option></select>
         <div class="chips">
           <button class="chip" id="filter-all-status" data-status="all">Ver todas (inclui finalizadas)</button>
           <button class="chip" id="filter-hidden">Mostrar ocultas</button>
@@ -218,6 +219,9 @@
     </div>
   </form>
 </div>
+
+<div class="conv-menu tag-popup" id="tag-popup" hidden></div>
+<div class="conv-menu" id="sector-popup" hidden></div>
 
 <div class="conv-menu" id="presence-menu" hidden>
   <button type="button" data-availability="available"><span class="pdot online"></span>Disponível</button>

@@ -10,12 +10,13 @@
     currentId: null,
     currentConv: null,
     messages: [],
-    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', q: '', hidden: 'none' },
+    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', sector: '', q: '', hidden: 'none' },
     accounts: new Map(), // id -> status do número (só provedor baileys)
     prefs: new Map(), // conversa id -> { pinned, muted, hidden } deste atendente
     presence: new Map(), // user id -> { online, availability }
     settings: { sla_warn_minutes: 5, sla_alert_minutes: 15 },
     quickReplies: [],
+    sectors: [],
     reply: null, // mensagem sendo citada
     typing: new Map(), // conversa id -> Map(user id -> { name, until })
     multiAccount: false,
@@ -85,6 +86,7 @@
     const qs = new URLSearchParams({ status: f.status, assigned: f.assigned });
     if (f.tag) qs.set('tag', f.tag);
     if (f.account) qs.set('account', f.account);
+    if (f.sector) qs.set('sector', f.sector);
     if (f.q) qs.set('q', f.q);
     if (f.hidden !== 'none') qs.set('hidden', f.hidden);
     const { conversations } = await api('GET', `/api/conversations?${qs}`);
@@ -171,6 +173,7 @@
               ${c.scheduled_count > 0 ? `<span class="chip-soft" title="${c.scheduled_count} mensagem(ns) agendada(s)">⏰ ${c.scheduled_count}</span>` : ''}
               <span class="spacer"></span>
               ${c.account_name && state.multiAccount ? `<span class="chip-soft ${accountOffline(c.account_id) ? 'off' : ''}">${esc(c.account_name)}</span>` : ''}
+              ${sectorChip(c)}
             </div>
           </div>
           <button type="button" class="more" data-menu="${c.id}" title="Mais opções"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
@@ -220,6 +223,7 @@
       'sep',
       c.status === 'resolved' ? ['reopen', MI.check, 'Reabrir conversa'] : ['resolve', MI.check, 'Finalizar conversa'],
       c.status === 'open' ? (c.last_message_direction === 'out' ? ['inbox', MI.wait, 'Voltar para Entrada'] : ['waiting', MI.wait, 'Marcar como esperando']) : null,
+      ['sector', MI.tag, 'Mudar setor'],
       ['pin', MI.pin, c.pinned ? 'Desafixar (só para você)' : 'Fixar (só para você)'],
       ['hide', MI.hide, c.hidden ? 'Mostrar conversa' : 'Ocultar (só para você)'],
       'sep',
@@ -251,8 +255,11 @@
   $('conv-menu').addEventListener('click', async (e) => {
     const b = e.target.closest('button[data-act]');
     const c = state.conversations.find((x) => x.id === menuConvId);
+    const anchor = document.querySelector(`.conv-item[data-id="${menuConvId}"] .more`);
     closeConvMenu();
     if (!b || !c) return;
+    if (b.dataset.act === 'sector') { e.stopPropagation(); openSectorPopup(c, anchor || els.items); return; }
+    if (b.dataset.act === 'tag') { e.stopPropagation(); openTagPopup(c, anchor || els.items); return; }
     const patch = (body) => api('PATCH', `/api/conversations/${c.id}`, body);
     // Preferência pessoal: o servidor não transmite para os outros, então a tela se atualiza com a resposta
     const pref = async (body) => { const { conversation } = await patch(body); rememberPrefs(conversation); upsertConversation(conversation); if (conversation.id === state.currentId) renderChat(); };
@@ -306,6 +313,7 @@
   }));
   els.tagFilter.addEventListener('change', () => { state.filters.tag = els.tagFilter.value; loadConversations(); });
   els.accountFilter.addEventListener('change', () => { state.filters.account = els.accountFilter.value; loadConversations(); });
+  $('sector-filter').addEventListener('change', () => { state.filters.sector = $('sector-filter').value; loadConversations(); });
   els.btnFilters.addEventListener('click', () => {
     els.filtersDrawer.hidden = !els.filtersDrawer.hidden;
     els.btnFilters.classList.toggle('active', !els.filtersDrawer.hidden);
@@ -346,7 +354,9 @@
     els.chatTitle.textContent = contactName(c);
     els.chatTags.innerHTML =
       `<span class="sub">${esc(formatPhone(c.wa_id))}</span>` +
+      `<button type="button" class="tag-quick" id="btn-tag-quick" title="Adicionar ou remover etiquetas">${TAG_ICON}</button>` +
       c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('') +
+      sectorChip(c, true) +
       (c.account_name && state.multiAccount ? `<span class="chip-soft ${accountOffline(c.account_id) ? 'off' : ''}">via ${esc(c.account_name)}</span>` : '') +
       `<span class="chip-soft">${c.assigned_user_name ? `${pdot(c.assigned_user_id)}&nbsp;${esc(c.assigned_user_name)}` : 'Sem responsável'}</span>` +
       (c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : '') +
@@ -448,6 +458,72 @@
       </div>`;
     }).join('');
     if (scroll) els.messages.scrollTop = els.messages.scrollHeight;
+  }
+
+  // ---------- Setores e etiqueta rápida ----------
+  const TAG_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+  function sectorChip(c, clickable = false) {
+    if (!c.sector_id) return clickable ? `<span class="sector-chip clickable" id="sector-chip" title="Definir setor"><span class="dot"></span>Sem setor</span>` : '';
+    return `<span class="sector-chip ${clickable ? 'clickable' : ''}" ${clickable ? 'id="sector-chip" title="Mudar setor"' : ''} style="--sector-color:${esc(c.sector_color || '#868e96')}"><span class="dot"></span>${esc(c.sector_name)}</span>`;
+  }
+  function placeMenu(menu, anchor) {
+    menu.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.min(r.bottom + 6, window.innerHeight - menu.offsetHeight - 8)}px`;
+  }
+  let tagPopupConv = null;
+  function openTagPopup(conv, anchor) {
+    tagPopupConv = conv.id;
+    const selected = new Set(conv.tags.map((t) => t.id));
+    $('tag-popup').innerHTML = `<div class="hint">Clique para marcar ou desmarcar</div><div class="tag-picker">${state.tags.map((t) => `
+      <span class="tag selectable ${selected.has(t.id) ? 'on' : ''}" data-id="${t.id}" style="--tag-color:${esc(t.color)}"><i class="dot" style="background:${esc(t.color)}"></i>${esc(t.name)}</span>`).join('') || '<span class="muted small">Nenhuma tag cadastrada</span>'}</div>`;
+    placeMenu($('tag-popup'), anchor);
+  }
+  $('tag-popup').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const el = e.target.closest('.tag.selectable');
+    const c = state.conversations.find((x) => x.id === tagPopupConv) || (state.currentConv?.id === tagPopupConv ? state.currentConv : null);
+    if (!el || !c) return;
+    const id = Number(el.dataset.id);
+    const ids = new Set(c.tags.map((t) => t.id));
+    ids.has(id) ? ids.delete(id) : ids.add(id);
+    el.classList.toggle('on');
+    try { await api('PUT', `/api/conversations/${c.id}/tags`, { tag_ids: [...ids] }); }
+    catch (err) { toast(err.message, true); }
+  });
+  let sectorPopupConv = null;
+  function openSectorPopup(conv, anchor) {
+    sectorPopupConv = conv.id;
+    $('sector-popup').innerHTML = state.sectors.map((s) => `<button type="button" data-sector="${s.id}" class="${s.id === conv.sector_id ? 'selected' : ''}"><span class="sector-chip" style="--sector-color:${esc(s.color)}"><span class="dot"></span></span>${esc(s.name)}${s.is_default ? ' <span class="muted small">(padrão)</span>' : ''}</button>`).join('')
+      || '<div class="qr-empty">Nenhum setor. Admin cria em Configurações.</div>';
+    placeMenu($('sector-popup'), anchor);
+  }
+  $('sector-popup').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const b = e.target.closest('button[data-sector]');
+    $('sector-popup').hidden = true;
+    if (!b || !sectorPopupConv) return;
+    try { await api('PATCH', `/api/conversations/${sectorPopupConv}`, { sector_id: Number(b.dataset.sector) }); toast('Setor alterado'); }
+    catch (err) { toast(err.message, true); }
+  });
+  els.chatTags.addEventListener('click', (e) => {
+    const c = current();
+    if (!c) return;
+    if (e.target.closest('#btn-tag-quick')) { e.stopPropagation(); openTagPopup(c, e.target.closest('#btn-tag-quick')); }
+    else if (e.target.closest('#sector-chip')) { e.stopPropagation(); openSectorPopup(c, e.target.closest('#sector-chip')); }
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#tag-popup') && !e.target.closest('#btn-tag-quick')) $('tag-popup').hidden = true;
+    if (!e.target.closest('#sector-popup') && !e.target.closest('#sector-chip')) $('sector-popup').hidden = true;
+  });
+  async function loadSectors() {
+    try {
+      const { sectors } = await api('GET', '/api/sectors');
+      state.sectors = sectors;
+      $('sector-filter').innerHTML = '<option value="">Todos os setores</option>' + sectors.map((s) => `<option value="${s.id}">${esc(s.name)}${s.open_count ? ` (${s.open_count})` : ''}</option>`).join('');
+      $('sector-filter').value = state.filters.sector;
+    } catch { /* ignora */ }
   }
 
   // ---------- Citação e reações (renderização) ----------
@@ -1403,6 +1479,7 @@
     if (f.assigned === 'unassigned' && c.assigned_user_id) return false;
     if (f.tag && !c.tags.some((t) => String(t.id) === String(f.tag))) return false;
     if (f.account && String(c.account_id) !== String(f.account)) return false;
+    if (f.sector && String(c.sector_id) !== String(f.sector)) return false;
     if (f.hidden === 'none' && c.hidden) return false;
     if (f.hidden === 'only' && !c.hidden) return false;
     if (f.q) {
@@ -1443,6 +1520,7 @@
       if (conversation_id === state.currentId) { renderChat(); setTimeout(() => { if (conversation_id === state.currentId) renderChat(); }, 4200); }
     });
     socket.on('settings:updated', (s) => { Object.assign(state.settings, s); renderList(); });
+    socket.on('sectors:updated', () => loadSectors());
     socket.on('contact:updated', (contact) => {
       let touched = false;
       for (const c of state.conversations) if (c.contact_id === contact.id) { c.contact_name = contact.name; touched = true; }
@@ -1565,6 +1643,7 @@
     for (const u of users) setPresence(u.id, { online: Boolean(u.online), availability: u.availability || 'available' });
     setPresence(state.me.id, { online: true });
     renderMyPresence();
+    await loadSectors();
     els.tagFilter.innerHTML = '<option value="">Todas as tags</option>' + tags.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
     els.dAssignee.innerHTML = '<option value="">Sem responsável</option>' + users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
     try {

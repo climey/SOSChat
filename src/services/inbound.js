@@ -73,8 +73,8 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
       conversationId = convRows[0].id;
     } else {
       const ins = await client.query(
-        `INSERT INTO conversations (contact_id, status, last_message_at, account_id) VALUES ($1, 'open', $2, $3) RETURNING id`,
-        [contactId, sentAt, accountId]
+        `INSERT INTO conversations (contact_id, status, last_message_at, account_id, sector_id) VALUES ($1, 'open', $2, $3, $4) RETURNING id`,
+        [contactId, sentAt, accountId, await conversations.defaultSectorId(client)]
       );
       conversationId = ins.rows[0].id;
       isNew = true;
@@ -138,8 +138,8 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
     let conversationId = convRows[0]?.id;
     if (!conversationId) {
       const ins = await client.query(
-        `INSERT INTO conversations (contact_id, status, last_message_at, account_id) VALUES ($1, 'open', $2, $3) RETURNING id`,
-        [contactId, sentAt, accountId]
+        `INSERT INTO conversations (contact_id, status, last_message_at, account_id, sector_id) VALUES ($1, 'open', $2, $3, $4) RETURNING id`,
+        [contactId, sentAt, accountId, await conversations.defaultSectorId(client)]
       );
       conversationId = ins.rows[0].id;
     }

@@ -513,3 +513,30 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .details .field { margin-bottom: 8px; }
 .reactions { clear: both; }
 .msg-row .agent-avatar { position: relative; overflow: visible; }
+
+/* ---------- Setores e etiqueta rápida ---------- */
+.sector-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; border: 1px solid var(--sector-color, var(--border)); color: var(--text-2); white-space: nowrap; }
+.sector-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sector-color, var(--muted)); }
+.sector-chip.clickable { cursor: pointer; }
+.sector-chip.clickable:hover { background: var(--surface-2); }
+.chat-tags .tag-quick { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.chat-tags .tag-quick:hover { background: var(--surface-2); color: var(--text); }
+.chat-tags .tag-quick svg { width: 13px; height: 13px; }
+.tag-popup { padding: 10px; min-width: 220px; }
+.tag-popup .tag-picker { gap: 6px; }
+.tag-popup .hint { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+.conv-menu button .sector-chip .dot { margin: 0; }
+.conv-menu button.selected { background: var(--surface-3); }
+
+/* ---------- Configurações organizadas por seção ---------- */
+.settings-layout { display: flex; gap: 24px; align-items: flex-start; }
+.settings-nav { width: 230px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; }
+.settings-nav a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 9px; color: var(--text-2); font-weight: 500; }
+.settings-nav a svg { width: 17px; height: 17px; color: var(--muted); }
+.settings-nav a:hover { background: var(--surface); color: var(--text); }
+.settings-nav a.active { background: var(--primary-soft); color: #ff8787; }
+.settings-nav a.active svg { color: var(--primary); }
+.settings-content { flex: 1; min-width: 0; }
+.settings-section .card { padding: 22px 24px; }
+.settings-section .card h3 { font-size: 16px; color: var(--text); }
+@media (max-width: 900px) { .settings-layout { flex-direction: column; } .settings-nav { width: 100%; flex-direction: row; flex-wrap: wrap; position: static; } }

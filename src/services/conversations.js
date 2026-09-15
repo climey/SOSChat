@@ -15,11 +15,13 @@ function selectSql(userParam) {
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id, ct.blocked AS contact_blocked,
          u.name AS assigned_user_name,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone,
+         c.sector_id, se.name AS sector_name, se.color AS sector_color,
          COALESCE(sc.n, 0) AS scheduled_count
     FROM conversations c
     JOIN contacts ct ON ct.id = c.contact_id
     LEFT JOIN users u ON u.id = c.assigned_user_id
     LEFT JOIN wa_accounts wa ON wa.id = c.account_id
+    LEFT JOIN sectors se ON se.id = c.sector_id
     LEFT JOIN (SELECT conversation_id, COUNT(*)::int AS n FROM scheduled_messages WHERE status = 'pending' GROUP BY conversation_id) sc
            ON sc.conversation_id = c.id
     ${prefsJoin}
@@ -87,6 +89,7 @@ async function list(filters = {}) {
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
   if (filters.accountId) add('c.account_id = ?', filters.accountId);
+  if (filters.sectorId) add('c.sector_id = ?', filters.sectorId);
   if (filters.hidden === 'only') where.push('COALESCE(cp.hidden, FALSE) = TRUE');
   else if (filters.hidden !== 'all') where.push('COALESCE(cp.hidden, FALSE) = FALSE');
   if (filters.tagId) {
@@ -110,6 +113,12 @@ async function list(filters = {}) {
     LIMIT $${params.length - 1} OFFSET $${params.length}`;
   const { rows } = await db.query(sql, params);
   return attachTags(rows, db);
+}
+
+/** Id do setor padrão (para conversas novas). */
+async function defaultSectorId(client = db) {
+  const { rows } = await client.query('SELECT id FROM sectors WHERE is_default ORDER BY id LIMIT 1');
+  return rows[0]?.id || null;
 }
 
 /** Remove arquivos de mídia que nenhuma mensagem nem contato referencia mais. */
@@ -140,4 +149,4 @@ async function deleteByAccount(accountId) {
   return rowCount;
 }
 
-module.exports = { getById, list, setPrefs, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };
+module.exports = { getById, list, setPrefs, defaultSectorId, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };

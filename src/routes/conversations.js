@@ -41,6 +41,7 @@ router.get('/', async (req, res, next) => {
       userId: req.user.id,
       tagId: parseId(req.query.tag),
       accountId: parseId(req.query.account),
+      sectorId: parseId(req.query.sector),
       hidden: ['only', 'all'].includes(req.query.hidden) ? req.query.hidden : 'none',
       q: String(req.query.q || '').trim().slice(0, 100) || null,
       limit: req.query.limit,
@@ -279,9 +280,16 @@ router.patch('/:id', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
-    const { status, assigned_user_id, pinned, muted, hidden, unread, waiting } = req.body || {};
+    const { status, assigned_user_id, pinned, muted, hidden, unread, waiting, sector_id } = req.body || {};
     const sets = [];
     const params = [id];
+
+    if (sector_id !== undefined) {
+      const sid = parseId(sector_id);
+      const s = sid && (await db.query('SELECT 1 FROM sectors WHERE id = $1', [sid]));
+      if (!s?.rowCount) return res.status(400).json({ error: 'Setor inválido' });
+      params.push(sid); sets.push(`sector_id = $${params.length}`);
+    }
 
     // Preferências pessoais: só afetam a tela de quem marcou
     if (pinned !== undefined || muted !== undefined || hidden !== undefined) {

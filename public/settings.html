@@ -43,77 +43,129 @@
   <!--/RAIL-->
 
   <main class="main">
-    <div class="page">
+    <div class="page settings-page">
       <div class="page-header">
-        <div><h1>Configurações</h1><p>Tags, atendentes e integração com o WhatsApp</p></div>
+        <div><h1>Configurações</h1><p>Equipe, atendimento e integração com o WhatsApp</p></div>
       </div>
 
-      <div class="settings-grid">
-        <div class="card">
-          <h3>Tags / etiquetas</h3>
-          <form class="inline-form" id="tag-form" data-admin-only>
-            <input class="input" id="tag-name" placeholder="Nova tag (ex: Placa)" maxlength="40" required>
-            <input class="color-input" type="color" id="tag-color" value="#E03131" title="Cor">
-            <button class="btn btn-primary" type="submit">Adicionar</button>
-          </form>
-          <table class="table" id="tags-table"></table>
-        </div>
+      <div class="settings-layout">
+        <nav class="settings-nav" id="settings-nav">
+          <a href="#numeros" data-section="numeros">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            <span>Números de WhatsApp</span>
+          </a>
+          <a href="#atendentes" data-section="atendentes">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Atendentes</span>
+          </a>
+          <a href="#setores" data-section="setores">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <span>Setores</span>
+          </a>
+          <a href="#etiquetas" data-section="etiquetas">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            <span>Etiquetas</span>
+          </a>
+          <a href="#respostas" data-section="respostas">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <span>Respostas rápidas</span>
+          </a>
+          <a href="#alertas" data-section="alertas">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>Alertas de espera</span>
+          </a>
+        </nav>
 
-        <div class="card">
-          <h3>Atendentes</h3>
-          <form class="inline-form" id="user-form" data-admin-only>
-            <input class="input" id="user-name" placeholder="Nome" required>
-            <input class="input" id="user-email" type="email" placeholder="E-mail" required>
-            <input class="input" id="user-password" type="password" placeholder="Senha (mín. 8)" minlength="8" required autocomplete="new-password">
-            <select class="select" id="user-role"><option value="agent">Atendente</option><option value="admin">Admin</option></select>
-            <button class="btn btn-primary" type="submit">Adicionar</button>
-          </form>
-          <table class="table" id="users-table"></table>
-        </div>
-      </div>
-
-      <div class="settings-grid" style="margin-top:20px">
-        <div class="card">
-          <h3>Respostas rápidas</h3>
-          <p class="small muted">Na conversa, digite <code>/</code> e o atalho, ou use o botão ⚡. Variáveis: <code>{nome}</code>, <code>{nome_completo}</code>, <code>{atendente}</code>, <code>{telefone}</code>.</p>
-          <form id="qr-form" data-admin-only>
-            <div class="inline-form" style="margin-bottom:8px">
-              <input class="input" id="qr-shortcut" placeholder="atalho (ex.: prazo)" maxlength="30" required style="max-width:160px">
-              <input class="input" id="qr-title" placeholder="Título" maxlength="80" required>
+        <div class="settings-content">
+          <section class="settings-section" data-section="numeros">
+            <div class="card" id="wa-card">
+              <h3>Números de WhatsApp</h3>
+              <p class="small muted" id="wa-help"></p>
+              <form class="inline-form" id="wa-add-form" data-admin-only>
+                <input class="input" id="wa-add-name" placeholder="Nome do número (ex.: Vendas, Suporte)" maxlength="60" required>
+                <button class="btn btn-primary" type="submit">Adicionar número</button>
+              </form>
+              <div id="wa-accounts" class="wa-accounts"></div>
+              <div id="wa-orphans" class="wa-orphans" hidden>
+                <span>Há <b id="wa-orphans-count">0</b> conversa(s) de números que já foram removidos, ainda no histórico.</span>
+                <button class="btn btn-sm" id="wa-orphans-delete">Apagar essas conversas</button>
+              </div>
             </div>
-            <textarea class="textarea" id="qr-body" rows="3" placeholder="Texto da resposta…" required></textarea>
-            <div class="row-actions" style="margin-top:8px">
-              <button type="button" class="btn" id="qr-cancel" hidden>Cancelar edição</button>
-              <button class="btn btn-primary" type="submit" id="qr-submit">Adicionar</button>
+          </section>
+
+          <section class="settings-section" data-section="atendentes" hidden>
+            <div class="card">
+              <h3>Atendentes</h3>
+              <p class="small muted">Admins gerenciam números, setores, etiquetas, atendentes e alertas. Atendentes atendem e criam respostas rápidas.</p>
+              <form class="inline-form" id="user-form" data-admin-only>
+                <input class="input" id="user-name" placeholder="Nome" required>
+                <input class="input" id="user-email" type="email" placeholder="E-mail" required>
+                <input class="input" id="user-password" type="password" placeholder="Senha (mín. 8)" minlength="8" required autocomplete="new-password">
+                <select class="select" id="user-role"><option value="agent">Atendente</option><option value="admin">Admin</option></select>
+                <button class="btn btn-primary" type="submit">Adicionar</button>
+              </form>
+              <table class="table" id="users-table"></table>
             </div>
-          </form>
-          <table class="table" id="qr-table" style="margin-top:12px"></table>
-        </div>
+          </section>
 
-        <div class="card">
-          <h3>Alerta de conversa parada</h3>
-          <p class="small muted">Tempo que o cliente fica sem resposta até a conversa ser destacada na lista.</p>
-          <form class="inline-form" id="sla-form">
-            <label class="label" style="margin:0">Amarelo após</label>
-            <input class="input" type="number" id="sla-warn" min="1" max="1440" style="max-width:90px" required> <span class="muted small">min</span>
-            <label class="label" style="margin:0 0 0 12px">Vermelho após</label>
-            <input class="input" type="number" id="sla-alert" min="1" max="1440" style="max-width:90px" required> <span class="muted small">min</span>
-            <button class="btn btn-primary" type="submit" data-admin-only>Salvar</button>
-          </form>
-        </div>
-      </div>
+          <section class="settings-section" data-section="setores" hidden>
+            <div class="card">
+              <h3>Setores</h3>
+              <p class="small muted">Cada conversa pertence a um setor (ex.: Geral, Vendas, Suporte). Conversas novas entram no setor padrão; qualquer atendente pode mudar o setor de uma conversa pelo chip abaixo do nome do cliente.</p>
+              <form class="inline-form" id="sector-form" data-admin-only>
+                <input class="input" id="sector-name" placeholder="Novo setor" maxlength="40" required>
+                <input class="color-input" type="color" id="sector-color" value="#868e96" title="Cor">
+                <button class="btn btn-primary" type="submit">Adicionar</button>
+              </form>
+              <table class="table" id="sectors-table"></table>
+            </div>
+          </section>
 
-      <div class="card" style="margin-top:20px" id="wa-card">
-        <h3>Números de WhatsApp</h3>
-        <p class="small muted" id="wa-help"></p>
-        <form class="inline-form" id="wa-add-form" data-admin-only>
-          <input class="input" id="wa-add-name" placeholder="Nome do número (ex.: Vendas, Suporte)" maxlength="60" required>
-          <button class="btn btn-primary" type="submit">Adicionar número</button>
-        </form>
-        <div id="wa-accounts" class="wa-accounts"></div>
-        <div id="wa-orphans" class="wa-orphans" hidden>
-          <span>Há <b id="wa-orphans-count">0</b> conversa(s) de números que já foram removidos, ainda no histórico.</span>
-          <button class="btn btn-sm" id="wa-orphans-delete">Apagar essas conversas</button>
+          <section class="settings-section" data-section="etiquetas" hidden>
+            <div class="card">
+              <h3>Etiquetas</h3>
+              <p class="small muted">Classificam a conversa (ex.: Placa, Chassi, CRLV). Uma conversa pode ter várias. Aparecem na lista, no cabeçalho e nos relatórios.</p>
+              <form class="inline-form" id="tag-form" data-admin-only>
+                <input class="input" id="tag-name" placeholder="Nova etiqueta (ex: Placa)" maxlength="40" required>
+                <input class="color-input" type="color" id="tag-color" value="#E03131" title="Cor">
+                <button class="btn btn-primary" type="submit">Adicionar</button>
+              </form>
+              <table class="table" id="tags-table"></table>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="respostas" hidden>
+            <div class="card">
+              <h3>Respostas rápidas</h3>
+              <p class="small muted">Na conversa, digite <code>/</code> e o atalho, ou use o botão ⚡. Qualquer atendente pode criar; cada um edita as suas, e admins editam todas. Variáveis: <code>{nome}</code>, <code>{nome_completo}</code>, <code>{atendente}</code>, <code>{telefone}</code>.</p>
+              <form id="qr-form">
+                <div class="inline-form" style="margin-bottom:8px">
+                  <input class="input" id="qr-shortcut" placeholder="atalho (ex.: prazo)" maxlength="30" required style="max-width:160px">
+                  <input class="input" id="qr-title" placeholder="Título" maxlength="80" required>
+                </div>
+                <textarea class="textarea" id="qr-body" rows="3" placeholder="Texto da resposta…" required></textarea>
+                <div class="row-actions" style="margin-top:8px">
+                  <button type="button" class="btn" id="qr-cancel" hidden>Cancelar edição</button>
+                  <button class="btn btn-primary" type="submit" id="qr-submit">Adicionar</button>
+                </div>
+              </form>
+              <table class="table" id="qr-table" style="margin-top:12px"></table>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="alertas" hidden>
+            <div class="card">
+              <h3>Alerta de conversa parada</h3>
+              <p class="small muted">Tempo que o cliente fica sem resposta até a conversa ser destacada na lista, com um cronômetro amarelo e depois vermelho.</p>
+              <form class="inline-form" id="sla-form">
+                <label class="label" style="margin:0">Amarelo após</label>
+                <input class="input" type="number" id="sla-warn" min="1" max="1440" style="max-width:90px" required> <span class="muted small">min</span>
+                <label class="label" style="margin:0 0 0 12px">Vermelho após</label>
+                <input class="input" type="number" id="sla-alert" min="1" max="1440" style="max-width:90px" required> <span class="muted small">min</span>
+                <button class="btn btn-primary" type="submit" data-admin-only>Salvar</button>
+              </form>
+            </div>
+          </section>
         </div>
       </div>
     </div>

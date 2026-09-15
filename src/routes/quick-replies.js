@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -17,12 +17,22 @@ function validate(body) {
 
 router.get('/', async (req, res, next) => {
   try {
-    const { rows } = await db.query('SELECT id, shortcut, title, body FROM quick_replies ORDER BY shortcut');
+    const { rows } = await db.query(
+      `SELECT q.id, q.shortcut, q.title, q.body, q.created_by, u.name AS created_by_name
+         FROM quick_replies q LEFT JOIN users u ON u.id = q.created_by ORDER BY q.shortcut`
+    );
     res.json({ quick_replies: rows });
   } catch (err) { next(err); }
 });
 
-router.post('/', requireAdmin, async (req, res, next) => {
+/** Qualquer atendente cria; edita e exclui só quem criou (ou admin). */
+async function canEdit(req, id) {
+  if (req.user.role === 'admin') return true;
+  const { rows } = await db.query('SELECT created_by FROM quick_replies WHERE id = $1', [id]);
+  return rows.length > 0 && rows[0].created_by === req.user.id;
+}
+
+router.post('/', async (req, res, next) => {
   try {
     const v = validate(req.body);
     if (v.error) return res.status(400).json({ error: v.error });
@@ -37,8 +47,9 @@ router.post('/', requireAdmin, async (req, res, next) => {
   }
 });
 
-router.patch('/:id', requireAdmin, async (req, res, next) => {
+router.patch('/:id', async (req, res, next) => {
   try {
+    if (!(await canEdit(req, Number(req.params.id)))) return res.status(403).json({ error: 'Só quem criou (ou um admin) pode editar esta resposta' });
     const v = validate(req.body);
     if (v.error) return res.status(400).json({ error: v.error });
     const { rows } = await db.query(
@@ -53,8 +64,9 @@ router.patch('/:id', requireAdmin, async (req, res, next) => {
   }
 });
 
-router.delete('/:id', requireAdmin, async (req, res, next) => {
+router.delete('/:id', async (req, res, next) => {
   try {
+    if (!(await canEdit(req, Number(req.params.id)))) return res.status(403).json({ error: 'Só quem criou (ou um admin) pode excluir esta resposta' });
     const r = await db.query('DELETE FROM quick_replies WHERE id = $1', [Number(req.params.id)]);
     if (!r.rowCount) return res.status(404).json({ error: 'Resposta não encontrada' });
     res.json({ ok: true });

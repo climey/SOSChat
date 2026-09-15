@@ -64,6 +64,7 @@ app.use('/api/media', require('./routes/media'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
 app.use('/api/quick-replies', require('./routes/quick-replies'));
 app.use('/api/settings', require('./routes/settings'));
+app.use('/api/sectors', require('./routes/sectors'));
 app.use('/api/contacts', require('./routes/contacts'));
 if (config.enableDevSimulator) {
   app.use('/api/dev', require('./routes/dev'));

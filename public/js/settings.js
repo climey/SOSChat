@@ -241,16 +241,66 @@
   let qrEditing = null;
   let quickReplies = [];
   async function loadQuickReplies() {
-    const admin = me.role === 'admin';
     ({ quick_replies: quickReplies } = await api('GET', '/api/quick-replies'));
+    const mine = (r) => me.role === 'admin' || r.created_by === me.id;
     $('qr-table').innerHTML = `
-      <thead><tr><th>Atalho</th><th>Título</th><th>Texto</th>${admin ? '<th></th>' : ''}</tr></thead>
+      <thead><tr><th>Atalho</th><th>Título</th><th>Texto</th><th>Criada por</th><th></th></tr></thead>
       <tbody>${quickReplies.map((r) => `<tr data-id="${r.id}">
         <td><code>/${esc(r.shortcut)}</code></td><td>${esc(r.title)}</td>
         <td class="muted" style="max-width:320px;white-space:pre-wrap">${esc(r.body)}</td>
-        ${admin ? `<td class="row-actions"><button class="btn btn-sm" data-act="edit">Editar</button><button class="btn btn-sm btn-ghost" data-act="del">Excluir</button></td>` : ''}
-      </tr>`).join('') || '<tr><td colspan="4" class="muted">Nenhuma resposta rápida</td></tr>'}</tbody>`;
+        <td class="muted small">${esc(r.created_by_name || 'sistema')}</td>
+        <td class="row-actions">${mine(r) ? '<button class="btn btn-sm" data-act="edit">Editar</button><button class="btn btn-sm btn-ghost" data-act="del">Excluir</button>' : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="5" class="muted">Nenhuma resposta rápida</td></tr>'}</tbody>`;
   }
+
+  // ---------- Setores ----------
+  let sectors = [];
+  async function loadSectors() {
+    ({ sectors } = await api('GET', '/api/sectors'));
+    const admin = me.role === 'admin';
+    $('sectors-table').innerHTML = `
+      <thead><tr><th>Setor</th><th class="num">Abertas</th>${admin ? '<th></th>' : ''}</tr></thead>
+      <tbody>${sectors.map((s) => `<tr data-id="${s.id}">
+        <td><span class="sector-chip" style="--sector-color:${esc(s.color)}"><span class="dot"></span>${esc(s.name)}</span>${s.is_default ? ' <span class="muted small">padrão</span>' : ''}</td>
+        <td class="num">${s.open_count}</td>
+        ${admin ? `<td class="row-actions">
+          ${s.is_default ? '' : '<button class="btn btn-sm" data-act="default">Tornar padrão</button>'}
+          <button class="btn btn-sm" data-act="edit" data-name="${esc(s.name)}" data-color="${esc(s.color)}">Editar</button>
+          ${s.is_default ? '' : '<button class="btn btn-sm btn-ghost" data-act="del">Excluir</button>'}</td>` : ''}
+      </tr>`).join('')}</tbody>`;
+  }
+  $('sector-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('POST', '/api/sectors', { name: $('sector-name').value, color: $('sector-color').value });
+      $('sector-name').value = '';
+      toast('Setor criado');
+      loadSectors();
+    } catch (err) { toast(err.message, true); }
+  });
+  $('sectors-table').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = btn.closest('tr').dataset.id;
+    try {
+      if (btn.dataset.act === 'del') {
+        if (!confirm('Excluir este setor? As conversas dele voltam para o setor padrão.')) return;
+        await api('DELETE', `/api/sectors/${id}`);
+        toast('Setor excluído');
+      } else if (btn.dataset.act === 'default') {
+        await api('PATCH', `/api/sectors/${id}`, { is_default: true });
+        toast('Setor padrão alterado');
+      } else {
+        const name = prompt('Nome do setor:', btn.dataset.name);
+        if (name === null) return;
+        const color = prompt('Cor (#RRGGBB):', btn.dataset.color);
+        if (color === null) return;
+        await api('PATCH', `/api/sectors/${id}`, { name, color });
+        toast('Setor atualizado');
+      }
+      loadSectors();
+    } catch (err) { toast(err.message, true); }
+  });
   function resetQrForm() {
     qrEditing = null;
     $('qr-form').reset();
@@ -304,9 +354,20 @@
     catch (err) { toast(err.message, true); }
   });
 
+  // ---------- Navegação por seção ----------
+  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'alertas'];
+  function showSection(name) {
+    const s = SECTIONS.includes(name) ? name : 'numeros';
+    document.querySelectorAll('.settings-section').forEach((el) => { el.hidden = el.dataset.section !== s; });
+    document.querySelectorAll('#settings-nav a').forEach((a) => a.classList.toggle('active', a.dataset.section === s));
+    if (location.hash !== `#${s}`) history.replaceState(null, '', `#${s}`);
+  }
+  window.addEventListener('hashchange', () => showSection(location.hash.slice(1)));
+  showSection(location.hash.slice(1));
+
   async function init() {
     me = await SOS.loadMe();
-    await Promise.all([loadTags(), loadUsers(), loadIntegration(), loadQuickReplies(), loadSla()]);
+    await Promise.all([loadTags(), loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors()]);
   }
   init().catch((err) => toast(err.message, true));
 })();
