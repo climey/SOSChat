@@ -210,10 +210,13 @@
     if (!m.media_id || m.deleted_at) return '';
     const src = `/api/media/${esc(m.media_id)}`;
     if (m.type === 'image' || m.type === 'sticker') {
-      return `<a href="${src}" target="_blank" rel="noopener"><img class="media-img" src="${src}" alt="" loading="lazy"></a>`;
+      return `<img class="media-img" src="${src}" alt="" loading="lazy" data-lb="${m.id}">`;
     }
     if (m.type === 'audio') return audioPlayerHtml(m, src);
-    if (m.type === 'video') return `<video class="media-video" controls preload="metadata" src="${src}"></video>`;
+    if (m.type === 'video') {
+      return `<span class="media-wrap"><video class="media-video" controls preload="metadata" src="${src}"></video>
+        <button type="button" class="media-expand" data-lb="${m.id}" title="Abrir em tela cheia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button></span>`;
+    }
     const name = m.body && !isPlaceholder(m.body) ? m.body : 'Documento';
     return `<a class="media-doc" href="${src}" target="_blank" rel="noopener">📎 <span class="name">${esc(name)}</span></a>`;
   }
@@ -240,6 +243,98 @@
     }).join('');
     if (scroll) els.messages.scrollTop = els.messages.scrollHeight;
   }
+
+  // ---------- Visualizador de mídia (lightbox) ----------
+  const lb = { items: [], idx: -1, zoom: 1 };
+  const VIDEO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>';
+  const lbMedia = () => state.messages.filter((m) => m.media_id && !m.deleted_at && ['image', 'sticker', 'video'].includes(m.type));
+
+  function openLightbox(messageId) {
+    lb.items = lbMedia();
+    lb.idx = lb.items.findIndex((m) => m.id === messageId);
+    if (lb.idx < 0) return;
+    $('lightbox').hidden = false;
+    document.body.style.overflow = 'hidden';
+    renderStrip();
+    showLightbox();
+  }
+  function closeLightbox() {
+    $('lightbox').hidden = true;
+    document.body.style.overflow = '';
+    $('lb-stage').innerHTML = '';
+  }
+  function showLightbox() {
+    const m = lb.items[lb.idx];
+    if (!m) return closeLightbox();
+    const c = current();
+    lb.zoom = 1;
+    const src = `/api/media/${esc(m.media_id)}`;
+    const isVideo = m.type === 'video';
+    $('lb-stage').innerHTML = isVideo
+      ? `<video controls autoplay src="${src}"></video>`
+      : `<img src="${src}" alt="" id="lb-img">`;
+    const who = m.direction === 'in' ? (c ? contactName(c) : 'Cliente') : (m.sender_name || 'Você');
+    $('lb-name').textContent = who;
+    $('lb-date').textContent = new Date(m.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', ' às');
+    $('lb-avatar').outerHTML = (m.direction === 'in' && c
+      ? avatarHtml(c, 'sm', false)
+      : `<div class="avatar sm">${esc(initials(m.sender_name || 'V'))}</div>`).replace('<div class="avatar ', '<div id="lb-avatar" class="avatar ');
+    $('lb-download').href = src;
+    $('lb-download').setAttribute('download', `${m.type}-${m.id}${isVideo ? '.mp4' : '.jpg'}`);
+    const caption = m.body && !isPlaceholder(m.body) ? m.body : '';
+    $('lb-caption').hidden = !caption;
+    $('lb-caption').textContent = caption;
+    $('lb-prev').disabled = lb.idx <= 0;
+    $('lb-next').disabled = lb.idx >= lb.items.length - 1;
+    $('lb-zoom-in').hidden = isVideo;
+    $('lb-zoom-out').hidden = isVideo;
+    document.querySelectorAll('.lb-thumb').forEach((t) => t.classList.toggle('current', Number(t.dataset.id) === m.id));
+    document.querySelector('.lb-thumb.current')?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }
+  function renderStrip() {
+    $('lb-strip').innerHTML = lb.items.map((m) => `<div class="lb-thumb" data-id="${m.id}" title="${esc(fmtClock(m.created_at))}">${m.type === 'video' ? VIDEO_ICON : `<img src="/api/media/${esc(m.media_id)}" alt="" loading="lazy">`}</div>`).join('');
+  }
+  function stepLightbox(dir) {
+    const n = lb.idx + dir;
+    if (n < 0 || n >= lb.items.length) return;
+    lb.idx = n;
+    showLightbox();
+  }
+  function setZoom(z) {
+    const img = $('lb-img');
+    if (!img) return;
+    lb.zoom = Math.min(4, Math.max(1, z));
+    img.classList.toggle('zoomed', lb.zoom > 1);
+    img.style.transform = lb.zoom > 1 ? `scale(${lb.zoom})` : '';
+    img.style.transformOrigin = 'center';
+  }
+  els.messages.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-lb]');
+    if (t) { e.preventDefault(); openLightbox(Number(t.dataset.lb)); }
+  });
+  $('lb-close').addEventListener('click', closeLightbox);
+  $('lb-prev').addEventListener('click', () => stepLightbox(-1));
+  $('lb-next').addEventListener('click', () => stepLightbox(1));
+  $('lb-zoom-in').addEventListener('click', () => setZoom(lb.zoom + 0.5));
+  $('lb-zoom-out').addEventListener('click', () => setZoom(lb.zoom - 0.5));
+  $('lb-strip').addEventListener('click', (e) => {
+    const t = e.target.closest('.lb-thumb');
+    if (!t) return;
+    lb.idx = lb.items.findIndex((m) => m.id === Number(t.dataset.id));
+    showLightbox();
+  });
+  $('lb-stage').addEventListener('click', (e) => {
+    if (e.target.id === 'lb-img') setZoom(lb.zoom > 1 ? 1 : 2);
+    else if (e.target === $('lb-stage')) closeLightbox();
+  });
+  document.addEventListener('keydown', (e) => {
+    if ($('lightbox').hidden) return;
+    if (e.key === 'Escape') closeLightbox();
+    else if (e.key === 'ArrowLeft') stepLightbox(-1);
+    else if (e.key === 'ArrowRight') stepLightbox(1);
+    else if (e.key === '+' || e.key === '=') setZoom(lb.zoom + 0.5);
+    else if (e.key === '-') setZoom(lb.zoom - 0.5);
+  });
 
   // ---------- Player de áudio ----------
   const players = new Map(); // message id -> Audio (sobrevive às re-renderizações)
