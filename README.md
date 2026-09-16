@@ -103,7 +103,12 @@ public/                login, inbox, relatórios e configurações
 | PUT | `/api/conversations/:id/tags` | `{tag_ids: []}` |
 | POST | `/api/conversations/:id/read` | zera não lidas e marca como lida na Meta |
 | GET | `/api/reports/summary\|volume\|agents\|tags?from&to&group` | relatórios |
-| GET/POST/PATCH/DELETE | `/api/tags`, `/api/users` | administração |
+| GET/POST/PATCH/DELETE | `/api/tags`, `/api/users`, `/api/plans` | administração (planos: catálogo de consultas) |
+| GET/PATCH/DELETE | `/api/contacts/:id` | ficha do contato (campos extras, exclusão só admin) |
+| PUT/PATCH/DELETE, POST renew | `/api/contacts/:id/plan` | atribuir, ajustar, remover e renovar o plano de consultas |
+| GET/POST/DELETE | `/api/contacts/:id/consultations` | registrar consulta (debita 1 do plano), estornar |
+| GET | `/api/contacts/:id/notes`, `/api/contacts/:id/events` | observações (todas as conversas) e log de atividade |
+| GET | `/api/reports/consultations?from&to&agent` | consultas por dia, tipo e atendente; situação dos planos |
 
 Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` (proteção CSRF) e o cookie de sessão.
 
@@ -114,6 +119,7 @@ Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` 
 - [x] **Etapa 1.6:** vários números de WhatsApp na mesma inbox (modelo Umbler Talk), conversa amarrada ao número
 - [x] **Etapa 1.7:** inbox no estilo Umbler Talk (abas Entrada/Esperando/Finalizados, notas internas, assinatura), envio de arquivos, busca na conversa, mensagens agendadas com cancelamento automático, player de áudio próprio
 - [x] **Etapa 1.8:** menu de ações na conversa, preferências pessoais (fixar/silenciar/ocultar), respostas rápidas, transferência com nota, alerta de conversa parada, presença e "está digitando", ficha do contato, citação, reações, emojis, mensagem de voz (ffmpeg → OGG/Opus), atualização automática após deploy
+- [x] **Etapa 1.9:** painel do contato no estilo Umbler (foto, abas Contato/Detalhes da conversa, observações, log de atividade, campos editáveis, bloquear/excluir) e **planos de consultas**: catálogo em Configurações, cartão de saldo no contato com chip `2/3` na lista e no cabeçalho, botão "Registrar consulta" (Placa/Chassi/CRLV) que debita e gera nota interna, oferta de débito ao enviar PDF, aviso e etiqueta *Renovação* ao zerar, filtro por plano e relatório "Consultas e planos"
 - [ ] **Etapa 2:** templates da Cloud API (janela de 24h), distribuição automática, saudação e horário de atendimento
 - [ ] **Etapa 3:** integração com a plataforma de consultas (detectar placa/chassi na mensagem e mostrar dados do veículo no painel lateral)
 - [ ] **Etapa 4:** filas/departamentos, horário de atendimento com mensagem automática, distribuição automática

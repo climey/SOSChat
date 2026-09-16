@@ -301,6 +301,7 @@
     else if (state.tab === 'agents' && d.agents) rows = d.agents.map((a) => ({ atendente: a.name, conversas: a.conversations, abertas: a.open_now, finalizadas: a.resolved, mensagens: a.messages_sent, resposta_mediana_s: a.median_response_seconds, resposta_media_s: a.avg_response_seconds, finalizar_mediana_s: a.median_resolution_seconds }));
     else if (state.tab === 'messages' && d.vol) rows = d.vol.series.map((r) => ({ periodo: fmtBucket(r.bucket, $('group').value), recebidas: r.messages_in, enviadas: r.messages_out }));
     else if (state.tab === 'origin' && d.origin) rows = d.origin.map((r) => ({ ddd: r.ddd, estado: UF_NAME[DDD_UF[r.ddd]] || '', regiao: UF_REGION[DDD_UF[r.ddd]] || '', conversas: r.conversations, clientes: r.contacts }));
+    else if (state.tab === 'consultations' && d.cs) rows = d.cs.series.map((r) => ({ dia: fmtBucket(r.bucket, 'day'), consultas: r.total, debitadas: r.charged, avulsas: r.loose }));
     else if (state.tab === 'now' && d.now) rows = d.now.oldest_waiting.map((c) => ({ cliente: c.contact_name || c.profile_name || c.wa_id, responsavel: c.assigned_user_name || '', esperando_s: c.waiting_seconds }));
     if (!rows.length) return toast('Nada para exportar nesta aba', true);
     const blob = new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' });
@@ -311,6 +312,37 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
 
+  // ---------- Consultas e planos ----------
+  const KIND_LABEL = { placa: 'Placa', chassi: 'Chassi', crlv: 'CRLV', outra: 'Outra' };
+  const KIND_COLOR = { placa: RED, chassi: '#f08c00', crlv: BLUE, outra: '#868e96' };
+  async function loadConsultations(q) {
+    const cs = await api('GET', `/api/reports/consultations?${q}`);
+    state.data.cs = cs;
+    const c = cs.current, p = cs.previous, pl = cs.plans;
+    $('cs-stats').innerHTML = [
+      tile('Consultas no período', fmtN(c.total), `${fmtN(c.contacts)} clientes diferentes`, delta(c.total, p.total)),
+      tile('Debitadas de plano', fmtN(c.charged), `${fmtN(c.loose)} avulsas (sem plano ou sem debitar)`, ''),
+      tile('Clientes com plano', fmtN(pl.with_plan), `${fmtN(pl.credits_left)} consultas ainda disponíveis no total`, ''),
+      tile('Sem saldo', fmtN(pl.empty), `${fmtN(pl.low)} com a última consulta`, ''),
+      tile('Vencidos', fmtN(pl.expired), `${fmtN(pl.expiring)} vencem nos próximos 7 dias`, ''),
+    ].join('');
+    barChart($('cs-series'), cs.series, [{ key: 'charged', color: RED, label: 'Debitadas' }, { key: 'loose', color: BLUE, label: 'Avulsas' }], (r) => fmtBucket(r.bucket, 'day'));
+    hbarChart($('cs-kinds'), cs.kinds.map((k) => ({ label: KIND_LABEL[k.kind] || k.kind, value: k.total, color: KIND_COLOR[k.kind] || RED })));
+    hbarChart($('cs-agents'), cs.agents.map((a) => ({ label: a.name, value: a.total, sub: a.charged ? `${a.charged} de plano` : '' })));
+    hbarChart($('cs-contacts'), cs.contacts.map((x) => ({ label: x.name, value: x.total, sub: x.plan_name ? `${x.plan_name} · ${Math.max(0, x.plan_credits - x.plan_used)}/${x.plan_credits}` : 'sem plano' })), { color: BLUE });
+    hbarChart($('cs-plans'), pl.by_plan.map((x) => ({ label: x.name, value: x.contacts, sub: x.empty ? `${x.empty} sem saldo` : '' })));
+    const att = pl.attention || [];
+    $('cs-attention').innerHTML = att.length ? att.map((x) => {
+      const left = Math.max(0, x.plan_credits - x.plan_used);
+      const expired = x.plan_expires_at && new Date(x.plan_expires_at) < new Date();
+      const why = left === 0 ? 'sem saldo' : expired ? 'vencido' : `vence ${new Date(x.plan_expires_at).toLocaleDateString('pt-BR')}`;
+      const cls = left === 0 || expired ? 'is-empty' : 'is-low';
+      return `<a class="row" href="/?c=${x.conversation_id || ''}" title="Abrir conversa">
+        <span class="who">${esc(x.name)}<small>${esc(formatPhone(x.wa_id))} · ${esc(x.plan_name || 'plano')}</small></span>
+        <span class="plan-chip ${cls}">${left}/${x.plan_credits}</span><span class="muted small">${esc(why)}</span></a>`;
+    }).join('') : '<div class="empty" style="height:120px">Nenhum cliente precisa de atenção</div>';
+  }
+
   // ---------- Carga ----------
   async function load() {
     const q = params();
@@ -319,6 +351,7 @@
       else if (state.tab === 'agents') await loadAgents(q);
       else if (state.tab === 'messages') await loadMessages(q);
       else if (state.tab === 'origin') await loadOrigin(q);
+      else if (state.tab === 'consultations') await loadConsultations(q);
     } catch (err) { toast(err.message, true); }
   }
   async function init() {
@@ -326,7 +359,7 @@
     setPreset('7');
     await loadFilterOptions();
     const tab = location.hash.slice(1);
-    showTab(['overview', 'now', 'agents', 'messages', 'origin'].includes(tab) ? tab : 'overview');
+    showTab(['overview', 'now', 'agents', 'messages', 'origin', 'consultations'].includes(tab) ? tab : 'overview');
   }
   init().catch((err) => toast(err.message, true));
 })();

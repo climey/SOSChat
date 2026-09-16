@@ -4,6 +4,7 @@ const db = require('../db');
 const realtime = require('../realtime');
 const whatsapp = require('../services/whatsapp');
 const conversations = require('../services/conversations');
+const contactsService = require('../services/contacts');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const outbound = require('../services/outbound');
 const schedules = require('../services/schedules');
@@ -42,6 +43,7 @@ router.get('/', async (req, res, next) => {
       tagId: parseId(req.query.tag),
       accountId: parseId(req.query.account),
       sectorId: parseId(req.query.sector),
+      plan: ['with', 'without', 'empty', 'expired'].includes(req.query.plan) ? req.query.plan : null,
       hidden: ['only', 'all'].includes(req.query.hidden) ? req.query.hidden : 'none',
       q: String(req.query.q || '').trim().slice(0, 100) || null,
       limit: req.query.limit,
@@ -62,6 +64,7 @@ router.get('/counts', async (req, res, next) => {
       tagId: parseId(req.query.tag),
       accountId: parseId(req.query.account),
       sectorId: parseId(req.query.sector),
+      plan: ['with', 'without', 'empty', 'expired'].includes(req.query.plan) ? req.query.plan : null,
       hidden: ['only', 'all'].includes(req.query.hidden) ? req.query.hidden : 'none',
       q: String(req.query.q || '').trim().slice(0, 100) || null,
     }));
@@ -399,6 +402,7 @@ router.patch('/:id/contact', async (req, res, next) => {
     if (req.body?.name !== undefined) {
       const name = String(req.body.name || '').trim().slice(0, 120);
       await db.query('UPDATE contacts SET name = $2 WHERE id = $1', [before.contact_id, name || null]);
+      await contactsService.logEvent(before.contact_id, req.user.id, 'field', `${req.user.name} renomeou o contato para ${name || '(sem nome)'}`);
     }
     if (req.body?.blocked !== undefined) {
       const blocked = Boolean(req.body.blocked);
@@ -408,7 +412,7 @@ router.patch('/:id/contact', async (req, res, next) => {
       } catch (err) {
         return res.status(502).json({ error: `Não foi possível ${blocked ? 'bloquear' : 'desbloquear'} no WhatsApp: ${err.message}` });
       }
-      await db.query('UPDATE contacts SET blocked = $2 WHERE id = $1', [before.contact_id, blocked]);
+      await contactsService.setBlocked(before.contact_id, req.user, blocked);
     }
     const conv = await conversations.getById(id);
     realtime.broadcast('conversation:updated', conv);

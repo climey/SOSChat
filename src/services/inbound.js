@@ -98,6 +98,7 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
         WHERE id = $1`,
       [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]
     );
+    await client.query('UPDATE contacts SET last_seen_at = GREATEST(COALESCE(last_seen_at, $2::timestamptz), $2::timestamptz) WHERE id = $1', [contactId, sentAt]);
 
     const conversation = await conversations.getById(conversationId, client);
     return { message: await withQuoted(msgRows[0], client), conversation, isNew };

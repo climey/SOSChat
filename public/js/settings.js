@@ -355,7 +355,72 @@
   });
 
   // ---------- Navegação por seção ----------
-  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'alertas'];
+  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'alertas'];
+  // ---------- Planos de consultas ----------
+  let plans = [];
+  let planEditing = null;
+  const money = (c) => (c == null ? '' : 'R$ ' + (c / 100).toFixed(2).replace('.', ','));
+  async function loadPlans() {
+    ({ plans } = await api('GET', '/api/plans'));
+    const admin = me.role === 'admin';
+    $('plans-table').innerHTML = `
+      <thead><tr><th>Plano</th><th class="num">Consultas</th><th class="num">Validade</th><th class="num">Preço</th><th class="num">Clientes</th><th>Situação</th>${admin ? '<th></th>' : ''}</tr></thead>
+      <tbody>${plans.map((p) => `<tr data-id="${p.id}" class="${p.active ? '' : 'muted'}">
+        <td><b>${esc(p.name)}</b></td>
+        <td class="num">${p.credits}</td>
+        <td class="num">${p.validity_days ? p.validity_days + ' dias' : 'sem vencimento'}</td>
+        <td class="num">${esc(money(p.price_cents)) || '-'}</td>
+        <td class="num">${p.contacts_count}</td>
+        <td>${p.active ? '<span class="status-pill open">Ativo</span>' : '<span class="status-pill resolved">Inativo</span>'}</td>
+        ${admin ? `<td class="row-actions">
+          <button class="btn btn-sm" data-act="edit">Editar</button>
+          <button class="btn btn-sm" data-act="toggle">${p.active ? 'Desativar' : 'Ativar'}</button>
+          <button class="btn btn-sm btn-ghost" data-act="del">Excluir</button></td>` : ''}
+      </tr>`).join('') || '<tr><td colspan="7" class="muted">Nenhum plano cadastrado</td></tr>'}</tbody>`;
+  }
+  function resetPlanForm() {
+    planEditing = null;
+    $('plan-form').reset();
+    $('plan-submit').textContent = 'Adicionar';
+    $('plan-cancel').hidden = true;
+  }
+  $('plan-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+      name: $('plan-name').value, credits: Number($('plan-credits').value),
+      validity_days: $('plan-days').value ? Number($('plan-days').value) : null,
+      price_cents: $('plan-price').value ? Math.round(Number($('plan-price').value) * 100) : null,
+    };
+    try {
+      if (planEditing) { await api('PATCH', `/api/plans/${planEditing}`, body); toast('Plano atualizado'); }
+      else { await api('POST', '/api/plans', body); toast('Plano criado'); }
+      resetPlanForm();
+      loadPlans();
+    } catch (err) { toast(err.message, true); }
+  });
+  $('plan-cancel').addEventListener('click', resetPlanForm);
+  $('plans-table').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = Number(btn.closest('tr').dataset.id);
+    const p = plans.find((x) => x.id === id);
+    try {
+      if (btn.dataset.act === 'edit') {
+        planEditing = id;
+        $('plan-name').value = p.name; $('plan-credits').value = p.credits;
+        $('plan-days').value = p.validity_days || ''; $('plan-price').value = p.price_cents != null ? (p.price_cents / 100).toFixed(2) : '';
+        $('plan-submit').textContent = 'Salvar'; $('plan-cancel').hidden = false; $('plan-name').focus();
+        return;
+      }
+      if (btn.dataset.act === 'toggle') { await api('PATCH', `/api/plans/${id}`, { active: !p.active }); toast(p.active ? 'Plano desativado' : 'Plano ativado'); }
+      else if (btn.dataset.act === 'del') {
+        if (!confirm(`Excluir o plano "${p.name}" do catálogo? Clientes que já têm esse plano continuam com o saldo deles.`)) return;
+        await api('DELETE', `/api/plans/${id}`); toast('Plano excluído');
+      }
+      loadPlans();
+    } catch (err) { toast(err.message, true); }
+  });
+
   function showSection(name) {
     const s = SECTIONS.includes(name) ? name : 'numeros';
     document.querySelectorAll('.settings-section').forEach((el) => { el.hidden = el.dataset.section !== s; });
@@ -367,7 +432,7 @@
 
   async function init() {
     me = await SOS.loadMe();
-    await Promise.all([loadTags(), loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors()]);
+    await Promise.all([loadTags(), loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans()]);
   }
   init().catch((err) => toast(err.message, true));
 })();

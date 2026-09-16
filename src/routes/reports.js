@@ -315,4 +315,62 @@ router.get('/now', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Consultas registradas e situação dos planos
+router.get('/consultations', async (req, res, next) => {
+  try {
+    const { from, to, prevFrom, prevTo } = period(req.query);
+    const agent = parseId(req.query.agent);
+    const params = [from, to];
+    let f = '';
+    if (agent) { params.push(agent); f = ` AND k.user_id = $${params.length}`; }
+    const base = `FROM consultations k WHERE k.reversed_at IS NULL AND k.created_at BETWEEN $1 AND $2 ${f}`;
+    const totals = await db.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE k.charged)::int AS charged,
+              COUNT(*) FILTER (WHERE NOT k.charged)::int AS loose,
+              COUNT(DISTINCT k.contact_id)::int AS contacts ${base}`, params);
+    const prevParams = [prevFrom, prevTo, ...params.slice(2)];
+    const prev = await db.query(`SELECT COUNT(*)::int AS total ${base}`, prevParams);
+    const byDay = await db.query(
+      `SELECT date_trunc('day', k.created_at) AS bucket, COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE k.charged)::int AS charged, COUNT(*) FILTER (WHERE NOT k.charged)::int AS loose
+         ${base} GROUP BY 1 ORDER BY 1`, params);
+    const byKind = await db.query(`SELECT k.kind, COUNT(*)::int AS total ${base} GROUP BY k.kind ORDER BY total DESC`, params);
+    const byAgent = await db.query(
+      `SELECT COALESCE(u.name, 'Sem atendente') AS name, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE k.charged)::int AS charged
+         FROM consultations k LEFT JOIN users u ON u.id = k.user_id
+        WHERE k.reversed_at IS NULL AND k.created_at BETWEEN $1 AND $2 ${f}
+        GROUP BY u.name ORDER BY total DESC`, params);
+    const topContacts = await db.query(
+      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, ct.plan_name, ct.plan_credits, ct.plan_used, COUNT(*)::int AS total
+         FROM consultations k JOIN contacts ct ON ct.id = k.contact_id
+        WHERE k.reversed_at IS NULL AND k.created_at BETWEEN $1 AND $2 ${f}
+        GROUP BY ct.id ORDER BY total DESC LIMIT 15`, params);
+    const plans = await db.query(
+      `SELECT COUNT(*)::int AS with_plan,
+              COUNT(*) FILTER (WHERE plan_used >= plan_credits)::int AS empty,
+              COUNT(*) FILTER (WHERE plan_used < plan_credits AND plan_credits - plan_used <= 1)::int AS low,
+              COUNT(*) FILTER (WHERE plan_expires_at IS NOT NULL AND plan_expires_at < NOW())::int AS expired,
+              COUNT(*) FILTER (WHERE plan_expires_at IS NOT NULL AND plan_expires_at BETWEEN NOW() AND NOW() + INTERVAL '7 days')::int AS expiring,
+              COALESCE(SUM(GREATEST(plan_credits - plan_used, 0)), 0)::int AS credits_left
+         FROM contacts WHERE plan_credits IS NOT NULL`);
+    const byPlan = await db.query(
+      `SELECT COALESCE(plan_name, 'Sem nome') AS name, COUNT(*)::int AS contacts,
+              COUNT(*) FILTER (WHERE plan_used >= plan_credits)::int AS empty
+         FROM contacts WHERE plan_credits IS NOT NULL GROUP BY plan_name ORDER BY contacts DESC`);
+    const attention = await db.query(
+      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, ct.plan_name, ct.plan_credits, ct.plan_used, ct.plan_expires_at,
+              (SELECT c.id FROM conversations c WHERE c.contact_id = ct.id ORDER BY c.last_message_at DESC LIMIT 1) AS conversation_id
+         FROM contacts ct
+        WHERE ct.plan_credits IS NOT NULL
+          AND (ct.plan_used >= ct.plan_credits OR (ct.plan_expires_at IS NOT NULL AND ct.plan_expires_at < NOW() + INTERVAL '7 days'))
+        ORDER BY ct.plan_expires_at NULLS LAST, ct.plan_used DESC LIMIT 30`);
+    res.json({
+      current: totals.rows[0], previous: prev.rows[0],
+      series: byDay.rows, kinds: byKind.rows, agents: byAgent.rows, contacts: topContacts.rows,
+      plans: { ...plans.rows[0], by_plan: byPlan.rows, attention: attention.rows },
+    });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

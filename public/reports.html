@@ -58,6 +58,7 @@
         <button data-tab="agents">Atendentes</button>
         <button data-tab="messages">Mensagens</button>
         <button data-tab="origin">Origem</button>
+        <button data-tab="consultations">Consultas e planos</button>
       </div>
 
       <form class="report-filters card" id="filters">
@@ -127,6 +128,23 @@
           <h3>Desempenho individual</h3>
           <p class="small muted" style="margin:-6px 0 10px">Tempo de resposta: quanto o atendente demora para responder cada mensagem do cliente. Mediana ignora casos extremos.</p>
           <div style="overflow-x:auto"><table class="table" id="ag-table"></table></div>
+        </div>
+      </section>
+
+      <!-- Consultas e planos -->
+      <section class="report-tab" data-tab="consultations" hidden>
+        <div class="stats" id="cs-stats"></div>
+        <div class="grid-2">
+          <div class="card"><h3>Consultas por dia</h3><div class="chart-legend"><span><i style="background:#E03131"></i>Debitadas de plano</span><span><i style="background:#339af0"></i>Avulsas</span></div><div class="chart" id="cs-series"></div></div>
+          <div class="card"><h3>Por tipo</h3><div class="chart" id="cs-kinds"></div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card"><h3>Por atendente</h3><div class="chart" id="cs-agents"></div></div>
+          <div class="card"><h3>Clientes que mais consultaram</h3><div class="chart" id="cs-contacts"></div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card"><h3>Planos ativos por tipo</h3><p class="small muted" style="margin:-6px 0 8px">Situação atual, independente do período.</p><div class="chart" id="cs-plans"></div></div>
+          <div class="card"><h3>Precisam de atenção</h3><p class="small muted" style="margin:-6px 0 8px">Sem saldo, vencidos ou vencendo em 7 dias. Clique para abrir a conversa.</p><div class="plan-attention" id="cs-attention"></div></div>
         </div>
       </section>
 

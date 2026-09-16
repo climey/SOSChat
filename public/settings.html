@@ -70,6 +70,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             <span>Respostas rápidas</span>
           </a>
+          <a href="#planos" data-section="planos">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 0 2-2V5h14v2a2 2 0 0 0 2 2v6a2 2 0 0 0-2 2v2H5v-2a2 2 0 0 0-2-2z"/><line x1="13" y1="5" x2="13" y2="19" stroke-dasharray="2 2"/></svg>
+            <span>Planos de consultas</span>
+          </a>
           <a href="#alertas" data-section="alertas">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>Alertas de espera</span>
@@ -150,6 +154,22 @@
                 </div>
               </form>
               <table class="table" id="qr-table" style="margin-top:12px"></table>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="planos" hidden>
+            <div class="card">
+              <h3>Planos de consultas</h3>
+              <p class="small muted">Catálogo usado ao atribuir um plano a um cliente no painel do contato. O saldo de cada cliente fica no próprio contato (cartão "Plano de consultas"), e cada consulta registrada pelo atendente debita 1. Ao zerar, a conversa recebe a etiqueta <b>Renovação</b> e o chat sugere a resposta rápida <code>/renovar</code>.</p>
+              <form class="inline-form" id="plan-form" data-admin-only>
+                <input class="input" id="plan-name" placeholder="Nome (ex.: Plano 5 consultas)" maxlength="80" required style="max-width:240px">
+                <input class="input" id="plan-credits" type="number" min="0" max="10000" placeholder="Consultas" required style="max-width:110px">
+                <input class="input" id="plan-days" type="number" min="1" max="3650" placeholder="Validade (dias)" style="max-width:130px">
+                <input class="input" id="plan-price" type="number" min="0" step="0.01" placeholder="Preço R$" style="max-width:110px">
+                <button class="btn btn-primary" type="submit" id="plan-submit">Adicionar</button>
+                <button class="btn" type="button" id="plan-cancel" hidden>Cancelar</button>
+              </form>
+              <table class="table" id="plans-table" style="margin-top:12px"></table>
             </div>
           </section>
 

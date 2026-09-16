@@ -13,6 +13,8 @@ function selectSql(userParam) {
          c.last_message_preview, c.last_message_direction, c.first_response_at, c.resolved_at, c.created_at, c.attended,
          COALESCE(cp.pinned, FALSE) AS pinned, COALESCE(cp.muted, FALSE) AS muted, COALESCE(cp.hidden, FALSE) AS hidden,
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id, ct.blocked AS contact_blocked,
+         ct.plan_name, ct.plan_credits, ct.plan_expires_at,
+         CASE WHEN ct.plan_credits IS NULL THEN NULL ELSE GREATEST(ct.plan_credits - ct.plan_used, 0) END AS plan_left,
          u.name AS assigned_user_name, u.avatar_media_id AS assigned_user_avatar,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone,
          c.sector_id, se.name AS sector_name, se.color AS sector_color,
@@ -90,6 +92,10 @@ async function list(filters = {}) {
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
   if (filters.accountId) add('c.account_id = ?', filters.accountId);
   if (filters.sectorId) add('c.sector_id = ?', filters.sectorId);
+  if (filters.plan === 'with') where.push('ct.plan_credits IS NOT NULL');
+  else if (filters.plan === 'without') where.push('ct.plan_credits IS NULL');
+  else if (filters.plan === 'empty') where.push('ct.plan_credits IS NOT NULL AND ct.plan_used >= ct.plan_credits');
+  else if (filters.plan === 'expired') where.push('ct.plan_credits IS NOT NULL AND ct.plan_expires_at < NOW()');
   if (filters.hidden === 'only') where.push('COALESCE(cp.hidden, FALSE) = TRUE');
   else if (filters.hidden !== 'all') where.push('COALESCE(cp.hidden, FALSE) = FALSE');
   if (filters.tagId) {
@@ -129,6 +135,10 @@ async function counts(filters = {}) {
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
   if (filters.accountId) add('c.account_id = ?', filters.accountId);
   if (filters.sectorId) add('c.sector_id = ?', filters.sectorId);
+  if (filters.plan === 'with') where.push('ct.plan_credits IS NOT NULL');
+  else if (filters.plan === 'without') where.push('ct.plan_credits IS NULL');
+  else if (filters.plan === 'empty') where.push('ct.plan_credits IS NOT NULL AND ct.plan_used >= ct.plan_credits');
+  else if (filters.plan === 'expired') where.push('ct.plan_credits IS NOT NULL AND ct.plan_expires_at < NOW()');
   if (filters.hidden === 'only') where.push('COALESCE(cp.hidden, FALSE) = TRUE');
   else if (filters.hidden !== 'all') where.push('COALESCE(cp.hidden, FALSE) = FALSE');
   if (filters.tagId) { params.push(filters.tagId); joins += ` JOIN conversation_tags ft ON ft.conversation_id = c.id AND ft.tag_id = $${params.length}`; }
@@ -144,6 +154,7 @@ async function counts(filters = {}) {
             COUNT(*) FILTER (WHERE c.status = 'open' AND c.attended = FALSE)::int AS queued,
             COUNT(*) FILTER (WHERE c.status = 'resolved')::int AS resolved
        FROM conversations c
+       JOIN contacts ct ON ct.id = c.contact_id
        LEFT JOIN conversation_prefs cp ON cp.conversation_id = c.id AND cp.user_id = $1
        ${joins} ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`,
     params

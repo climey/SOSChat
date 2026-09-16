@@ -10,7 +10,9 @@
     currentId: null,
     currentConv: null,
     messages: [],
-    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', sector: '', q: '', hidden: 'none' },
+    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', sector: '', plan: '', q: '', hidden: 'none' },
+    plans: [], // catálogo de planos de consultas
+    contact: null, // ficha completa do contato da conversa aberta
     accounts: new Map(), // id -> status do número (só provedor baileys)
     prefs: new Map(), // conversa id -> { pinned, muted, hidden } deste atendente
     presence: new Map(), // user id -> { online, availability }
@@ -87,6 +89,7 @@
     if (f.tag) qs.set('tag', f.tag);
     if (f.account) qs.set('account', f.account);
     if (f.sector) qs.set('sector', f.sector);
+    if (f.plan) qs.set('plan', f.plan);
     if (f.q) qs.set('q', f.q);
     if (f.hidden !== 'none') qs.set('hidden', f.hidden);
     const { conversations } = await api('GET', `/api/conversations?${qs}`);
@@ -106,6 +109,8 @@
       if (f.tag) qs.set('tag', f.tag);
       if (f.account) qs.set('account', f.account);
       if (f.sector) qs.set('sector', f.sector);
+      if (f.plan) qs.set('plan', f.plan);
+    if (f.plan) qs.set('plan', f.plan);
       if (f.q) qs.set('q', f.q);
       if (f.hidden !== 'none') qs.set('hidden', f.hidden);
       try {
@@ -199,6 +204,7 @@
             </div>
             <div class="meta">
               ${c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')}
+              ${planChip(c)}
               ${c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : ''}
               ${c.status === 'open' && !c.attended ? '<span class="tag new">Na fila</span>' : ''}
               ${c.scheduled_count > 0 ? `<span class="chip-soft" title="${c.scheduled_count} mensagem(ns) agendada(s)">⏰ ${c.scheduled_count}</span>` : ''}
@@ -344,6 +350,7 @@
   els.tagFilter.addEventListener('change', () => { state.filters.tag = els.tagFilter.value; loadConversations(); });
   els.accountFilter.addEventListener('change', () => { state.filters.account = els.accountFilter.value; loadConversations(); });
   $('sector-filter').addEventListener('change', () => { state.filters.sector = $('sector-filter').value; loadConversations(); });
+  $('plan-filter').addEventListener('change', () => { state.filters.plan = $('plan-filter').value; loadConversations(); });
   els.btnFilters.addEventListener('click', () => {
     els.filtersDrawer.hidden = !els.filtersDrawer.hidden;
     els.btnFilters.classList.toggle('active', !els.filtersDrawer.hidden);
@@ -384,6 +391,7 @@
     els.chatTitle.textContent = contactName(c);
     els.chatTags.innerHTML =
       `<span class="sub">${esc(formatPhone(c.wa_id))}</span>` +
+      planChip(c) +
       `<button type="button" class="tag-quick" id="btn-tag-quick" title="Adicionar ou remover etiquetas">${TAG_ICON}</button>` +
       c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('') +
       sectorChip(c, true) +
@@ -397,6 +405,8 @@
     $('schedule-badge').hidden = !(c.scheduled_count > 0);
     $('schedule-badge').textContent = c.scheduled_count || 0;
     renderBanner();
+    renderPlanHint();
+    if (Number($('debit-prompt').dataset.conv) !== c.id) $('debit-prompt').hidden = true;
   }
 
   function statusIcon(m) {
@@ -969,17 +979,70 @@
   $('rec-cancel').addEventListener('click', () => stopRecording(true));
   $('rec-send').addEventListener('click', () => stopRecording(false));
 
-  // ---------- Ficha do contato ----------
+  // ---------- Ficha do contato, plano e consultas ----------
+  const PLAN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 0 2-2V5h14v2a2 2 0 0 0 2 2v6a2 2 0 0 0-2 2v2H5v-2a2 2 0 0 0-2-2z"/><line x1="13" y1="5" x2="13" y2="19" stroke-dasharray="2 2"/></svg>';
+  const CLOCK_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+  const CAL_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+  const DOTS_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+  const ARROW_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+  const ARROW_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+
+  /** Situação do plano a partir de uma conversa ou de uma ficha (ambas trazem plan_credits/plan_left). */
+  function planState(c) {
+    if (!c || c.plan_credits === null || c.plan_credits === undefined) return null;
+    const expired = Boolean(c.plan_expires_at) && new Date(c.plan_expires_at) < new Date();
+    const left = Number(c.plan_left ?? Math.max(0, c.plan_credits - (c.plan_used || 0)));
+    const cls = expired ? 'is-expired' : left === 0 ? 'is-empty' : left <= 1 ? 'is-low' : 'is-ok';
+    return { expired, left, total: Number(c.plan_credits), cls, name: c.plan_name || 'Plano' };
+  }
+  function planChip(c) {
+    const p = planState(c);
+    if (!p) return '';
+    const title = `${p.name}: ${p.left} de ${p.total} consulta(s) disponível(is)${p.expired ? ' · vencido' : ''}`;
+    return `<span class="plan-chip ${p.cls}" title="${esc(title)}">${PLAN_ICON}${p.left}/${p.total}</span>`;
+  }
+  const daysUntil = (d) => Math.ceil((new Date(d) - Date.now()) / 86400e3);
+  function planExpiryText(c) {
+    if (!c.plan_expires_at) return 'Sem vencimento';
+    const n = daysUntil(c.plan_expires_at);
+    const date = new Date(c.plan_expires_at).toLocaleDateString('pt-BR');
+    if (n < 0) return `Venceu em ${date}`;
+    if (n === 0) return 'Vence hoje';
+    return `Vence em ${n} dia${n > 1 ? 's' : ''} (${date})`;
+  }
+  function agoText(d) {
+    const s = Math.max(0, (Date.now() - new Date(d)) / 1000);
+    if (s < 60) return 'agora mesmo';
+    const m = Math.floor(s / 60); if (m < 60) return `há ${m} min`;
+    const h = Math.floor(m / 60); if (h < 24) return `há ${h} hora${h > 1 ? 's' : ''}`;
+    const days = Math.floor(h / 24); if (days < 30) return `há ${days} dia${days > 1 ? 's' : ''}`;
+    const mo = Math.floor(days / 30); if (mo < 12) return `há ${mo} m${mo > 1 ? 'eses' : 'ês'}`;
+    return new Date(d).toLocaleDateString('pt-BR');
+  }
+  const fmtCpf = (v) => v.length === 11 ? v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4') : v.length === 14 ? v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : v;
+
+  const FIELDS = [
+    { key: 'cpf', label: 'CPF / CNPJ', inputmode: 'numeric' },
+    { key: 'email', label: 'E-mail', type: 'email' },
+    { key: 'phone2', label: 'Telefone fixo', type: 'tel' },
+    { key: 'company', label: 'Empresa' },
+    { key: 'city', label: 'Cidade' },
+    { key: 'address', label: 'Endereço', more: true },
+    { key: 'birthdate', label: 'Nascimento', type: 'date', more: true },
+    { key: 'notes', label: 'Observações internas', textarea: true, more: true },
+  ];
   let contactCardId = null;
+  const dOpen = { 'd-notes': false, 'd-consults': false, 'd-log': false };
+  let fieldsExpanded = false;
+
   async function loadContactCard(c) {
     if (!c) return;
     contactCardId = c.contact_id;
     try {
       const { contact, conversations } = await api('GET', `/api/contacts/${c.contact_id}`);
       if (contactCardId !== c.contact_id) return;
-      if (document.activeElement !== $('d-cpf')) $('d-cpf').value = contact.cpf || '';
-      if (document.activeElement !== $('d-email')) $('d-email').value = contact.email || '';
-      if (document.activeElement !== $('d-notes')) $('d-notes').value = contact.notes || '';
+      state.contact = contact;
+      renderContactCard(contact);
       const others = conversations.filter((x) => x.id !== c.id);
       $('d-history').innerHTML = others.length ? others.map((x) => `
         <div class="h-item" data-open="${x.id}">
@@ -987,17 +1050,348 @@
           <div class="h-prev">${esc(stripWa(x.last_message_preview || ''))}</div>
           <div class="muted">${x.messages_count} msg · ${esc(x.assigned_user_name || 'sem responsável')}</div>
         </div>`).join('') : '<div class="muted small">Primeira conversa deste contato</div>';
+      for (const k of Object.keys(dOpen)) if (dOpen[k]) loadSub(k);
     } catch { /* ignora */ }
   }
   $('d-history').addEventListener('click', (e) => { const it = e.target.closest('[data-open]'); if (it) openConversation(Number(it.dataset.open)); });
-  for (const [id, field] of [['d-cpf', 'cpf'], ['d-email', 'email'], ['d-notes', 'notes']]) {
-    $(id).addEventListener('change', async () => {
-      const c = current();
-      if (!c) return;
-      try { await api('PATCH', `/api/contacts/${c.contact_id}`, { [field]: $(id).value }); toast('Ficha salva'); }
-      catch (err) { toast(err.message, true); }
+
+  function renderContactCard(ct) {
+    $('d-notes-count').textContent = ct.notes_count ? `(${ct.notes_count})` : '';
+    $('d-consults-count').textContent = ct.consultations_count ? `(${ct.consultations_count})` : '';
+    renderPlanCard(ct);
+    renderFields(ct);
+    renderBlockButton(ct.blocked);
+  }
+  function renderBlockButton(blocked) {
+    $('d-block').innerHTML = `${BLOCK_ICON}<span>${blocked ? 'Desbloquear contato' : 'Bloquear contato'}</span>`;
+    $('d-block').classList.toggle('on', Boolean(blocked));
+  }
+
+  // ---- Plano ----
+  function renderPlanCard(ct) {
+    const p = planState(ct);
+    const box = $('d-plan');
+    if (!p) {
+      box.innerHTML = `<div class="plan-card none">
+        <div class="plan-top"><span class="plan-name">${PLAN_ICON}Plano de consultas</span><span class="plan-status">Sem plano</span></div>
+        <p class="muted small" style="margin:6px 0 10px">Este cliente não tem plano ativo. Consultas registradas ficam como avulsas.</p>
+        <div class="plan-actions"><button type="button" class="btn btn-sm btn-primary" data-plan="assign">Atribuir plano</button><button type="button" class="btn btn-sm" data-plan="consult">Registrar consulta</button></div>
+      </div>`;
+      return;
+    }
+    const pct = p.total ? Math.round((p.left / p.total) * 100) : 0;
+    const status = p.expired ? 'Vencido' : p.left === 0 ? 'Sem saldo' : p.left <= 1 ? 'Última consulta' : 'Ativo';
+    box.innerHTML = `<div class="plan-card ${p.cls}">
+      <div class="plan-top"><span class="plan-name">${PLAN_ICON}${esc(p.name)}</span><span class="plan-status">${status}</span></div>
+      <div class="plan-count"><b>${p.left}</b><span>/${p.total}</span><small>consulta${p.left === 1 ? '' : 's'} disponíve${p.left === 1 ? 'l' : 'is'}</small></div>
+      <div class="plan-bar"><i style="width:${pct}%"></i></div>
+      <div class="plan-meta">${esc(planExpiryText(ct))}${ct.plan_started_at ? ` · desde ${new Date(ct.plan_started_at).toLocaleDateString('pt-BR')}` : ''}</div>
+      <div class="plan-actions">
+        <button type="button" class="btn btn-sm btn-primary" data-plan="consult">Registrar consulta</button>
+        <button type="button" class="btn btn-sm" data-plan="renew">Renovar</button>
+        <button type="button" class="icon-btn sm" data-plan="menu" title="Mais opções do plano">${DOTS_ICON}</button>
+      </div>
+    </div>`;
+  }
+  $('d-plan').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-plan]');
+    if (!b || !state.contact) return;
+    const act = b.dataset.plan;
+    if (act === 'assign' || act === 'change') openPlanModal('assign');
+    else if (act === 'consult') openConsultModal('placa', guessReference());
+    else if (act === 'renew') renewPlan(state.contact);
+    else if (act === 'menu') { e.stopPropagation(); placeMenu($('plan-menu'), b); }
+  });
+  $('plan-menu').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-plan]');
+    $('plan-menu').hidden = true;
+    if (!b || !state.contact) return;
+    if (b.dataset.plan === 'adjust') openPlanModal('adjust');
+    else if (b.dataset.plan === 'change') openPlanModal('assign');
+    else if (b.dataset.plan === 'remove') removePlan(state.contact);
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#plan-menu') && !e.target.closest('[data-plan="menu"]')) $('plan-menu').hidden = true; });
+  async function renewPlan(ct) {
+    if (!ct || ct.plan_credits == null) return;
+    if (!confirm(`Renovar o plano ${ct.plan_name}? O saldo volta para ${ct.plan_credits} consulta(s) e o vencimento é recalculado a partir de hoje.`)) return;
+    try { await api('POST', `/api/contacts/${ct.id}/plan/renew`); toast('Plano renovado'); } catch (err) { toast(err.message, true); }
+  }
+  async function removePlan(ct) {
+    if (!confirm(`Remover o plano ${ct.plan_name} deste cliente? O histórico de consultas fica guardado.`)) return;
+    try { await api('DELETE', `/api/contacts/${ct.id}/plan`); toast('Plano removido'); } catch (err) { toast(err.message, true); }
+  }
+
+  const planModal = { mode: 'assign', selected: null };
+  async function loadPlans() { try { ({ plans: state.plans } = await api('GET', '/api/plans')); } catch { state.plans = []; } }
+  function openPlanModal(mode) {
+    const ct = state.contact;
+    if (!ct) return;
+    planModal.mode = mode;
+    $('plan-title').textContent = mode === 'adjust' ? 'Ajustar plano' : (ct.plan_credits != null ? 'Trocar de plano' : 'Atribuir plano');
+    $('plan-sub').textContent = (ct.name || ct.profile_name || formatPhone(ct.wa_id)) + (mode === 'assign' && ct.plan_credits != null ? ` · o saldo atual (${ct.plan_left}/${ct.plan_credits}) será substituído` : '');
+    $('plan-assign').hidden = mode !== 'assign';
+    $('plan-adjust').hidden = mode !== 'adjust';
+    if (mode === 'assign') {
+      const active = state.plans.filter((x) => x.active);
+      planModal.selected = active.length ? active[0].id : 'custom';
+      $('plan-c-name').value = ''; $('plan-c-credits').value = ''; $('plan-c-days').value = '';
+      renderPlanOptions();
+    } else {
+      $('plan-a-credits').value = ct.plan_credits;
+      $('plan-a-used').value = ct.plan_used;
+      $('plan-a-expires').value = ct.plan_expires_at ? new Date(ct.plan_expires_at).toISOString().slice(0, 10) : '';
+    }
+    $('plan-modal').hidden = false;
+  }
+  function renderPlanOptions() {
+    const active = state.plans.filter((x) => x.active);
+    const price = (c) => (c == null ? '' : ` · R$ ${(c / 100).toFixed(2).replace('.', ',')}`);
+    $('plan-options').innerHTML = active.map((x) => `<button type="button" class="plan-opt ${planModal.selected === x.id ? 'on' : ''}" data-plan-id="${x.id}"><b>${esc(x.name)}</b><span>${x.credits} consulta${x.credits === 1 ? '' : 's'}${x.validity_days ? ` · ${x.validity_days} dias` : ' · sem vencimento'}${price(x.price_cents)}</span></button>`).join('')
+      + `<button type="button" class="plan-opt ${planModal.selected === 'custom' ? 'on' : ''}" data-plan-id="custom"><b>Personalizado</b><span>Defina nome, quantidade e validade</span></button>`;
+    $('plan-custom').hidden = planModal.selected !== 'custom';
+  }
+  $('plan-options').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-plan-id]');
+    if (!b) return;
+    planModal.selected = b.dataset.planId === 'custom' ? 'custom' : Number(b.dataset.planId);
+    renderPlanOptions();
+    if (planModal.selected === 'custom') $('plan-c-name').focus();
+  });
+  function closePlanModal() { $('plan-modal').hidden = true; }
+  ['plan-cancel', 'plan-cancel-2'].forEach((id) => $(id).addEventListener('click', closePlanModal));
+  $('plan-modal').addEventListener('click', (e) => { if (e.target === $('plan-modal')) closePlanModal(); });
+  $('plan-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const ct = state.contact;
+    if (!ct) return;
+    $('plan-submit').disabled = true;
+    try {
+      if (planModal.mode === 'assign') {
+        const body = planModal.selected === 'custom'
+          ? { name: $('plan-c-name').value, credits: Number($('plan-c-credits').value), validity_days: $('plan-c-days').value ? Number($('plan-c-days').value) : null }
+          : { plan_id: planModal.selected };
+        const r = await api('PUT', `/api/contacts/${ct.id}/plan`, body);
+        toast(`Plano ${r.contact.plan_name} atribuído`);
+      } else {
+        const exp = $('plan-a-expires').value;
+        await api('PATCH', `/api/contacts/${ct.id}/plan`, { credits: Number($('plan-a-credits').value), used: Number($('plan-a-used').value), expires_at: exp ? new Date(exp + 'T23:59:59').toISOString() : null });
+        toast('Plano ajustado');
+      }
+      closePlanModal();
+    } catch (err) { toast(err.message, true); }
+    finally { $('plan-submit').disabled = false; }
+  });
+
+  // ---- Consultas ----
+  const consult = { kind: 'placa', contactId: null, conversationId: null };
+  function guessReference() {
+    for (let i = state.messages.length - 1, n = 0; i >= 0 && n < 30; i--, n++) {
+      const m = state.messages[i];
+      if (m.direction !== 'in' || !m.body || m.type === 'note') continue;
+      const t = m.body.toUpperCase().replace(/[^A-Z0-9\s-]/g, ' ');
+      const plate = t.match(/\b([A-Z]{3})-?(\d[A-Z0-9]\d{2})\b/);
+      if (plate) return plate[1] + plate[2];
+      const vin = t.match(/\b[A-HJ-NPR-Z0-9]{17}\b/);
+      if (vin) return vin[0];
+    }
+    return '';
+  }
+  function openConsultModal(kind = 'placa', prefillRef = '') {
+    const c = current();
+    if (!c) return;
+    const ct = state.contact && state.contact.id === c.contact_id ? state.contact : c;
+    consult.contactId = c.contact_id; consult.conversationId = c.id; consult.kind = kind;
+    document.querySelectorAll('#consult-kinds .chip').forEach((b) => b.classList.toggle('active', b.dataset.kind === kind));
+    $('consult-ref').value = prefillRef;
+    $('consult-note').value = '';
+    const p = planState(ct);
+    const cb = $('consult-charge');
+    if (!p) { cb.checked = false; cb.disabled = true; $('consult-charge-label').textContent = 'Cliente sem plano: fica como consulta avulsa'; }
+    else if (p.expired) { cb.checked = false; cb.disabled = true; $('consult-charge-label').textContent = 'Plano vencido: fica como consulta avulsa'; }
+    else if (p.left === 0) { cb.checked = false; cb.disabled = true; $('consult-charge-label').textContent = 'Plano sem saldo: fica como consulta avulsa'; }
+    else { cb.checked = true; cb.disabled = false; $('consult-charge-label').textContent = `Debitar 1 consulta do plano (saldo ${p.left}/${p.total})`; }
+    $('consult-sub').textContent = `${contactName(c)} · ${p ? p.name : 'sem plano'}`;
+    $('consult-modal').hidden = false;
+    $('consult-ref').focus();
+  }
+  function closeConsultModal() { $('consult-modal').hidden = true; }
+  $('consult-kinds').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-kind]');
+    if (!b) return;
+    consult.kind = b.dataset.kind;
+    document.querySelectorAll('#consult-kinds .chip').forEach((x) => x.classList.toggle('active', x === b));
+  });
+  ['consult-cancel', 'consult-cancel-2'].forEach((id) => $(id).addEventListener('click', closeConsultModal));
+  $('consult-modal').addEventListener('click', (e) => { if (e.target === $('consult-modal')) closeConsultModal(); });
+  $('consult-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('consult-submit').disabled = true;
+    try {
+      const r = await api('POST', `/api/contacts/${consult.contactId}/consultations`, {
+        conversation_id: consult.conversationId, kind: consult.kind, reference: $('consult-ref').value,
+        charge: $('consult-charge').checked, note: $('consult-note').value,
+      });
+      const p = planState(r.contact);
+      toast(p && r.consultation.charged ? `Consulta registrada · saldo ${p.left}/${p.total}` : 'Consulta avulsa registrada');
+      closeConsultModal();
+    } catch (err) { toast(err.message, true); }
+    finally { $('consult-submit').disabled = false; }
+  });
+  $('btn-consult').addEventListener('click', () => openConsultModal('placa', guessReference()));
+
+  // Depois de enviar um PDF para cliente com plano, oferece o débito com um clique
+  let debitTimer = null;
+  function offerDebit(file) {
+    const c = current();
+    if (!c || !file) return;
+    const isDoc = /pdf/i.test(file.type || '') || /\.pdf$/i.test(file.name || '');
+    const p = planState(state.contact && state.contact.id === c.contact_id ? state.contact : c);
+    if (!isDoc || !p || p.expired || p.left === 0) return;
+    $('debit-text').innerHTML = `Documento enviado. Debitar 1 consulta do plano de <b>${esc(contactName(c))}</b>? <span class="muted">(saldo ${p.left}/${p.total})</span>`;
+    $('debit-prompt').dataset.conv = c.id;
+    $('debit-prompt').hidden = false;
+    clearTimeout(debitTimer);
+    debitTimer = setTimeout(() => { $('debit-prompt').hidden = true; }, 120000);
+  }
+  $('debit-prompt').addEventListener('click', async (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const convId = Number($('debit-prompt').dataset.conv);
+    $('debit-prompt').hidden = true;
+    if (b.id === 'debit-no') return;
+    const c = state.conversations.find((x) => x.id === convId) || (state.currentConv && state.currentConv.id === convId ? state.currentConv : null);
+    if (!c) return;
+    try {
+      const r = await api('POST', `/api/contacts/${c.contact_id}/consultations`, { conversation_id: convId, kind: b.dataset.kind, reference: convId === state.currentId ? guessReference() : '', charge: true });
+      const p = planState(r.contact);
+      toast(`Consulta debitada · saldo ${p.left}/${p.total}`);
+    } catch (err) { toast(err.message, true); }
+  });
+
+  // Aviso no chat quando o plano zerou ou venceu
+  function renderPlanHint() {
+    const c = current();
+    const box = $('plan-hint');
+    const p = planState(c);
+    if (!c || !p || c.status !== 'open' || (p.left > 0 && !p.expired)) { box.hidden = true; return; }
+    const why = p.expired ? 'O plano deste cliente venceu' : 'O plano deste cliente não tem mais consultas';
+    const hasReply = state.quickReplies.some((q) => q.shortcut === 'renovar');
+    box.innerHTML = `${PLAN_ICON}<span>${esc(why)} (${esc(p.name)}).</span><span class="spacer"></span>${hasReply ? '<button type="button" class="btn btn-sm" data-hint="reply">Sugerir renovação</button>' : ''}<button type="button" class="btn btn-sm btn-primary" data-hint="renew">Renovar plano</button>`;
+    box.hidden = false;
+  }
+  $('plan-hint').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-hint]');
+    const c = current();
+    if (!b || !c) return;
+    if (b.dataset.hint === 'reply') { const q = state.quickReplies.find((x) => x.shortcut === 'renovar'); if (q) { setComposeMode('message'); applyQuick(q.id); } }
+    else renewPlan({ id: c.contact_id, plan_name: c.plan_name, plan_credits: c.plan_credits });
+  });
+
+  // ---- Campos da ficha ----
+  function fieldValue(ct, f) {
+    const v = ct[f.key];
+    if (!v) return '';
+    if (f.key === 'birthdate') return new Date(String(v).slice(0, 10) + 'T00:00:00').toLocaleDateString('pt-BR');
+    if (f.key === 'cpf') return fmtCpf(String(v));
+    return String(v);
+  }
+  function renderFields(ct) {
+    const rows = FIELDS.filter((f) => fieldsExpanded || !f.more || ct[f.key]).map((f) => `
+      <div class="d-field" data-key="${f.key}">
+        <div class="d-field-label">${esc(f.label)}</div>
+        ${ct[f.key] ? `<div class="d-field-value ${f.textarea ? 'multi' : ''}" title="Clique para editar">${esc(fieldValue(ct, f))}</div>` : '<button type="button" class="d-field-add">Adicionar</button>'}
+      </div>`).join('');
+    const ro = `
+      <div class="d-field ro"><div class="d-field-label">Ativo pela última vez</div><div class="d-field-value">${CLOCK_SM}${esc(ct.last_seen_at ? agoText(ct.last_seen_at) : 'sem registro')}</div></div>
+      <div class="d-field ro"><div class="d-field-label">Cliente desde</div><div class="d-field-value">${CAL_SM}${esc(new Date(ct.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</div></div>`;
+    $('d-fields').innerHTML = rows + ro;
+    $('d-more').innerHTML = fieldsExpanded ? `${ARROW_UP}Ver menos campos` : `${ARROW_DOWN}Ver mais campos`;
+  }
+  $('d-more').addEventListener('click', () => { fieldsExpanded = !fieldsExpanded; if (state.contact) renderFields(state.contact); });
+  $('d-fields').addEventListener('click', (e) => {
+    const row = e.target.closest('.d-field:not(.ro)');
+    if (!row || row.querySelector('.d-field-edit')) return;
+    if (!e.target.closest('.d-field-value') && !e.target.closest('.d-field-add')) return;
+    editField(row);
+  });
+  function editField(row) {
+    const f = FIELDS.find((x) => x.key === row.dataset.key);
+    const ct = state.contact;
+    if (!f || !ct) return;
+    const raw = ct[f.key] ? (f.key === 'birthdate' ? String(ct[f.key]).slice(0, 10) : String(ct[f.key])) : '';
+    const el = document.createElement(f.textarea ? 'textarea' : 'input');
+    el.className = (f.textarea ? 'textarea' : 'input') + ' d-field-edit';
+    if (!f.textarea) el.type = f.type || 'text';
+    if (f.inputmode) el.inputMode = f.inputmode;
+    if (f.textarea) el.rows = 3;
+    el.value = raw;
+    el.placeholder = f.label;
+    row.querySelector('.d-field-value, .d-field-add').replaceWith(el);
+    el.focus();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      if (!save || el.value.trim() === raw.trim()) { renderFields(ct); return; }
+      try {
+        const { contact } = await api('PATCH', `/api/contacts/${ct.id}`, { [f.key]: el.value });
+        state.contact = contact;
+        renderContactCard(contact);
+        toast('Ficha salva');
+      } catch (err) { toast(err.message, true); renderFields(ct); }
+    };
+    el.addEventListener('blur', () => finish(true));
+    el.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+      if (ev.key === 'Enter' && !f.textarea) { ev.preventDefault(); el.blur(); }
     });
   }
+
+  // ---- Observações, consultas e log (carregados ao abrir) ----
+  els.details.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-dtoggle]');
+    if (!b) return;
+    const key = b.dataset.dtoggle;
+    dOpen[key] = !dOpen[key];
+    b.classList.toggle('open', dOpen[key]);
+    $(key).hidden = !dOpen[key];
+    if (dOpen[key]) loadSub(key);
+  });
+  async function loadSub(key) {
+    const ct = state.contact;
+    if (!ct) return;
+    const box = $(key);
+    try {
+      if (key === 'd-notes') {
+        const { notes } = await api('GET', `/api/contacts/${ct.id}/notes`);
+        box.innerHTML = notes.length ? notes.map((n) => `<div class="d-item" data-open="${n.conversation_id}"><div class="d-item-top"><b>${esc(n.user_name || 'Sistema')}</b><span>${esc(fmtTime(n.created_at))}</span></div><div class="d-item-body">${esc(n.body)}</div></div>`).join('')
+          : '<div class="d-empty">Nenhuma observação. Escreva uma "Nota interna" no compositor.</div>';
+      } else if (key === 'd-consults') {
+        const { consultations } = await api('GET', `/api/contacts/${ct.id}/consultations`);
+        box.innerHTML = consultations.length ? consultations.map((k) => `<div class="d-item ${k.reversed_at ? 'reversed' : ''}">
+            <div class="d-item-top"><b>${esc(k.kind_label)}${k.reference ? ' ' + esc(k.reference) : ''}</b><span>${esc(fmtTime(k.created_at))}</span></div>
+            <div class="d-item-body">${esc(k.user_name || '')} · ${k.charged ? 'debitada do plano' : 'avulsa'}${k.note ? ' · ' + esc(k.note) : ''}${k.reversed_at ? ` · estornada por ${esc(k.reversed_by_name || '')}` : ''}</div>
+            ${k.reversed_at ? '' : `<button type="button" class="d-item-act" data-reverse="${k.id}">Estornar</button>`}
+          </div>`).join('') : '<div class="d-empty">Nenhuma consulta registrada.</div>';
+      } else if (key === 'd-log') {
+        const { events } = await api('GET', `/api/contacts/${ct.id}/events`);
+        box.innerHTML = events.length ? events.map((ev) => `<div class="d-item log ${esc(ev.type)}"><div class="d-item-body">${esc(ev.description)}</div><div class="d-item-top"><span>${esc(fmtTime(ev.created_at))}</span></div></div>`).join('')
+          : '<div class="d-empty">Nada registrado ainda.</div>';
+      }
+    } catch (err) { box.innerHTML = `<div class="d-empty">${esc(err.message)}</div>`; }
+  }
+  $('d-consults').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-reverse]');
+    if (!b || !state.contact) return;
+    if (!confirm('Estornar esta consulta? Se foi debitada do plano, o crédito volta.')) return;
+    try { await api('DELETE', `/api/contacts/${state.contact.id}/consultations/${b.dataset.reverse}`); toast('Consulta estornada'); }
+    catch (err) { toast(err.message, true); }
+  });
+  $('d-notes').addEventListener('click', (e) => {
+    const it = e.target.closest('[data-open]');
+    if (it && Number(it.dataset.open) !== state.currentId) openConversation(Number(it.dataset.open));
+  });
+  function refreshContactSubs() { for (const k of Object.keys(dOpen)) if (dOpen[k]) loadSub(k); }
 
   // ---------- Visualizador de mídia (lightbox) ----------
   const lb = { items: [], idx: -1, zoom: 1 };
@@ -1229,6 +1623,7 @@
   }
   async function sendAttachment(id, caption) {
     const fd = new FormData();
+    const file = attach.file;
     fd.append('file', attach.file, attach.file.name);
     fd.append('caption', els.signToggle.checked && caption ? `*${signText()}:*\n${caption}` : caption);
     if (state.reply) fd.append('quoted_message_id', state.reply.id);
@@ -1238,6 +1633,7 @@
       await SOS.upload(`/api/conversations/${id}/media`, fd);
       clearAttachment();
       clearReply();
+      offerDebit(file);
       els.composeText.value = '';
       autosize();
     } catch (err) {
@@ -1643,16 +2039,28 @@
     let open = false;
     try { open = localStorage.getItem('sos.details') === '1'; } catch { /* ignora */ }
     setDetailsOpen(open);
-    $('d-avatar').outerHTML = avatarHtml(c, '', false).replace('<div class="avatar ', '<div id="d-avatar" class="avatar ');
+    $('d-avatar').outerHTML = avatarHtml(c, 'xl', false).replace('<div class="avatar ', '<div id="d-avatar" class="avatar ');
     els.dName.textContent = contactName(c);
-    els.dPhone.textContent = formatPhone(c.wa_id) + (c.profile_name ? ` · perfil: ${c.profile_name}` : '');
+    els.dPhone.textContent = formatPhone(c.wa_id);
+    $('d-lid').innerHTML = [
+      c.profile_name && c.profile_name !== contactName(c) ? `perfil: ${esc(c.profile_name)}` : '',
+      c.contact_blocked ? '<span class="tag new">Bloqueado</span>' : '',
+    ].filter(Boolean).join(' · ');
     if (document.activeElement !== els.dNameInput) els.dNameInput.value = c.contact_name || '';
+    $('d-tags-view').innerHTML = c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')
+      + `<button type="button" class="tag-quick" id="d-tag-add" title="Adicionar ou remover etiquetas">${TAG_ICON}</button>`;
+    // Enquanto a ficha completa não chega, o cartão do plano usa os dados que a conversa já traz
+    if (!state.contact || state.contact.id !== c.contact_id) {
+      renderPlanCard({ ...c, id: c.contact_id, plan_used: c.plan_credits != null ? c.plan_credits - c.plan_left : 0, plan_started_at: null });
+      renderBlockButton(c.contact_blocked);
+    }
     els.dStatus.innerHTML = `<span class="status-pill ${c.status}">${c.status === 'open' ? 'Aberta' : 'Finalizada'}</span>`;
     const times = [`Iniciada ${new Date(c.created_at).toLocaleString('pt-BR')}`];
     if (c.first_response_at) times.push(`1ª resposta em ${fmtDuration((new Date(c.first_response_at) - new Date(c.created_at)) / 1000)}`);
     if (c.resolved_at) times.push(`Resolvida em ${fmtDuration((new Date(c.resolved_at) - new Date(c.created_at)) / 1000)}`);
     els.dTimes.innerHTML = times.map(esc).join('<br>');
     els.dAssignee.value = c.assigned_user_id || '';
+    $('d-route').innerHTML = `${sectorChip(c)}${c.account_name ? `<span class="chip-soft ${accountOffline(c.account_id) ? 'off' : ''}">via ${esc(c.account_name)}</span>` : ''}<button type="button" class="btn btn-sm btn-ghost" id="d-sector-change">Mudar setor</button>`;
     const selected = new Set(c.tags.map((t) => t.id));
     els.dTags.innerHTML = state.tags.map((t) => `
       <span class="tag selectable ${selected.has(t.id) ? 'on' : ''}" data-id="${t.id}" style="--tag-color:${esc(t.color)}">
@@ -1676,10 +2084,57 @@
     try { await api('PATCH', `/api/conversations/${c.id}`, { assigned_user_id: els.dAssignee.value ? Number(els.dAssignee.value) : null }); }
     catch (err) { toast(err.message, true); }
   });
-  els.dNameInput.addEventListener('change', async () => {
+  $('d-tags-view').addEventListener('click', (e) => {
+    const b = e.target.closest('#d-tag-add');
+    const c = current();
+    if (!b || !c) return;
+    e.stopPropagation();
+    openTagPopup(c, b);
+  });
+  $('d-route').addEventListener('click', (e) => {
+    const b = e.target.closest('#d-sector-change');
+    const c = current();
+    if (!b || !c) return;
+    e.stopPropagation();
+    openSectorPopup(c, b);
+  });
+  $('d-close').addEventListener('click', () => setDetailsOpen(false));
+  $('d-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-dtab]');
+    if (!b) return;
+    document.querySelectorAll('#d-tabs button').forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.d-tab').forEach((x) => { x.hidden = x.dataset.dtab !== b.dataset.dtab; });
+  });
+  $('d-edit-name').addEventListener('click', () => {
+    els.dNameInput.hidden = false;
+    els.dNameInput.focus();
+    els.dNameInput.select();
+  });
+  async function saveContactName() {
+    const c = current();
+    els.dNameInput.hidden = true;
+    if (!c || els.dNameInput.value.trim() === (c.contact_name || '')) return;
+    try { await api('PATCH', `/api/conversations/${c.id}/contact`, { name: els.dNameInput.value }); toast('Nome salvo'); }
+    catch (err) { toast(err.message, true); }
+  }
+  els.dNameInput.addEventListener('blur', saveContactName);
+  els.dNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); els.dNameInput.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); els.dNameInput.value = current()?.contact_name || ''; els.dNameInput.blur(); }
+  });
+  $('d-block').addEventListener('click', async () => {
     const c = current();
     if (!c) return;
-    try { await api('PATCH', `/api/conversations/${c.id}/contact`, { name: els.dNameInput.value }); toast('Nome salvo'); }
+    const blocked = !c.contact_blocked;
+    if (!confirm(blocked ? `Bloquear ${contactName(c)} no WhatsApp? Ele não conseguirá mais enviar mensagens.` : `Desbloquear ${contactName(c)}?`)) return;
+    try { await api('PATCH', `/api/conversations/${c.id}/contact`, { blocked }); toast(blocked ? 'Contato bloqueado' : 'Contato desbloqueado'); }
+    catch (err) { toast(err.message, true); }
+  });
+  $('d-delete').addEventListener('click', async () => {
+    const c = current();
+    if (!c) return;
+    if (!confirm(`Excluir o contato ${contactName(c)}? Todas as conversas, mensagens, consultas e o plano dele serão apagados para todos os atendentes. Isso não pode ser desfeito.`)) return;
+    try { await api('DELETE', `/api/contacts/${c.contact_id}`); toast('Contato excluído'); }
     catch (err) { toast(err.message, true); }
   });
 
@@ -1695,6 +2150,10 @@
     if (f.tag && !c.tags.some((t) => String(t.id) === String(f.tag))) return false;
     if (f.account && String(c.account_id) !== String(f.account)) return false;
     if (f.sector && String(c.sector_id) !== String(f.sector)) return false;
+    if (f.plan === 'with' && c.plan_credits == null) return false;
+    if (f.plan === 'without' && c.plan_credits != null) return false;
+    if (f.plan === 'empty' && !(c.plan_credits != null && c.plan_left === 0)) return false;
+    if (f.plan === 'expired' && !(c.plan_credits != null && c.plan_expires_at && new Date(c.plan_expires_at) < new Date())) return false;
     if (f.hidden === 'none' && c.hidden) return false;
     if (f.hidden === 'only' && !c.hidden) return false;
     if (f.q) {
@@ -1750,10 +2209,20 @@
     });
     socket.on('contact:updated', (contact) => {
       let touched = false;
-      for (const c of state.conversations) if (c.contact_id === contact.id) { c.contact_name = contact.name; touched = true; }
-      if (state.currentConv?.contact_id === contact.id) { state.currentConv.contact_name = contact.name; renderChat(); renderDetails(); loadContactCard(state.currentConv); }
+      const apply = (c) => {
+        c.contact_name = contact.name; c.contact_blocked = contact.blocked;
+        c.plan_name = contact.plan_name; c.plan_credits = contact.plan_credits; c.plan_left = contact.plan_left; c.plan_expires_at = contact.plan_expires_at;
+      };
+      for (const c of state.conversations) if (c.contact_id === contact.id) { apply(c); touched = true; }
+      if (state.currentConv && state.currentConv.contact_id === contact.id) {
+        apply(state.currentConv);
+        if (contact.plan_left !== undefined) { state.contact = contact; renderContactCard(contact); refreshContactSubs(); }
+        renderChat();
+        renderDetails();
+      }
       if (touched) renderList();
     });
+    socket.on('plans:updated', loadPlans);
     socket.on('conversation:transferred', ({ conversation, from, note }) => {
       toast(`${from} transferiu ${contactName(conversation)} para você${note ? ': ' + note : ''}`);
       if ('Notification' in window && Notification.permission === 'granted' && !document.hasFocus()) {
@@ -1770,6 +2239,11 @@
       if (message.conversation_id === state.currentId) {
         if (!state.messages.some((m) => m.id === message.id)) {
           state.messages.push(message);
+          if (message.type === 'note' && state.contact && state.contact.id === conversation.contact_id) {
+            state.contact.notes_count = (state.contact.notes_count || 0) + 1;
+            $('d-notes-count').textContent = `(${state.contact.notes_count})`;
+            if (dOpen['d-notes']) loadSub('d-notes');
+          }
           const nearBottom = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight < 120;
           renderMessages(nearBottom || message.direction === 'out');
         }
@@ -2097,6 +2571,7 @@
     setPresence(state.me.id, { online: true });
     renderMyPresence();
     await loadSectors();
+    loadPlans();
     els.tagFilter.innerHTML = '<option value="">Todas as tags</option>' + tags.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
     els.dAssignee.innerHTML = '<option value="">Sem responsável</option>' + users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
     try {
@@ -2111,6 +2586,8 @@
     } catch { /* sem status, segue sem filtro */ }
     await loadConversations();
     connectSocket();
+    const wantId = Number(new URLSearchParams(location.search).get('c'));
+    if (wantId) { history.replaceState(null, '', location.pathname); openConversation(wantId).catch(() => toast('Conversa não encontrada', true)); }
     setupSimulator();
     SOS.initUpdater(canReloadNow);
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
