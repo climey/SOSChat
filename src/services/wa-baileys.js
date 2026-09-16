@@ -163,7 +163,7 @@ class Session {
 
   status() {
     return {
-      id: this.account.id, name: this.account.name, phone: this.state.me,
+      id: this.account.id, name: this.account.name, phone: this.state.me, auto_tag_id: this.account.auto_tag_id || null,
       status: this.state.status, hasQr: Boolean(this.state.qr), lastError: this.state.lastError, since: this.state.since,
     };
   }
@@ -456,7 +456,7 @@ class Session {
 
 // ---------- Gerenciador de contas ----------
 async function loadAccounts() {
-  const { rows } = await db.query('SELECT id, name, phone, active FROM wa_accounts WHERE active = TRUE ORDER BY id');
+  const { rows } = await db.query('SELECT id, name, phone, active, auto_tag_id FROM wa_accounts WHERE active = TRUE ORDER BY id');
   return rows;
 }
 
@@ -489,7 +489,7 @@ function pickAccount() {
 }
 
 async function addAccount(name) {
-  const { rows } = await db.query('INSERT INTO wa_accounts (name) VALUES ($1) RETURNING id, name, phone, active', [name]);
+  const { rows } = await db.query('INSERT INTO wa_accounts (name) VALUES ($1) RETURNING id, name, phone, active, auto_tag_id', [name]);
   const session = new Session(rows[0]);
   sessions.set(rows[0].id, session);
   session.connect().catch((err) => console.error(`[baileys:${rows[0].id}] erro ao conectar`, err));
@@ -500,6 +500,15 @@ async function renameAccount(accountId, name) {
   const s = getSession(accountId);
   await db.query('UPDATE wa_accounts SET name = $2 WHERE id = $1', [accountId, name]);
   s.account.name = name;
+  s.setStatus(s.state.status);
+  return s.status();
+}
+
+/** Etiqueta aplicada a toda conversa nova que chega por este número (null desliga). */
+async function setAutoTag(accountId, tagId) {
+  const s = getSession(accountId);
+  await db.query('UPDATE wa_accounts SET auto_tag_id = $2 WHERE id = $1', [accountId, tagId]);
+  s.account.auto_tag_id = tagId;
   s.setStatus(s.state.status);
   return s.status();
 }
@@ -563,7 +572,7 @@ function verifySignature() {
 
 module.exports = {
   start, stop, getStatus, getQr, pickAccount,
-  addAccount, renameAccount, removeAccount,
+  addAccount, renameAccount, setAutoTag, removeAccount,
   refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),

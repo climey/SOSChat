@@ -489,7 +489,7 @@
       const actions = canAct ? `<div class="msg-actions">
           <button type="button" data-msg-act="reply" title="Responder">${REPLY_ICON}</button>
           <button type="button" data-msg-act="react" title="Reagir">😊</button>
-        </div>` : '';
+        </div>` : (isNote && !m.deleted_at && m.body ? `<div class="msg-actions"><button type="button" data-msg-act="pin" title="Fixar na ficha do contato (vira observação permanente)">📌</button></div>` : '');
       const stickerCls = m.type === 'sticker' && m.media_id && !m.deleted_at ? 'sticker' : '';
       return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed} ${stickerCls}" data-id="${m.id}">
         <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : ''}
@@ -605,6 +605,7 @@
     if (!m) return;
     if (act.dataset.msgAct === 'reply') setReply(m);
     if (act.dataset.msgAct === 'react') openEmojiPicker({ forReaction: id, anchor: act });
+    if (act.dataset.msgAct === 'pin') pinNoteToContact(m);
   });
   function setReply(m) {
     state.reply = m;
@@ -1029,11 +1030,11 @@
     { key: 'city', label: 'Cidade' },
     { key: 'address', label: 'Endereço', more: true },
     { key: 'birthdate', label: 'Nascimento', type: 'date', more: true },
-    { key: 'notes', label: 'Observações internas', textarea: true, more: true },
   ];
   let contactCardId = null;
   const dOpen = { 'd-notes': false, 'd-consults': false, 'd-log': false };
   let fieldsExpanded = false;
+  let autoOpenedNotesFor = null;
 
   async function loadContactCard(c) {
     if (!c) return;
@@ -1043,6 +1044,7 @@
       if (contactCardId !== c.contact_id) return;
       state.contact = contact;
       renderContactCard(contact);
+      if (contact.notes_count > 0 && !dOpen['d-notes'] && autoOpenedNotesFor !== contact.id) { autoOpenedNotesFor = contact.id; document.querySelector('[data-dtoggle="d-notes"]').click(); }
       const others = conversations.filter((x) => x.id !== c.id);
       $('d-history').innerHTML = others.length ? others.map((x) => `
         <div class="h-item" data-open="${x.id}">
@@ -1398,8 +1400,13 @@
     try {
       if (key === 'd-notes') {
         const { notes } = await api('GET', `/api/contacts/${ct.id}/notes`);
-        box.innerHTML = notes.length ? notes.map((n) => `<div class="d-item" data-open="${n.conversation_id}"><div class="d-item-top"><b>${esc(n.user_name || 'Sistema')}</b><span>${esc(fmtTime(n.created_at))}</span></div><div class="d-item-body">${esc(n.body)}</div></div>`).join('')
-          : '<div class="d-empty">Nenhuma observação. Escreva uma "Nota interna" no compositor.</div>';
+        const mine = (n) => n.user_id === state.me.id || state.me.role === 'admin';
+        box.innerHTML = `<form class="d-note-form" id="d-note-form"><textarea class="textarea" id="d-note-body" rows="2" maxlength="2000" placeholder="Fixar uma observação sobre este cliente (todos os atendentes veem)"></textarea><button type="submit" class="btn btn-sm btn-primary">Fixar observação</button></form>`
+          + (notes.length ? notes.map((n) => `<div class="d-item obs" data-note="${n.id}">
+              <div class="d-item-top"><b>${esc(n.user_name || 'Sistema')}</b><span>${esc(fmtTime(n.created_at))}${n.updated_at && n.updated_at !== n.created_at ? ' · editada' : ''}</span></div>
+              <div class="d-item-body">${esc(n.body)}</div>
+              ${mine(n) ? `<div class="d-item-acts"><button type="button" class="d-item-act" data-note-edit="${n.id}">Editar</button><button type="button" class="d-item-act" data-note-del="${n.id}">Remover</button></div>` : ''}
+            </div>`).join('') : '<div class="d-empty">Nenhuma observação fixada. Use o campo acima ou o alfinete de uma nota interna.</div>');
       } else if (key === 'd-consults') {
         const { consultations } = await api('GET', `/api/contacts/${ct.id}/consultations`);
         box.innerHTML = consultations.length ? consultations.map((k) => `<div class="d-item ${k.reversed_at ? 'reversed' : ''}">
@@ -1421,10 +1428,41 @@
     try { await api('DELETE', `/api/contacts/${state.contact.id}/consultations/${b.dataset.reverse}`); toast('Consulta estornada'); }
     catch (err) { toast(err.message, true); }
   });
-  $('d-notes').addEventListener('click', (e) => {
-    const it = e.target.closest('[data-open]');
-    if (it && Number(it.dataset.open) !== state.currentId) openConversation(Number(it.dataset.open));
+  $('d-notes').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'd-note-form' || !state.contact) return;
+    e.preventDefault();
+    const body = $('d-note-body').value.trim();
+    if (!body) return;
+    try { await api('POST', `/api/contacts/${state.contact.id}/notes`, { body }); toast('Observação fixada'); }
+    catch (err) { toast(err.message, true); }
   });
+  $('d-notes').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-note-del]');
+    const ed = e.target.closest('[data-note-edit]');
+    if (!state.contact || (!del && !ed)) return;
+    try {
+      if (del) {
+        if (!confirm('Remover esta observação da ficha?')) return;
+        await api('DELETE', `/api/contacts/${state.contact.id}/notes/${del.dataset.noteDel}`);
+        toast('Observação removida');
+      } else {
+        const item = ed.closest('.d-item');
+        const body = prompt('Editar observação:', item.querySelector('.d-item-body').textContent);
+        if (body === null) return;
+        await api('PATCH', `/api/contacts/${state.contact.id}/notes/${ed.dataset.noteEdit}`, { body });
+        toast('Observação atualizada');
+      }
+    } catch (err) { toast(err.message, true); }
+  });
+  async function pinNoteToContact(m) {
+    const c = current();
+    if (!c || !m.body) return;
+    try {
+      await api('POST', `/api/contacts/${c.contact_id}/notes`, { body: m.body });
+      toast('Nota fixada na ficha do contato');
+      if (!dOpen['d-notes']) document.querySelector('[data-dtoggle="d-notes"]').click();
+    } catch (err) { toast(err.message, true); }
+  }
   function refreshContactSubs() { for (const k of Object.keys(dOpen)) if (dOpen[k]) loadSub(k); }
 
   // ---------- Visualizador de mídia (lightbox) ----------
@@ -2273,11 +2311,6 @@
       if (message.conversation_id === state.currentId) {
         if (!state.messages.some((m) => m.id === message.id)) {
           state.messages.push(message);
-          if (message.type === 'note' && state.contact && state.contact.id === conversation.contact_id) {
-            state.contact.notes_count = (state.contact.notes_count || 0) + 1;
-            $('d-notes-count').textContent = `(${state.contact.notes_count})`;
-            if (dOpen['d-notes']) loadSub('d-notes');
-          }
           const nearBottom = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight < 120;
           renderMessages(nearBottom || message.direction === 'out');
         }

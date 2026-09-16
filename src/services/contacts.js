@@ -35,7 +35,7 @@ async function getFull(id) {
   const { rows } = await db.query(
     `SELECT
        (SELECT COUNT(*)::int FROM conversations c WHERE c.contact_id = $1) AS conversations_count,
-       (SELECT COUNT(*)::int FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE c.contact_id = $1 AND m.type = 'note') AS notes_count,
+       (SELECT COUNT(*)::int FROM contact_notes n WHERE n.contact_id = $1) AS notes_count,
        (SELECT COUNT(*)::int FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL) AS consultations_count,
        (SELECT COUNT(*)::int FROM contact_events e WHERE e.contact_id = $1) AS events_count`,
     [id]
@@ -80,7 +80,6 @@ async function update(id, user, body) {
     if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new ContactError(400, 'Data de nascimento inválida');
     push('birthdate', d || null, 'nascimento');
   }
-  if (body.notes !== undefined) push('notes', text(body.notes, 4000), 'observações');
   if (!sets.length) throw new ContactError(400, 'Nada para atualizar');
   const { rowCount } = await db.query(`UPDATE contacts SET ${sets.join(', ')} WHERE id = $1`, params);
   if (!rowCount) throw new ContactError(404, 'Contato não encontrado');
@@ -298,20 +297,62 @@ async function listEvents(id, limit = 100) {
   return rows;
 }
 
-/** Observações (notas internas) de todas as conversas do contato. */
+// ---------- Observações fixadas na ficha ----------
 async function listNotes(id, limit = 100) {
   const { rows } = await db.query(
-    `SELECT m.id, m.body, m.created_at, m.conversation_id, u.name AS user_name, u.avatar_media_id AS user_avatar
-       FROM messages m JOIN conversations c ON c.id = m.conversation_id LEFT JOIN users u ON u.id = m.sender_user_id
-      WHERE c.contact_id = $1 AND m.type = 'note' AND m.deleted_at IS NULL
-      ORDER BY m.created_at DESC, m.id DESC LIMIT $2`,
+    `SELECT n.id, n.body, n.created_at, n.updated_at, n.user_id, u.name AS user_name, u.avatar_media_id AS user_avatar
+       FROM contact_notes n LEFT JOIN users u ON u.id = n.user_id
+      WHERE n.contact_id = $1 ORDER BY n.created_at DESC, n.id DESC LIMIT $2`,
     [id, limit]
   );
   return rows;
 }
 
+function cleanNoteBody(body) {
+  const text = String(body || '').trim().slice(0, 2000);
+  if (!text) throw new ContactError(400, 'Escreva a observação');
+  return text;
+}
+
+async function addNote(id, user, body) {
+  const contact = await get(id);
+  if (!contact) throw new ContactError(404, 'Contato não encontrado');
+  const text = cleanNoteBody(body);
+  const { rows } = await db.query('INSERT INTO contact_notes (contact_id, user_id, body) VALUES ($1, $2, $3) RETURNING *', [id, user.id, text]);
+  await logEvent(id, user.id, 'note', `${user.name} fixou uma observação: ${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`);
+  await broadcast(id);
+  return { ...rows[0], user_name: user.name, user_avatar: user.avatar_media_id || null };
+}
+
+async function noteFor(id, noteId, user) {
+  const { rows } = await db.query('SELECT * FROM contact_notes WHERE id = $1 AND contact_id = $2', [noteId, id]);
+  if (!rows.length) throw new ContactError(404, 'Observação não encontrada');
+  if (rows[0].user_id !== user.id && user.role !== 'admin') throw new ContactError(403, 'Só quem escreveu (ou um admin) pode alterar esta observação');
+  return rows[0];
+}
+
+async function updateNote(id, noteId, user, body) {
+  await noteFor(id, noteId, user);
+  const text = cleanNoteBody(body);
+  const { rows } = await db.query(
+    `WITH up AS (UPDATE contact_notes SET body = $3, updated_at = NOW() WHERE id = $1 AND contact_id = $2 RETURNING *)
+     SELECT up.*, u.name AS user_name, u.avatar_media_id AS user_avatar FROM up LEFT JOIN users u ON u.id = up.user_id`,
+    [noteId, id, text]
+  );
+  await logEvent(id, user.id, 'note', `${user.name} editou uma observação`);
+  await broadcast(id);
+  return rows[0];
+}
+
+async function deleteNote(id, noteId, user) {
+  const n = await noteFor(id, noteId, user);
+  await db.query('DELETE FROM contact_notes WHERE id = $1', [noteId]);
+  await logEvent(id, user.id, 'note', `${user.name} removeu a observação: ${n.body.slice(0, 80)}`);
+  await broadcast(id);
+}
+
 module.exports = {
   ContactError, DEFAULT_KINDS, CONTACT_COLS, get, getFull, update, setBlocked, remove, logEvent,
   setPlan, renewPlan, removePlan, adjustPlan, registerConsultation, reverseConsultation,
-  listConsultations, listEvents, listNotes,
+  listConsultations, listEvents, listNotes, addNote, updateNote, deleteNote,
 };

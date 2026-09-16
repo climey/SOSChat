@@ -1,4 +1,5 @@
 const express = require('express');
+const db = require('../db');
 const QRCode = require('qrcode');
 const whatsapp = require('../services/whatsapp');
 const conversations = require('../services/conversations');
@@ -37,9 +38,25 @@ router.post('/accounts', requireAdmin, requireMulti, async (req, res, next) => {
 router.patch('/accounts/:id', requireAdmin, requireMulti, async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const name = String(req.body?.name || '').trim().slice(0, 60);
-    if (!id || !name) return res.status(400).json({ error: 'Dados inválidos' });
-    res.json({ account: await whatsapp.renameAccount(id, name) });
+    if (!id) return res.status(404).json({ error: 'Número não encontrado' });
+    const body = req.body || {};
+    let account = null;
+    if (body.name !== undefined) {
+      const name = String(body.name || '').trim().slice(0, 60);
+      if (!name) return res.status(400).json({ error: 'Informe o nome do número' });
+      account = await whatsapp.renameAccount(id, name);
+    }
+    if (body.auto_tag_id !== undefined) {
+      const tagId = body.auto_tag_id === null || body.auto_tag_id === '' ? null : parseId(body.auto_tag_id);
+      if (body.auto_tag_id !== null && body.auto_tag_id !== '' && !tagId) return res.status(400).json({ error: 'Etiqueta inválida' });
+      if (tagId) {
+        const { rows } = await db.query('SELECT id FROM tags WHERE id = $1', [tagId]);
+        if (!rows.length) return res.status(400).json({ error: 'Etiqueta não encontrada' });
+      }
+      account = await whatsapp.setAutoTag(id, tagId);
+    }
+    if (!account) return res.status(400).json({ error: 'Nada para atualizar' });
+    res.json({ account });
   } catch (err) {
     next(err);
   }

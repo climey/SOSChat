@@ -33,6 +33,7 @@ module.exports = {
   // Gestão de contas (só baileys)
   addAccount: (name) => provider.addAccount(name),
   renameAccount: (id, name) => provider.renameAccount(id, name),
+  setAutoTag: (id, tagId) => provider.setAutoTag(id, tagId),
   removeAccount: (id) => provider.removeAccount(id),
   logout: (id) => provider.logout(id),
   reconnect: (id) => provider.reconnect(id),

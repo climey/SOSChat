@@ -5,8 +5,10 @@
   let me = null;
 
   // ---------- Tags ----------
+  let allTags = [];
   async function loadTags() {
     const { tags } = await api('GET', '/api/tags');
+    allTags = tags;
     const admin = me.role === 'admin';
     $('tags-table').innerHTML = `
       <thead><tr><th>Tag</th><th class="num">Em uso</th>${admin ? '<th></th>' : ''}</tr></thead>
@@ -135,6 +137,9 @@
           <div class="title">${esc(a.name)} <span class="status-pill ${cls}">${esc(label)}</span></div>
           <div class="phone">${a.phone ? esc(a.phone) : 'Número aparece após conectar'}</div>
           ${a.lastError ? `<div class="err">${esc(a.lastError)}</div>` : ''}
+          ${multi && a.id ? (isAdmin
+            ? `<label class="wa-autotag">Etiqueta automática nas conversas novas <select class="select" data-autotag="${a.id}"><option value="">Nenhuma</option>${allTags.map((t) => `<option value="${t.id}" ${a.auto_tag_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>`
+            : (a.auto_tag_id ? `<div class="wa-autotag">Etiqueta automática: <b>${esc((allTags.find((t) => t.id === a.auto_tag_id) || {}).name || '')}</b></div>` : '')) : ''}
           ${isAdmin && multi ? `<div class="actions">
             <button class="btn btn-sm" data-act="rename">Renomear</button>
             <button class="btn btn-sm" data-act="reconnect">Reconectar</button>
@@ -145,6 +150,15 @@
         ${a.hasQr && isAdmin ? `<div class="qr"><img data-qr="${a.id}" alt="QR code"><div class="hint">Celular: WhatsApp → Dispositivos conectados → Conectar dispositivo</div></div>` : ''}
       </div>`;
   }
+
+  $('wa-accounts').addEventListener('change', async (e) => {
+    const sel = e.target.closest('select[data-autotag]');
+    if (!sel) return;
+    try {
+      await api('PATCH', `/api/whatsapp/accounts/${sel.dataset.autotag}`, { auto_tag_id: sel.value ? Number(sel.value) : null });
+      toast(sel.value ? 'Etiqueta automática definida' : 'Etiqueta automática desligada');
+    } catch (err) { toast(err.message, true); loadIntegration(); }
+  });
 
   async function loadIntegration() {
     let st;
@@ -463,7 +477,8 @@
 
   async function init() {
     me = await SOS.loadMe();
-    await Promise.all([loadTags(), loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds()]);
+    await loadTags();
+    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds()]);
   }
   init().catch((err) => toast(err.message, true));
 })();

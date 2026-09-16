@@ -73,6 +73,18 @@ router.delete('/:id/consultations/:cid', withId(async (id, req, res) => {
 
 // ---------- Observações e log ----------
 router.get('/:id/notes', withId(async (id, req, res) => res.json({ notes: await contacts.listNotes(id) })));
+router.post('/:id/notes', withId(async (id, req, res) => res.status(201).json({ note: await contacts.addNote(id, req.user, req.body?.body) })));
+router.patch('/:id/notes/:nid', withId(async (id, req, res) => {
+  const nid = parseId(req.params.nid);
+  if (!nid) return res.status(404).json({ error: 'Observação não encontrada' });
+  res.json({ note: await contacts.updateNote(id, nid, req.user, req.body?.body) });
+}));
+router.delete('/:id/notes/:nid', withId(async (id, req, res) => {
+  const nid = parseId(req.params.nid);
+  if (!nid) return res.status(404).json({ error: 'Observação não encontrada' });
+  await contacts.deleteNote(id, nid, req.user);
+  res.json({ ok: true });
+}));
 router.get('/:id/events', withId(async (id, req, res) => res.json({ events: await contacts.listEvents(id) })));
 
 module.exports = router;

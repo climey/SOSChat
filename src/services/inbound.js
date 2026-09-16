@@ -78,6 +78,7 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
       );
       conversationId = ins.rows[0].id;
       isNew = true;
+      if (accountId) await client.query('INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, auto_tag_id FROM wa_accounts WHERE id = $2 AND auto_tag_id IS NOT NULL ON CONFLICT DO NOTHING', [conversationId, accountId]);
     }
 
     const { rows: msgRows } = await client.query(
@@ -143,6 +144,7 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
         [contactId, sentAt, accountId, await conversations.defaultSectorId(client)]
       );
       conversationId = ins.rows[0].id;
+      if (accountId) await client.query('INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, auto_tag_id FROM wa_accounts WHERE id = $2 AND auto_tag_id IS NOT NULL ON CONFLICT DO NOTHING', [conversationId, accountId]);
     }
     const { rows: msgRows } = await client.query(
       `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at, quoted_message_id)

@@ -807,3 +807,11 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .kind-chip { display: inline-flex; align-items: center; gap: 6px; padding-right: 6px; }
 .kind-x { border: none; background: transparent; color: var(--muted); font-size: 15px; line-height: 1; padding: 0 3px; border-radius: 50%; }
 .kind-x:hover { color: #ff8787; background: var(--primary-soft); }
+.d-note-form { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; }
+.d-note-form .btn { align-self: flex-end; }
+.d-item.obs { border-left: 3px solid var(--amber); }
+.d-item-acts { display: flex; gap: 6px; margin-top: 6px; }
+.d-item-acts .d-item-act { margin-top: 0; }
+.d-item.log.note { border-left-color: var(--amber); }
+.wa-autotag { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.wa-autotag .select { max-width: 220px; padding: 5px 30px 5px 10px; font-size: 12px; }

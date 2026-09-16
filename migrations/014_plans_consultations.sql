@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS plans (
 );
 INSERT INTO plans (name, credits, validity_days)
 SELECT v.name, v.credits, v.validity_days
-  FROM (VALUES ('Plano 3 consultas', 3, 30), ('Plano 5 consultas', 5, 30), ('Plano 10 consultas', 10, 30)) AS v(name, credits, validity_days)
+  FROM (VALUES ('Plano 3 consultas', 3, NULL::int), ('Plano 5 consultas', 5, NULL::int), ('Plano 10 consultas', 10, NULL::int)) AS v(name, credits, validity_days)
  WHERE NOT EXISTS (SELECT 1 FROM plans);
 
 -- Plano ativo do contato (snapshot: continua valendo mesmo se o plano do catalogo for apagado)

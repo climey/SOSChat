@@ -107,7 +107,9 @@ public/                login, inbox, relatórios e configurações
 | GET/PATCH/DELETE | `/api/contacts/:id` | ficha do contato (campos extras, exclusão só admin) |
 | PUT/PATCH/DELETE, POST renew | `/api/contacts/:id/plan` | atribuir, ajustar, remover e renovar o plano de consultas |
 | GET/POST/DELETE | `/api/contacts/:id/consultations` | registrar consulta (debita 1 do plano), estornar |
-| GET | `/api/contacts/:id/notes`, `/api/contacts/:id/events` | observações (todas as conversas) e log de atividade |
+| GET/POST/PATCH/DELETE | `/api/contacts/:id/notes` | observações fixadas na ficha (separadas das notas internas da conversa) |
+| GET | `/api/contacts/:id/events` | log de atividade do contato |
+| PATCH | `/api/whatsapp/accounts/:id` | `{name, auto_tag_id}` renomeia o número e define a etiqueta automática das conversas novas |
 | GET | `/api/reports/consultations?from&to&agent` | consultas por dia, tipo e atendente; situação dos planos |
 
 Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` (proteção CSRF) e o cookie de sessão.
