@@ -19,6 +19,12 @@ function selectSql(userParam) {
          (SELECT COUNT(*)::int FROM contact_notes n WHERE n.contact_id = ct.id) AS notes_count,
          CASE WHEN ct.plan_credits IS NULL THEN NULL ELSE GREATEST(ct.plan_credits - ct.plan_used, 0) END AS plan_left,
          u.name AS assigned_user_name, u.avatar_media_id AS assigned_user_avatar,
+         (SELECT COALESCE(json_agg(json_build_object('id', p.id, 'name', p.name, 'avatar', p.avatar_media_id, 'last_at', p.last_at) ORDER BY p.last_at DESC), '[]'::json)
+            FROM (SELECT u2.id, u2.name, u2.avatar_media_id, MAX(m.created_at) AS last_at
+                    FROM messages m JOIN users u2 ON u2.id = m.sender_user_id
+                   WHERE m.conversation_id = c.id
+                   GROUP BY u2.id, u2.name, u2.avatar_media_id
+                   ORDER BY MAX(m.created_at) DESC LIMIT 5) p) AS participants,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone,
          c.sector_id, se.name AS sector_name, se.color AS sector_color,
          COALESCE(sc.n, 0) AS scheduled_count

@@ -865,3 +865,10 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .edit-preview { border-left-color: var(--amber); }
 .edit-preview .qname { color: #ffd43b; }
 .msg-row.deleted .msg-actions { display: none; }
+/* Avatares de todos os atendentes que participaram da conversa */
+.agents { display: inline-flex; align-items: center; flex-shrink: 0; }
+.agents .agent + .agent { margin-left: -8px; }
+.agents .agent { border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--border); }
+.agents .agent.responsible { box-shadow: 0 0 0 2px var(--primary); z-index: 2; }
+.agents .agent.more { background: var(--surface-2); color: var(--muted); font-size: 9px; }
+.conv-item.active .agents .agent { border-color: var(--surface); }

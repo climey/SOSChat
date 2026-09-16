@@ -161,6 +161,34 @@
     const v = avatarVersion.get(mediaId) || '';
     return `<img src="/api/media/${esc(mediaId)}${v ? `?v=${v}` : ''}" alt="" loading="lazy">`;
   }
+  /**
+   * Atendentes desta conversa: o responsável primeiro (marcado), depois quem já respondeu nela.
+   * Mostra até 3 avatares empilhados e "+N" quando houver mais.
+   */
+  function conversationAgents(c) {
+    const list = [];
+    const seen = new Set();
+    if (c.assigned_user_id) {
+      const p = (c.participants || []).find((x) => x.id === c.assigned_user_id);
+      list.push({ id: c.assigned_user_id, name: c.assigned_user_name, avatar: c.assigned_user_avatar || (p && p.avatar), responsible: true });
+      seen.add(c.assigned_user_id);
+    }
+    for (const p of c.participants || []) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      list.push({ id: p.id, name: p.name, avatar: p.avatar, responsible: false });
+    }
+    return list;
+  }
+  function agentsHtml(c, max = 3) {
+    const list = conversationAgents(c);
+    if (!list.length) return '<span class="agents"><span class="agent none" title="Ninguém atendeu ainda">?</span></span>';
+    const shown = list.slice(0, max);
+    const rest = list.length - shown.length;
+    const title = list.map((a) => a.name + (a.responsible ? ' (responsável)' : '')).join(', ');
+    const chips = shown.map((a) => `<span class="agent ${a.responsible ? 'responsible' : ''}">${esc(initials(a.name || '?'))}${userImg(a.avatar)}${pdot(a.id)}</span>`).join('');
+    return `<span class="agents" title="${esc(title)}">${chips}${rest > 0 ? `<span class="agent more">+${rest}</span>` : ''}</span>`;
+  }
   /** Bolinha de presença de um atendente (verde online, amarelo ausente, cinza offline). */
   function pdot(userId) {
     const p = state.presence.get(Number(userId));
@@ -203,9 +231,7 @@
               <span class="preview">${tickHtml(c)}<span>${esc(previewText(c))}</span></span>
               ${waitHtml(c)}
               ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
-              ${c.assigned_user_name
-                ? `<span class="agent" title="Responsável: ${esc(c.assigned_user_name)}">${esc(initials(c.assigned_user_name))}${userImg(c.assigned_user_avatar)}${pdot(c.assigned_user_id)}</span>`
-                : '<span class="agent none" title="Sem responsável">?</span>'}
+              ${agentsHtml(c)}
             </div>
             <div class="meta">
               ${c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')}
@@ -406,7 +432,13 @@
       c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('') +
       sectorChip(c, true) +
       (c.account_name && state.multiAccount ? `<span class="chip-soft ${accountOffline(c.account_id) ? 'off' : ''}">via ${esc(c.account_name)}</span>` : '') +
-      `<span class="chip-soft">${c.assigned_user_name ? `${pdot(c.assigned_user_id)}&nbsp;${esc(c.assigned_user_name)}` : 'Sem responsável'}</span>` +
+      (() => {
+        const list = conversationAgents(c);
+        if (!list.length) return '<span class="chip-soft">Sem responsável</span>';
+        const names = list.slice(0, 2).map((a) => `${pdot(a.id)}&nbsp;${esc(a.name)}${a.responsible && list.length > 1 ? ' (resp.)' : ''}`).join(' · ');
+        const rest = list.length - Math.min(2, list.length);
+        return `<span class="chip-soft" title="${esc(list.map((a) => a.name).join(', '))}">${names}${rest > 0 ? ` +${rest}` : ''}</span>`;
+      })() +
       (c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : '') +
       typingHtml(c.id);
     els.btnResolve.title = c.status === 'resolved' ? 'Reabrir conversa' : 'Finalizar conversa';
