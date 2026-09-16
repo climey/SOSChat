@@ -131,7 +131,7 @@
         <div class="plan-hint" id="plan-hint" hidden></div>
         <div class="debit-prompt" id="debit-prompt" hidden>
           <span class="txt" id="debit-text"></span>
-          <span class="btns"><button type="button" class="btn btn-sm btn-primary" data-kind="placa">Placa</button><button type="button" class="btn btn-sm btn-primary" data-kind="chassi">Chassi</button><button type="button" class="btn btn-sm btn-primary" data-kind="crlv">CRLV</button><button type="button" class="btn btn-sm btn-ghost" id="debit-no">Não debitar</button></span>
+          <span class="btns" id="debit-kinds"></span>
         </div>
         <div class="composer" id="composer">
           <div class="composer-top">
@@ -270,12 +270,7 @@
       <h3 style="margin:0">Registrar consulta</h3>
     </div>
     <p class="small muted" id="consult-sub" style="margin:0 0 12px"></p>
-    <div class="chips" id="consult-kinds">
-      <button type="button" class="chip active" data-kind="placa">Placa</button>
-      <button type="button" class="chip" data-kind="chassi">Chassi</button>
-      <button type="button" class="chip" data-kind="crlv">CRLV</button>
-      <button type="button" class="chip" data-kind="outra">Outra</button>
-    </div>
+    <div class="chips" id="consult-kinds"></div>
     <div class="field" style="margin-top:12px"><input class="input" id="consult-ref" placeholder="Placa, chassi ou referência (opcional)" maxlength="40" autocomplete="off"></div>
     <label class="switch" id="consult-charge-wrap" style="margin-bottom:12px"><input type="checkbox" id="consult-charge" checked><span class="track"></span><span id="consult-charge-label">Debitar 1 consulta do plano</span></label>
     <div class="field"><input class="input" id="consult-note" placeholder="Observação (opcional, vira nota interna)" maxlength="500"></div>

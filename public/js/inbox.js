@@ -1098,7 +1098,7 @@
     if (!b || !state.contact) return;
     const act = b.dataset.plan;
     if (act === 'assign' || act === 'change') openPlanModal('assign');
-    else if (act === 'consult') openConsultModal('placa', guessReference());
+    else if (act === 'consult') openConsultModal(guessReference());
     else if (act === 'renew') renewPlan(state.contact);
     else if (act === 'menu') { e.stopPropagation(); placeMenu($('plan-menu'), b); }
   });
@@ -1184,24 +1184,55 @@
 
   // ---- Consultas ----
   const consult = { kind: 'placa', contactId: null, conversationId: null };
+  const DEFAULT_KINDS = ['Placa', 'Chassi', 'Motor', 'CRLV', 'CPF', 'CNPJ', 'Telefone', 'Nome completo'];
+  function consultKinds() {
+    const list = state.settings.consultation_kinds;
+    return Array.isArray(list) && list.length ? list : DEFAULT_KINDS;
+  }
+  /** Escolhe o tipo configurado que corresponde ao nome (sem diferenciar maiúsculas); senão o primeiro da lista. */
+  function matchKind(name) {
+    const list = consultKinds();
+    return list.find((k) => k.toLowerCase() === String(name || '').toLowerCase()) || list[0];
+  }
+  /**
+   * Procura nas últimas mensagens do cliente algo consultável: placa, chassi, CNPJ, CPF, telefone ou motor.
+   * Devolve { kind, ref } com o tipo já casado com a lista configurada.
+   */
   function guessReference() {
+    const has = (name) => consultKinds().some((k) => k.toLowerCase() === name.toLowerCase());
     for (let i = state.messages.length - 1, n = 0; i >= 0 && n < 30; i--, n++) {
       const m = state.messages[i];
       if (m.direction !== 'in' || !m.body || m.type === 'note') continue;
-      const t = m.body.toUpperCase().replace(/[^A-Z0-9\s-]/g, ' ');
-      const plate = t.match(/\b([A-Z]{3})-?(\d[A-Z0-9]\d{2})\b/);
-      if (plate) return plate[1] + plate[2];
-      const vin = t.match(/\b[A-HJ-NPR-Z0-9]{17}\b/);
-      if (vin) return vin[0];
+      const text = m.body;
+      const up = text.toUpperCase();
+      let x;
+      if ((x = up.match(/\b([A-Z]{3})[\s-]?(\d[A-Z0-9]\d{2})\b/)) && has('Placa')) return { kind: matchKind('Placa'), ref: x[1] + x[2] };
+      if ((x = up.match(/\b[A-HJ-NPR-Z0-9]{17}\b/)) && /\d/.test(x[0]) && /[A-Z]/.test(x[0]) && has('Chassi')) return { kind: matchKind('Chassi'), ref: x[0] };
+      if ((x = up.match(/MOTOR\s*[:\-]?\s*([A-Z0-9][A-Z0-9-]{5,15})/)) && has('Motor')) return { kind: matchKind('Motor'), ref: x[1] };
+      if ((x = text.match(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/)) && has('CNPJ')) return { kind: matchKind('CNPJ'), ref: x[0].replace(/\D/g, '') };
+      if ((x = text.match(/\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/)) && has('CPF')) return { kind: matchKind('CPF'), ref: x[0].replace(/\D/g, '') };
+      if ((x = text.match(/(?:\+?55\s*)?\(?\d{2}\)?\s*9?\s*\d{4}[\s-]\d{4}\b/)) && has('Telefone')) return { kind: matchKind('Telefone'), ref: x[0].replace(/\D/g, '') };
+      if ((x = text.match(/\b\d{11}\b/))) {
+        // 11 dígitos soltos: DDD válido + 9 na frente parece celular; senão trata como CPF
+        const phone = /^[1-9]\d9/.test(x[0]);
+        if (phone && has('Telefone')) return { kind: matchKind('Telefone'), ref: x[0] };
+        if (!phone && has('CPF')) return { kind: matchKind('CPF'), ref: x[0] };
+      }
+      if ((x = text.match(/\b\d{10}\b/)) && has('Telefone')) return { kind: matchKind('Telefone'), ref: x[0] };
     }
-    return '';
+    return { kind: consultKinds()[0], ref: '' };
   }
-  function openConsultModal(kind = 'placa', prefillRef = '') {
+  function renderKindChips(selected) {
+    $('consult-kinds').innerHTML = consultKinds().map((k) => `<button type="button" class="chip ${k === selected ? 'active' : ''}" data-kind="${esc(k)}">${esc(k)}</button>`).join('');
+  }
+  function openConsultModal(guess) {
     const c = current();
     if (!c) return;
+    const kind = matchKind(guess && guess.kind);
+    const prefillRef = (guess && guess.ref) || '';
     const ct = state.contact && state.contact.id === c.contact_id ? state.contact : c;
     consult.contactId = c.contact_id; consult.conversationId = c.id; consult.kind = kind;
-    document.querySelectorAll('#consult-kinds .chip').forEach((b) => b.classList.toggle('active', b.dataset.kind === kind));
+    renderKindChips(kind);
     $('consult-ref').value = prefillRef;
     $('consult-note').value = '';
     const p = planState(ct);
@@ -1237,7 +1268,7 @@
     } catch (err) { toast(err.message, true); }
     finally { $('consult-submit').disabled = false; }
   });
-  $('btn-consult').addEventListener('click', () => openConsultModal('placa', guessReference()));
+  $('btn-consult').addEventListener('click', () => openConsultModal(guessReference()));
 
   // Depois de enviar um PDF para cliente com plano, oferece o débito com um clique
   let debitTimer = null;
@@ -1248,6 +1279,9 @@
     const p = planState(state.contact && state.contact.id === c.contact_id ? state.contact : c);
     if (!isDoc || !p || p.expired || p.left === 0) return;
     $('debit-text').innerHTML = `Documento enviado. Debitar 1 consulta do plano de <b>${esc(contactName(c))}</b>? <span class="muted">(saldo ${p.left}/${p.total})</span>`;
+    const guess = guessReference();
+    $('debit-kinds').innerHTML = consultKinds().map((k) => `<button type="button" class="btn btn-sm ${k === guess.kind ? 'btn-primary' : ''}" data-kind="${esc(k)}">${esc(k)}</button>`).join('') + '<button type="button" class="btn btn-sm btn-ghost" id="debit-no">Não debitar</button>';
+    $('debit-prompt').dataset.ref = guess.ref || '';
     $('debit-prompt').dataset.conv = c.id;
     $('debit-prompt').hidden = false;
     clearTimeout(debitTimer);
@@ -1262,7 +1296,7 @@
     const c = state.conversations.find((x) => x.id === convId) || (state.currentConv && state.currentConv.id === convId ? state.currentConv : null);
     if (!c) return;
     try {
-      const r = await api('POST', `/api/contacts/${c.contact_id}/consultations`, { conversation_id: convId, kind: b.dataset.kind, reference: convId === state.currentId ? guessReference() : '', charge: true });
+      const r = await api('POST', `/api/contacts/${c.contact_id}/consultations`, { conversation_id: convId, kind: b.dataset.kind, reference: $('debit-prompt').dataset.ref || '', charge: true });
       const p = planState(r.contact);
       toast(`Consulta debitada · saldo ${p.left}/${p.total}`);
     } catch (err) { toast(err.message, true); }

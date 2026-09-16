@@ -6,17 +6,46 @@ const { requireAuth, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 router.use(requireAuth);
 
-// Chaves permitidas e validação de cada uma
+const DEFAULT_KINDS = ['Placa', 'Chassi', 'Motor', 'CRLV', 'CPF', 'CNPJ', 'Telefone', 'Nome completo'];
+
+/** Normaliza a lista de tipos de consulta: texto limpo, sem duplicados (ignorando maiúsculas). */
+function normalizeKinds(v) {
+  if (!Array.isArray(v)) return null;
+  const out = [];
+  for (const raw of v) {
+    if (typeof raw !== 'string') return null;
+    const k = raw.trim().replace(/\s+/g, ' ').slice(0, 30);
+    if (!k) continue;
+    if (!out.some((x) => x.toLowerCase() === k.toLowerCase())) out.push(k);
+  }
+  return out.length >= 1 && out.length <= 20 ? out : null;
+}
+
+// Chaves permitidas: validação/normalização de cada uma (devolve null quando inválida)
 const KEYS = {
-  sla_warn_minutes: (v) => Number.isInteger(v) && v >= 1 && v <= 1440,
-  sla_alert_minutes: (v) => Number.isInteger(v) && v >= 1 && v <= 1440,
+  sla_warn_minutes: (v) => (Number.isInteger(v) && v >= 1 && v <= 1440 ? v : null),
+  sla_alert_minutes: (v) => (Number.isInteger(v) && v >= 1 && v <= 1440 ? v : null),
+  consultation_kinds: normalizeKinds,
 };
+
+function parseValue(key, value) {
+  if (key === 'consultation_kinds') {
+    try { return normalizeKinds(JSON.parse(value)) || DEFAULT_KINDS; } catch { return DEFAULT_KINDS; }
+  }
+  return Number.isNaN(Number(value)) ? value : Number(value);
+}
 
 async function getAll() {
   const { rows } = await db.query('SELECT key, value FROM app_settings');
-  const out = {};
-  for (const r of rows) out[r.key] = Number.isNaN(Number(r.value)) ? r.value : Number(r.value);
+  const out = { consultation_kinds: DEFAULT_KINDS };
+  for (const r of rows) out[r.key] = parseValue(r.key, r.value);
   return out;
+}
+
+/** Lista atual de tipos de consulta (usada pelo serviço de contatos). */
+async function consultationKinds(client = db) {
+  const { rows } = await client.query(`SELECT value FROM app_settings WHERE key = 'consultation_kinds'`);
+  return rows.length ? parseValue('consultation_kinds', rows[0].value) : DEFAULT_KINDS;
 }
 
 router.get('/', async (req, res, next) => {
@@ -26,12 +55,17 @@ router.get('/', async (req, res, next) => {
 router.put('/', requireAdmin, async (req, res, next) => {
   try {
     const body = req.body || {};
+    const updates = [];
     for (const [key, value] of Object.entries(body)) {
       if (!KEYS[key]) return res.status(400).json({ error: `Configuração desconhecida: ${key}` });
-      if (!KEYS[key](value)) return res.status(400).json({ error: `Valor inválido para ${key}` });
+      const clean = KEYS[key](value);
+      if (clean === null) return res.status(400).json({ error: `Valor inválido para ${key}` });
+      updates.push([key, typeof clean === 'object' ? JSON.stringify(clean) : String(clean)]);
+    }
+    for (const [key, value] of updates) {
       await db.query(
         `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-        [key, String(value)]
+        [key, value]
       );
     }
     const settings = await getAll();
@@ -41,3 +75,5 @@ router.put('/', requireAdmin, async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.consultationKinds = consultationKinds;
+module.exports.DEFAULT_KINDS = DEFAULT_KINDS;

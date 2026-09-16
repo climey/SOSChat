@@ -8,7 +8,15 @@ class ContactError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-const KINDS = { placa: 'Placa', chassi: 'Chassi', crlv: 'CRLV', outra: 'Outra' };
+const { consultationKinds, DEFAULT_KINDS } = require('../routes/settings');
+
+/** Casa o texto enviado com um tipo configurado (sem diferenciar maiúsculas); aceita texto livre como reserva. */
+function resolveKind(list, raw) {
+  const t = String(raw || '').trim().replace(/\s+/g, ' ').slice(0, 30);
+  if (!t) return list[0];
+  return list.find((k) => k.toLowerCase() === t.toLowerCase()) || t;
+}
+const UPPER_KINDS = /placa|chassi|motor|renavam/i;
 
 const CONTACT_COLS = `ct.id, ct.wa_id, ct.name, ct.profile_name, ct.avatar_media_id, ct.blocked, ct.cpf, ct.email, ct.notes,
   ct.phone2, ct.company, ct.city, ct.address, ct.birthdate, ct.last_seen_at, ct.created_at,
@@ -194,8 +202,9 @@ async function adjustPlan(id, user, body) {
  * na conversa e, ao zerar o saldo, marca a conversa com a etiqueta "Renovação".
  */
 async function registerConsultation(id, user, body) {
-  const kind = KINDS[body.kind] ? body.kind : 'placa';
-  const reference = String(body.reference || '').trim().toUpperCase().slice(0, 40) || null;
+  const kind = resolveKind(await consultationKinds(), body.kind);
+  let reference = String(body.reference || '').trim().replace(/\s+/g, ' ').slice(0, 60) || null;
+  if (reference && UPPER_KINDS.test(kind)) reference = reference.toUpperCase();
   const note = String(body.note || '').trim().slice(0, 500) || null;
   const conversationId = body.conversation_id ? Number(body.conversation_id) : null;
   const wantCharge = body.charge !== false;
@@ -221,7 +230,7 @@ async function registerConsultation(id, user, body) {
     if (charge) await client.query('UPDATE contacts SET plan_used = plan_used + 1 WHERE id = $1', [id]);
     const { rows: afterRows } = await client.query(`SELECT ${CONTACT_COLS} FROM contacts ct WHERE ct.id = $1`, [id]);
     const after = afterRows[0];
-    const label = `${KINDS[kind]}${reference ? ' ' + reference : ''}`;
+    const label = `${kind}${reference ? ' ' + reference : ''}`;
     const balance = charge ? ` · saldo ${after.plan_left}/${after.plan_credits}` : (hasPlan ? ' · sem debitar do plano' : ' · avulsa');
     await logEvent(id, user.id, 'consultation', `${user.name} registrou consulta ${label}${balance}`, client);
     let message = null;
@@ -241,7 +250,7 @@ async function registerConsultation(id, user, body) {
         }
       }
     }
-    return { consultation: { ...ins.rows[0], user_name: user.name, kind_label: KINDS[kind] }, contact: after, message, tagged };
+    return { consultation: { ...ins.rows[0], user_name: user.name, kind_label: kind }, contact: after, message, tagged };
   });
 
   const contact = await broadcast(id);
@@ -263,7 +272,7 @@ async function reverseConsultation(id, consultationId, user) {
     if (k.reversed_at) throw new ContactError(409, 'Consulta já estornada');
     await client.query('UPDATE consultations SET reversed_at = NOW(), reversed_by = $2 WHERE id = $1', [consultationId, user.id]);
     if (k.charged) await client.query('UPDATE contacts SET plan_used = GREATEST(plan_used - 1, 0) WHERE id = $1 AND plan_credits IS NOT NULL', [id]);
-    await logEvent(id, user.id, 'consultation', `${user.name} estornou a consulta ${KINDS[k.kind]}${k.reference ? ' ' + k.reference : ''}${k.charged ? ' (crédito devolvido)' : ''}`, client);
+    await logEvent(id, user.id, 'consultation', `${user.name} estornou a consulta ${k.kind}${k.reference ? ' ' + k.reference : ''}${k.charged ? ' (crédito devolvido)' : ''}`, client);
     return k;
   });
   const contact = await broadcast(id);
@@ -277,7 +286,7 @@ async function listConsultations(id, limit = 100) {
       WHERE k.contact_id = $1 ORDER BY k.created_at DESC, k.id DESC LIMIT $2`,
     [id, limit]
   );
-  return rows.map((r) => ({ ...r, kind_label: KINDS[r.kind] || r.kind }));
+  return rows.map((r) => ({ ...r, kind_label: r.kind }));
 }
 
 async function listEvents(id, limit = 100) {
@@ -302,7 +311,7 @@ async function listNotes(id, limit = 100) {
 }
 
 module.exports = {
-  ContactError, KINDS, CONTACT_COLS, get, getFull, update, setBlocked, remove, logEvent,
+  ContactError, DEFAULT_KINDS, CONTACT_COLS, get, getFull, update, setBlocked, remove, logEvent,
   setPlan, renewPlan, removePlan, adjustPlan, registerConsultation, reverseConsultation,
   listConsultations, listEvents, listNotes,
 };

@@ -171,6 +171,15 @@
               </form>
               <table class="table" id="plans-table" style="margin-top:12px"></table>
             </div>
+            <div class="card" style="margin-top:16px">
+              <h3>Tipos de consulta</h3>
+              <p class="small muted">Opções que aparecem ao registrar uma consulta (Placa, Chassi, Motor, CPF, CNPJ...). O relatório agrupa por tipo. Remover um tipo não apaga consultas antigas.</p>
+              <div class="chips" id="kinds-list" style="margin-bottom:10px"></div>
+              <form class="inline-form" id="kind-form" data-admin-only>
+                <input class="input" id="kind-name" placeholder="Novo tipo (ex.: Renavam)" maxlength="30" required style="max-width:240px">
+                <button class="btn btn-primary" type="submit">Adicionar tipo</button>
+              </form>
+            </div>
           </section>
 
           <section class="settings-section" data-section="alertas" hidden>

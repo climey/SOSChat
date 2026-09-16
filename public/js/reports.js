@@ -313,8 +313,7 @@
   });
 
   // ---------- Consultas e planos ----------
-  const KIND_LABEL = { placa: 'Placa', chassi: 'Chassi', crlv: 'CRLV', outra: 'Outra' };
-  const KIND_COLOR = { placa: RED, chassi: '#f08c00', crlv: BLUE, outra: '#868e96' };
+  const KIND_PALETTE = [RED, '#f08c00', BLUE, '#2f9e44', '#7048e8', '#e8590c', '#0ca678', '#868e96', '#c2255c', '#1098ad'];
   async function loadConsultations(q) {
     const cs = await api('GET', `/api/reports/consultations?${q}`);
     state.data.cs = cs;
@@ -327,7 +326,7 @@
       tile('Vencidos', fmtN(pl.expired), `${fmtN(pl.expiring)} vencem nos próximos 7 dias`, ''),
     ].join('');
     barChart($('cs-series'), cs.series, [{ key: 'charged', color: RED, label: 'Debitadas' }, { key: 'loose', color: BLUE, label: 'Avulsas' }], (r) => fmtBucket(r.bucket, 'day'));
-    hbarChart($('cs-kinds'), cs.kinds.map((k) => ({ label: KIND_LABEL[k.kind] || k.kind, value: k.total, color: KIND_COLOR[k.kind] || RED })));
+    hbarChart($('cs-kinds'), cs.kinds.map((k, i) => ({ label: k.kind, value: k.total, color: KIND_PALETTE[i % KIND_PALETTE.length] })));
     hbarChart($('cs-agents'), cs.agents.map((a) => ({ label: a.name, value: a.total, sub: a.charged ? `${a.charged} de plano` : '' })));
     hbarChart($('cs-contacts'), cs.contacts.map((x) => ({ label: x.name, value: x.total, sub: x.plan_name ? `${x.plan_name} · ${Math.max(0, x.plan_credits - x.plan_used)}/${x.plan_credits}` : 'sem plano' })), { color: BLUE });
     hbarChart($('cs-plans'), pl.by_plan.map((x) => ({ label: x.name, value: x.contacts, sub: x.empty ? `${x.empty} sem saldo` : '' })));

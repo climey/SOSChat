@@ -378,6 +378,37 @@
           <button class="btn btn-sm btn-ghost" data-act="del">Excluir</button></td>` : ''}
       </tr>`).join('') || '<tr><td colspan="7" class="muted">Nenhum plano cadastrado</td></tr>'}</tbody>`;
   }
+  let kinds = [];
+  function renderKinds() {
+    const admin = me.role === 'admin';
+    $('kinds-list').innerHTML = kinds.map((k) => `<span class="chip kind-chip">${esc(k)}${admin ? `<button type="button" class="kind-x" data-kind="${esc(k)}" title="Remover tipo">&times;</button>` : ''}</span>`).join('') || '<span class="muted small">Nenhum tipo cadastrado</span>';
+  }
+  async function loadKinds() {
+    const { settings } = await api('GET', '/api/settings');
+    kinds = Array.isArray(settings.consultation_kinds) ? settings.consultation_kinds : [];
+    renderKinds();
+  }
+  async function saveKinds(next) {
+    const { settings } = await api('PUT', '/api/settings', { consultation_kinds: next });
+    kinds = settings.consultation_kinds;
+    renderKinds();
+  }
+  $('kind-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('kind-name').value.trim();
+    if (!name) return;
+    if (kinds.some((k) => k.toLowerCase() === name.toLowerCase())) return toast('Esse tipo já existe', true);
+    try { await saveKinds([...kinds, name]); $('kind-name').value = ''; toast('Tipo adicionado'); }
+    catch (err) { toast(err.message, true); }
+  });
+  $('kinds-list').addEventListener('click', async (e) => {
+    const b = e.target.closest('.kind-x');
+    if (!b) return;
+    if (kinds.length <= 1) return toast('Deixe pelo menos um tipo', true);
+    if (!confirm(`Remover o tipo "${b.dataset.kind}"?`)) return;
+    try { await saveKinds(kinds.filter((k) => k !== b.dataset.kind)); toast('Tipo removido'); }
+    catch (err) { toast(err.message, true); }
+  });
   function resetPlanForm() {
     planEditing = null;
     $('plan-form').reset();
@@ -432,7 +463,7 @@
 
   async function init() {
     me = await SOS.loadMe();
-    await Promise.all([loadTags(), loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans()]);
+    await Promise.all([loadTags(), loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds()]);
   }
   init().catch((err) => toast(err.message, true));
 })();
