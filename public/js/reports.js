@@ -301,7 +301,7 @@
     else if (state.tab === 'agents' && d.agents) rows = d.agents.map((a) => ({ atendente: a.name, conversas: a.conversations, abertas: a.open_now, finalizadas: a.resolved, mensagens: a.messages_sent, resposta_mediana_s: a.median_response_seconds, resposta_media_s: a.avg_response_seconds, finalizar_mediana_s: a.median_resolution_seconds }));
     else if (state.tab === 'messages' && d.vol) rows = d.vol.series.map((r) => ({ periodo: fmtBucket(r.bucket, $('group').value), recebidas: r.messages_in, enviadas: r.messages_out }));
     else if (state.tab === 'origin' && d.origin) rows = d.origin.map((r) => ({ ddd: r.ddd, estado: UF_NAME[DDD_UF[r.ddd]] || '', regiao: UF_REGION[DDD_UF[r.ddd]] || '', conversas: r.conversations, clientes: r.contacts }));
-    else if (state.tab === 'consultations' && d.cs) rows = d.cs.series.map((r) => ({ dia: fmtBucket(r.bucket, 'day'), consultas: r.total, debitadas: r.charged, avulsas: r.loose }));
+    else if (state.tab === 'consultations' && d.cs) rows = d.cs.clients_by_kind.map((x) => ({ cliente: x.name, telefone: x.wa_id, ...x.kinds, total_consultas: x.total, ...(d.cs.purchases.buyers.find((b) => b.id === x.id) ? { compras: d.cs.purchases.buyers.find((b) => b.id === x.id).purchases, consultas_compradas: d.cs.purchases.buyers.find((b) => b.id === x.id).credits, valor_reais: d.cs.purchases.buyers.find((b) => b.id === x.id).revenue_cents / 100 } : {}) }));
     else if (state.tab === 'clients' && d.clients) rows = d.clients.top.map((x) => ({ cliente: x.name, telefone: x.wa_id, faixa: REC_LABEL[x.tier] || x.tier, dias_com_contato: x.interactions, meses_ativos: x.active_months, consultas: x.consultations, cliente_desde: x.first_contact_at, ultimo_contato: x.last_seen_at }));
     else if (state.tab === 'now' && d.now) rows = d.now.oldest_waiting.map((c) => ({ cliente: c.contact_name || c.profile_name || c.wa_id, responsavel: c.assigned_user_name || '', esperando_s: c.waiting_seconds }));
     if (!rows.length) return toast('Nada para exportar nesta aba', true);
@@ -315,22 +315,30 @@
 
   // ---------- Consultas e planos ----------
   const KIND_PALETTE = [RED, '#f08c00', BLUE, '#2f9e44', '#7048e8', '#e8590c', '#0ca678', '#868e96', '#c2255c', '#1098ad'];
+  const money = (c) => 'R$ ' + (Number(c || 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   async function loadConsultations(q) {
     const cs = await api('GET', `/api/reports/consultations?${q}`);
     state.data.cs = cs;
-    const c = cs.current, p = cs.previous, pl = cs.plans;
+    const c = cs.current, p = cs.previous, pl = cs.plans, pu = cs.purchases;
     $('cs-stats').innerHTML = [
       tile('Consultas no período', fmtN(c.total), `${fmtN(c.contacts)} clientes diferentes`, delta(c.total, p.total)),
       tile('Debitadas de plano', fmtN(c.charged), `${fmtN(c.loose)} avulsas (sem plano ou sem debitar)`, ''),
       tile('Clientes com plano', fmtN(pl.with_plan), `${fmtN(pl.credits_left)} consultas ainda disponíveis no total`, ''),
       tile('Sem saldo', fmtN(pl.empty), `${fmtN(pl.low)} com a última consulta`, ''),
       tile('Vencidos', fmtN(pl.expired), `${fmtN(pl.expiring)} vencem nos próximos 7 dias`, ''),
+      tile('Receita', money(pu.revenue_cents), `${fmtN(pu.purchases)} compras · ${fmtN(pu.credits)} consultas vendidas · ${fmtN(pu.buyer_count)} clientes`, delta(pu.revenue_cents, pu.previous.revenue_cents)),
     ].join('');
     barChart($('cs-series'), cs.series, [{ key: 'charged', color: RED, label: 'Debitadas' }, { key: 'loose', color: BLUE, label: 'Avulsas' }], (r) => fmtBucket(r.bucket, 'day'));
     hbarChart($('cs-kinds'), cs.kinds.map((k, i) => ({ label: k.kind, value: k.total, color: KIND_PALETTE[i % KIND_PALETTE.length] })));
     hbarChart($('cs-agents'), cs.agents.map((a) => ({ label: a.name, value: a.total, sub: a.charged ? `${a.charged} de plano` : '' })));
     hbarChart($('cs-contacts'), cs.contacts.map((x) => ({ label: x.name, value: x.total, sub: x.plan_name ? `${x.plan_name} · ${Math.max(0, x.plan_credits - x.plan_used)}/${x.plan_credits}` : 'sem plano' })), { color: BLUE });
     hbarChart($('cs-plans'), pl.by_plan.map((x) => ({ label: x.name, value: x.contacts, sub: x.empty ? `${x.empty} sem saldo` : '' })));
+    barChart($('cs-revenue'), pu.series.map((r) => ({ ...r, revenue: r.revenue_cents / 100 })), [{ key: 'revenue', color: '#40c057', label: 'Receita' }], (r) => fmtBucket(r.bucket, 'day'), (v) => money(Math.round(v * 100)));
+    $('cs-buyers').innerHTML = `<thead><tr><th>Cliente</th><th class="num">Compras</th><th class="num">Planos</th><th class="num">Consultas</th><th class="num">Valor</th><th>Última</th></tr></thead>
+      <tbody>${pu.buyers.map((b) => `<tr><td><a href="/?c=${b.conversation_id || ''}">${esc(b.name)}</a><div class="muted small">${esc(formatPhone(b.wa_id))}</div></td><td class="num">${fmtN(b.purchases)}</td><td class="num">${fmtN(b.plans)}</td><td class="num">${fmtN(b.credits)}</td><td class="num">${money(b.revenue_cents)}</td><td>${new Date(b.last_purchase_at).toLocaleDateString('pt-BR')}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhuma compra no período</td></tr>'}</tbody>`;
+    const kindsAll = [...new Set(cs.clients_by_kind.flatMap((x) => Object.keys(x.kinds)))];
+    $('cs-matrix').innerHTML = `<thead><tr><th>Cliente</th>${kindsAll.map((k) => `<th class="num">${esc(k)}</th>`).join('')}<th class="num">Total</th></tr></thead>
+      <tbody>${cs.clients_by_kind.map((x) => `<tr><td>${esc(x.name)}<div class="muted small">${esc(formatPhone(x.wa_id))}</div></td>${kindsAll.map((k) => `<td class="num ${x.kinds[k] ? 'hot' : ''}">${x.kinds[k] || '·'}</td>`).join('')}<td class="num"><b>${x.total}</b></td></tr>`).join('') || `<tr><td colspan="${kindsAll.length + 2}" class="muted">Nenhuma consulta registrada no período</td></tr>`}</tbody>`;
     const att = pl.attention || [];
     $('cs-attention').innerHTML = att.length ? att.map((x) => {
       const left = Math.max(0, x.plan_credits - x.plan_used);
@@ -394,5 +402,6 @@
     const tab = location.hash.slice(1);
     showTab(['overview', 'now', 'agents', 'messages', 'origin', 'consultations', 'clients'].includes(tab) ? tab : 'overview');
   }
+  window.addEventListener('hashchange', () => { const t = location.hash.slice(1); if (['overview', 'now', 'agents', 'messages', 'origin', 'consultations', 'clients'].includes(t) && t !== state.tab) showTab(t); });
   init().catch((err) => toast(err.message, true));
 })();

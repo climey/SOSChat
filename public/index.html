@@ -221,6 +221,9 @@
         <section class="d-sec" id="d-hist"></section>
         <button type="button" class="d-row" data-dtoggle="d-notes"><span class="d-ic blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l-1 7 3 3H7l3-3z"/></svg></span><span class="lbl">Observações do contato</span><span class="cnt" id="d-notes-count"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
         <div class="d-sub" id="d-notes" hidden></div>
+        <section class="d-sec" id="d-kinds"></section>
+        <button type="button" class="d-row" data-dtoggle="d-purchases"><span class="d-ic green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></span><span class="lbl">Compras</span><span class="cnt" id="d-purchases-count"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+        <div class="d-sub" id="d-purchases" hidden></div>
         <button type="button" class="d-row" data-dtoggle="d-consults"><span class="d-ic red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span><span class="lbl">Consultas realizadas</span><span class="cnt" id="d-consults-count"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
         <div class="d-sub" id="d-consults" hidden></div>
         <button type="button" class="d-row" data-dtoggle="d-log"><span class="d-ic blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span><span class="lbl">Logs de atividade do contato</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
@@ -278,6 +281,7 @@
     <div class="chips" id="consult-kinds"></div>
     <div class="field" style="margin-top:12px"><input class="input" id="consult-ref" placeholder="Placa, chassi ou referência (opcional)" maxlength="40" autocomplete="off"></div>
     <label class="switch" id="consult-charge-wrap" style="margin-bottom:12px"><input type="checkbox" id="consult-charge" checked><span class="track"></span><span id="consult-charge-label">Debitar 1 consulta do plano</span></label>
+    <div class="field" id="consult-price-wrap" hidden><input class="input" id="consult-price" type="number" min="0" step="0.01" placeholder="Valor cobrado pela consulta avulsa (R$, opcional)"></div>
     <div class="field"><input class="input" id="consult-note" placeholder="Observação (opcional, vira nota interna)" maxlength="500"></div>
     <div class="actions">
       <button type="button" class="btn" id="consult-cancel-2">Cancelar</button>

@@ -4,8 +4,8 @@
  */
 const db = require('../db');
 
-const DEFAULTS = { occasional_min: 2, recurrent_min: 5, loyal_months: 6, inactive_days: 45 };
-const LIMITS = { occasional_min: [2, 100], recurrent_min: [2, 1000], loyal_months: [1, 120], inactive_days: [7, 3650] };
+const DEFAULTS = { occasional_min: 2, recurrent_min: 5, min_span_days: 30, loyal_months: 6, inactive_days: 45 };
+const LIMITS = { occasional_min: [2, 100], recurrent_min: [2, 1000], min_span_days: [1, 3650], loyal_months: [1, 120], inactive_days: [7, 3650] };
 const TIERS = { new: 'Novo', occasional: 'Ocasional', recurrent: 'Recorrente', loyal: 'Fiel' };
 const FILTERS = ['new', 'occasional', 'recurrent', 'loyal', 'inactive'];
 const MONTH_MS = 30.44 * 86400e3;
@@ -37,17 +37,18 @@ function tierOf(c, th = cache.th, now = Date.now()) {
   const months = Number(c.active_months || 0);
   const first = c.first_contact_at ? new Date(c.first_contact_at) : null;
   const monthsSince = first ? (now - first.getTime()) / MONTH_MS : 0;
-  let tier = 'new';
-  if (n >= th.recurrent_min && months >= 2) tier = monthsSince >= th.loyal_months ? 'loyal' : 'recurrent';
-  else if (n >= th.occasional_min) tier = 'occasional';
   const last = c.last_seen_at ? new Date(c.last_seen_at) : null;
+  const spanDays = first && last ? (last.getTime() - first.getTime()) / 86400e3 : 0;
+  let tier = 'new';
+  if (n >= th.recurrent_min && spanDays >= th.min_span_days) tier = monthsSince >= th.loyal_months ? 'loyal' : 'recurrent';
+  else if (n >= th.occasional_min) tier = 'occasional';
   const inactive = (tier === 'recurrent' || tier === 'loyal') && Boolean(last) && now - last.getTime() > th.inactive_days * 86400e3;
   return { tier, label: TIERS[tier], inactive, months_since_first: monthsSince, interactions: n, active_months: months };
 }
 
 /** Fragmento SQL (sobre o alias da tabela contacts) para filtrar por faixa. Os números vêm validados. */
 function whereSql(filter, th, a = 'ct') {
-  const rec = `(${a}.interactions >= ${th.recurrent_min} AND ${a}.active_months >= 2)`;
+  const rec = `(${a}.interactions >= ${th.recurrent_min} AND ${a}.last_seen_at - ${a}.first_contact_at >= make_interval(days => ${th.min_span_days}))`;
   const loyal = `(${rec} AND ${a}.first_contact_at <= NOW() - make_interval(months => ${th.loyal_months}))`;
   switch (filter) {
     case 'new': return `${a}.interactions < ${th.occasional_min}`;
@@ -98,7 +99,7 @@ async function refreshContact(contactId, client = db) {
   const rank = { new: 0, occasional: 1, recurrent: 2, loyal: 3 };
   if (rank[now.tier] > rank[was.tier]) {
     if (now.tier === 'occasional') events.push(`Voltou a falar com a SOS: ${after.interactions} dias com contato`);
-    if (now.tier === 'recurrent') events.push(`Passou a cliente recorrente (${after.interactions} dias com contato em ${after.active_months} meses)`);
+    if (now.tier === 'recurrent') events.push(`Passou a cliente recorrente (${after.interactions} dias com contato ao longo de ${Math.round((new Date(after.last_seen_at) - new Date(after.first_contact_at)) / 86400e3)} dias)`);
     if (now.tier === 'loyal') events.push(`Passou a cliente fiel (recorrente há mais de ${th.loyal_months} meses)`);
   }
   for (const description of events) {

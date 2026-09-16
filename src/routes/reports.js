@@ -365,10 +365,36 @@ router.get('/consultations', async (req, res, next) => {
         WHERE ct.plan_credits IS NOT NULL
           AND (ct.plan_used >= ct.plan_credits OR (ct.plan_expires_at IS NOT NULL AND ct.plan_expires_at < NOW() + INTERVAL '7 days'))
         ORDER BY ct.plan_expires_at NULLS LAST, ct.plan_used DESC LIMIT 30`);
+    // Compras e receita
+    const pBase = 'FROM purchases p WHERE p.created_at BETWEEN $1 AND $2';
+    const pTot = await db.query(`SELECT COUNT(*)::int AS purchases, COUNT(*) FILTER (WHERE p.kind = 'plan')::int AS plans, COUNT(*) FILTER (WHERE p.kind = 'single')::int AS singles,
+              COALESCE(SUM(p.credits), 0)::int AS credits, COALESCE(SUM(p.price_cents), 0)::int AS revenue_cents, COUNT(DISTINCT p.contact_id)::int AS buyer_count ${pBase}`, [from, to]);
+    const pPrev = await db.query(`SELECT COALESCE(SUM(p.price_cents), 0)::int AS revenue_cents, COUNT(*)::int AS purchases ${pBase}`, [prevFrom, prevTo]);
+    const pSeries = await db.query(`SELECT date_trunc('day', p.created_at) AS bucket, COUNT(*)::int AS purchases, COALESCE(SUM(p.price_cents), 0)::int AS revenue_cents, COALESCE(SUM(p.credits), 0)::int AS credits ${pBase} GROUP BY 1 ORDER BY 1`, [from, to]);
+    const buyers = await db.query(
+      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id,
+              COUNT(*)::int AS purchases, COUNT(*) FILTER (WHERE p.kind = 'plan')::int AS plans, COALESCE(SUM(p.credits), 0)::int AS credits, COALESCE(SUM(p.price_cents), 0)::int AS revenue_cents,
+              MAX(p.created_at) AS last_purchase_at,
+              (SELECT c.id FROM conversations c WHERE c.contact_id = ct.id ORDER BY c.last_message_at DESC LIMIT 1) AS conversation_id
+         FROM purchases p JOIN contacts ct ON ct.id = p.contact_id WHERE p.created_at BETWEEN $1 AND $2
+        GROUP BY ct.id ORDER BY revenue_cents DESC, credits DESC LIMIT 20`, [from, to]);
+    const byClientKind = await db.query(
+      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, k.kind, COUNT(*)::int AS total
+         FROM consultations k JOIN contacts ct ON ct.id = k.contact_id
+        WHERE k.reversed_at IS NULL AND k.created_at BETWEEN $1 AND $2 ${f}
+        GROUP BY ct.id, k.kind ORDER BY ct.id`, params);
+    const byClient = new Map();
+    for (const r of byClientKind.rows) {
+      if (!byClient.has(r.id)) byClient.set(r.id, { id: r.id, name: r.name, wa_id: r.wa_id, total: 0, kinds: {} });
+      const e = byClient.get(r.id); e.kinds[r.kind] = r.total; e.total += r.total;
+    }
+    const clientsByKind = [...byClient.values()].sort((a, b) => b.total - a.total).slice(0, 20);
     res.json({
       current: totals.rows[0], previous: prev.rows[0],
       series: byDay.rows, kinds: byKind.rows, agents: byAgent.rows, contacts: topContacts.rows,
       plans: { ...plans.rows[0], by_plan: byPlan.rows, attention: attention.rows },
+      purchases: { ...pTot.rows[0], previous: pPrev.rows[0], series: pSeries.rows, buyers: buyers.rows },
+      clients_by_kind: clientsByKind,
     });
   } catch (err) { next(err); }
 });

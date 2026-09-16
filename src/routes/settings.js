@@ -28,6 +28,7 @@ const KEYS = {
   consultation_kinds: normalizeKinds,
   recurrence_occasional_min: (v) => (Number.isInteger(v) && v >= 2 && v <= 100 ? v : null),
   recurrence_recurrent_min: (v) => (Number.isInteger(v) && v >= 2 && v <= 1000 ? v : null),
+  recurrence_min_span_days: (v) => (Number.isInteger(v) && v >= 1 && v <= 3650 ? v : null),
   recurrence_loyal_months: (v) => (Number.isInteger(v) && v >= 1 && v <= 120 ? v : null),
   recurrence_inactive_days: (v) => (Number.isInteger(v) && v >= 7 && v <= 3650 ? v : null),
 };
@@ -41,7 +42,7 @@ function parseValue(key, value) {
 
 async function getAll() {
   const { rows } = await db.query('SELECT key, value FROM app_settings');
-  const out = { consultation_kinds: DEFAULT_KINDS, recurrence_occasional_min: 2, recurrence_recurrent_min: 5, recurrence_loyal_months: 6, recurrence_inactive_days: 45 };
+  const out = { consultation_kinds: DEFAULT_KINDS, recurrence_occasional_min: 2, recurrence_recurrent_min: 5, recurrence_min_span_days: 30, recurrence_loyal_months: 6, recurrence_inactive_days: 45 };
   for (const r of rows) out[r.key] = parseValue(r.key, r.value);
   return out;
 }

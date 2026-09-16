@@ -40,7 +40,14 @@ async function getFull(id) {
        (SELECT COUNT(*)::int FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL) AS consultations_count,
        (SELECT COUNT(*)::int FROM contact_events e WHERE e.contact_id = $1) AS events_count,
        (SELECT k.created_at FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL ORDER BY k.created_at DESC LIMIT 1) AS last_consultation_at,
-       (SELECT k.kind FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL ORDER BY k.created_at DESC LIMIT 1) AS last_consultation_kind`,
+       (SELECT k.kind FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL ORDER BY k.created_at DESC LIMIT 1) AS last_consultation_kind,
+       (SELECT COUNT(*)::int FROM purchases p WHERE p.contact_id = $1) AS purchases_count,
+       (SELECT COUNT(*)::int FROM purchases p WHERE p.contact_id = $1 AND p.kind = 'plan') AS plans_bought,
+       (SELECT COALESCE(SUM(p.credits), 0)::int FROM purchases p WHERE p.contact_id = $1) AS credits_bought,
+       (SELECT COALESCE(SUM(p.price_cents), 0)::int FROM purchases p WHERE p.contact_id = $1) AS spent_cents,
+       (SELECT COALESCE(json_agg(json_build_object('kind', x.kind, 'total', x.total, 'charged', x.charged, 'loose', x.loose) ORDER BY x.total DESC), '[]'::json)
+          FROM (SELECT k.kind, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE k.charged)::int AS charged, COUNT(*) FILTER (WHERE NOT k.charged)::int AS loose
+                  FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL GROUP BY k.kind) x) AS consultations_by_kind`,
     [id]
   );
   return { ...contact, ...rows[0] };
@@ -113,11 +120,11 @@ function expiresFrom(startedAt, validityDays) {
 async function setPlan(id, user, body) {
   const contact = await get(id);
   if (!contact) throw new ContactError(404, 'Contato não encontrado');
-  let name, credits, validityDays = null, planId = null;
+  let name, credits, validityDays = null, planId = null, priceCents = null;
   if (body.plan_id) {
     const { rows } = await db.query('SELECT * FROM plans WHERE id = $1', [body.plan_id]);
     if (!rows.length) throw new ContactError(400, 'Plano não encontrado');
-    planId = rows[0].id; name = rows[0].name; credits = rows[0].credits; validityDays = rows[0].validity_days;
+    planId = rows[0].id; name = rows[0].name; credits = rows[0].credits; validityDays = rows[0].validity_days; priceCents = rows[0].price_cents;
   } else {
     name = String(body.name || '').trim().slice(0, 80) || 'Plano personalizado';
     credits = Number(body.credits);
@@ -133,11 +140,12 @@ async function setPlan(id, user, body) {
     [id, planId, name, credits, startedAt, expiresAt]
   );
   await logEvent(id, user.id, 'plan', `${user.name} ${contact.plan_credits === null ? 'atribuiu' : 'trocou para'} o plano ${name} (${credits} consulta(s))`);
+  await addPurchase(id, user, { kind: 'plan', description: name, credits, price_cents: body.price_cents !== undefined ? body.price_cents : priceCents });
   return broadcast(id);
 }
 
 /** Renova o ciclo: zera as usadas e recalcula o vencimento pela validade do plano (ou mantém o mesmo intervalo). */
-async function renewPlan(id, user) {
+async function renewPlan(id, user, body = {}) {
   const contact = await get(id);
   if (!contact) throw new ContactError(404, 'Contato não encontrado');
   if (contact.plan_credits === null) throw new ContactError(400, 'Este contato não tem plano');
@@ -156,6 +164,10 @@ async function renewPlan(id, user) {
   );
   await logEvent(id, user.id, 'plan', `${user.name} renovou o plano ${contact.plan_name} (${contact.plan_credits} consulta(s))`);
   if (!contact.plan_renewals) await logEvent(id, null, 'milestone', 'Primeira renovação de plano');
+  let price = body.price_cents !== undefined ? body.price_cents : null;
+  if (price === null && contact.plan_id) { const { rows } = await db.query('SELECT price_cents FROM plans WHERE id = $1', [contact.plan_id]); price = rows[0]?.price_cents ?? null; }
+  if (price === null) { const { rows } = await db.query('SELECT price_cents FROM purchases WHERE contact_id = $1 AND kind = $2 AND description = $3 AND price_cents IS NOT NULL ORDER BY created_at DESC LIMIT 1', [id, 'plan', contact.plan_name]); price = rows[0]?.price_cents ?? null; }
+  await addPurchase(id, user, { kind: 'plan', description: contact.plan_name, credits: contact.plan_credits, price_cents: price });
   return broadcast(id);
 }
 
@@ -211,6 +223,8 @@ async function registerConsultation(id, user, body) {
   const note = String(body.note || '').trim().slice(0, 500) || null;
   const conversationId = body.conversation_id ? Number(body.conversation_id) : null;
   const wantCharge = body.charge !== false;
+  const singlePrice = body.price_cents === undefined || body.price_cents === null || body.price_cents === '' ? null : Math.round(Number(body.price_cents));
+  if (singlePrice !== null && (!Number.isFinite(singlePrice) || singlePrice < 0)) throw new ContactError(400, 'Valor inválido');
 
   const result = await db.withTransaction(async (client) => {
     const { rows } = await client.query(`SELECT ${CONTACT_COLS} FROM contacts ct WHERE ct.id = $1 FOR UPDATE`, [id]);
@@ -256,6 +270,7 @@ async function registerConsultation(id, user, body) {
         }
       }
     }
+    if (!charge && singlePrice !== null) await client.query('INSERT INTO purchases (contact_id, user_id, kind, description, credits, price_cents, consultation_id) VALUES ($1, $2, $3, $4, 1, $5, $6)', [id, user.id, 'single', `Consulta avulsa: ${label}`, singlePrice, ins.rows[0].id]);
     return { consultation: { ...ins.rows[0], user_name: user.name, kind_label: kind }, contact: after, message, tagged };
   });
 
@@ -358,7 +373,70 @@ async function deleteNote(id, noteId, user) {
   await broadcast(id);
 }
 
+// ---------- Compras ----------
+function cleanPrice(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n < 0) throw new ContactError(400, 'Valor inválido');
+  return n;
+}
+async function addPurchase(id, user, p, client = db) {
+  const { rows } = await client.query(
+    `INSERT INTO purchases (contact_id, user_id, kind, description, credits, price_cents, consultation_id, note) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [id, user ? user.id : null, p.kind === 'single' ? 'single' : 'plan', String(p.description || 'Compra').trim().slice(0, 120), Math.max(0, Number(p.credits) || 0), cleanPrice(p.price_cents), p.consultation_id || null, p.note ? String(p.note).trim().slice(0, 300) : null]
+  );
+  return rows[0];
+}
+async function listPurchases(id, limit = 200) {
+  const { rows } = await db.query(
+    `SELECT p.*, u.name AS user_name FROM purchases p LEFT JOIN users u ON u.id = p.user_id WHERE p.contact_id = $1 ORDER BY p.created_at DESC, p.id DESC LIMIT $2`,
+    [id, limit]
+  );
+  return rows;
+}
+/** Compra registrada à mão (ex.: venda antiga). Não mexe no saldo do plano. */
+async function addManualPurchase(id, user, body) {
+  const contact = await get(id);
+  if (!contact) throw new ContactError(404, 'Contato não encontrado');
+  const description = String(body.description || '').trim().slice(0, 120);
+  if (!description) throw new ContactError(400, 'Descreva a compra (ex.: Plano 5 consultas)');
+  const credits = Number(body.credits);
+  if (!Number.isInteger(credits) || credits < 0 || credits > 10000) throw new ContactError(400, 'Quantidade de consultas inválida');
+  const purchase = await addPurchase(id, user, { kind: body.kind === 'single' ? 'single' : 'plan', description, credits, price_cents: body.price_cents, note: body.note });
+  if (body.created_at) {
+    const d = new Date(body.created_at);
+    if (Number.isNaN(d.getTime())) throw new ContactError(400, 'Data inválida');
+    await db.query('UPDATE purchases SET created_at = $2 WHERE id = $1', [purchase.id, d]);
+  }
+  await logEvent(id, user.id, 'purchase', `${user.name} registrou a compra: ${description} (${credits} consulta(s))`);
+  const contactAfter = await broadcast(id);
+  return { purchase: (await listPurchases(id)).find((x) => x.id === purchase.id) || purchase, contact: contactAfter };
+}
+async function updatePurchase(id, purchaseId, user, body) {
+  const { rows } = await db.query('SELECT * FROM purchases WHERE id = $1 AND contact_id = $2', [purchaseId, id]);
+  if (!rows.length) throw new ContactError(404, 'Compra não encontrada');
+  const sets = [];
+  const params = [purchaseId];
+  const push = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`); };
+  if (body.price_cents !== undefined) push('price_cents', cleanPrice(body.price_cents));
+  if (body.note !== undefined) push('note', String(body.note || '').trim().slice(0, 300) || null);
+  if (body.description !== undefined) { const d = String(body.description || '').trim().slice(0, 120); if (!d) throw new ContactError(400, 'Descrição vazia'); push('description', d); }
+  if (body.credits !== undefined) { const n = Number(body.credits); if (!Number.isInteger(n) || n < 0) throw new ContactError(400, 'Quantidade inválida'); push('credits', n); }
+  if (!sets.length) throw new ContactError(400, 'Nada para atualizar');
+  await db.query(`UPDATE purchases SET ${sets.join(', ')} WHERE id = $1`, params);
+  await logEvent(id, user.id, 'purchase', `${user.name} ajustou a compra ${rows[0].description}`);
+  const contact = await broadcast(id);
+  return { purchase: (await listPurchases(id)).find((x) => x.id === purchaseId), contact };
+}
+async function deletePurchase(id, purchaseId, user) {
+  const { rows } = await db.query('DELETE FROM purchases WHERE id = $1 AND contact_id = $2 RETURNING *', [purchaseId, id]);
+  if (!rows.length) throw new ContactError(404, 'Compra não encontrada');
+  await logEvent(id, user.id, 'purchase', `${user.name} removeu a compra ${rows[0].description}`);
+  return broadcast(id);
+}
+
 module.exports = {
+  listPurchases, addManualPurchase, updatePurchase, deletePurchase,
   ContactError, DEFAULT_KINDS, CONTACT_COLS, get, getFull, update, setBlocked, remove, logEvent,
   setPlan, renewPlan, removePlan, adjustPlan, registerConsultation, reverseConsultation,
   listConsultations, listEvents, listNotes, addNote, updateNote, deleteNote,

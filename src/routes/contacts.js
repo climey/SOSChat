@@ -56,7 +56,7 @@ router.delete('/:id', requireAdmin, withId(async (id, req, res) => {
 // ---------- Plano ----------
 router.put('/:id/plan', withId(async (id, req, res) => res.json({ contact: await contacts.setPlan(id, req.user, req.body || {}) })));
 router.patch('/:id/plan', withId(async (id, req, res) => res.json({ contact: await contacts.adjustPlan(id, req.user, req.body || {}) })));
-router.post('/:id/plan/renew', withId(async (id, req, res) => res.json({ contact: await contacts.renewPlan(id, req.user) })));
+router.post('/:id/plan/renew', withId(async (id, req, res) => res.json({ contact: await contacts.renewPlan(id, req.user, req.body || {}) })));
 router.delete('/:id/plan', withId(async (id, req, res) => res.json({ contact: await contacts.removePlan(id, req.user) })));
 
 // ---------- Consultas ----------
@@ -69,6 +69,20 @@ router.delete('/:id/consultations/:cid', withId(async (id, req, res) => {
   const cid = parseId(req.params.cid);
   if (!cid) return res.status(404).json({ error: 'Consulta não encontrada' });
   res.json(await contacts.reverseConsultation(id, cid, req.user));
+}));
+
+// ---------- Compras ----------
+router.get('/:id/purchases', withId(async (id, req, res) => res.json({ purchases: await contacts.listPurchases(id) })));
+router.post('/:id/purchases', withId(async (id, req, res) => res.status(201).json(await contacts.addManualPurchase(id, req.user, req.body || {}))));
+router.patch('/:id/purchases/:pid', withId(async (id, req, res) => {
+  const pid = parseId(req.params.pid);
+  if (!pid) return res.status(404).json({ error: 'Compra não encontrada' });
+  res.json(await contacts.updatePurchase(id, pid, req.user, req.body || {}));
+}));
+router.delete('/:id/purchases/:pid', requireAdmin, withId(async (id, req, res) => {
+  const pid = parseId(req.params.pid);
+  if (!pid) return res.status(404).json({ error: 'Compra não encontrada' });
+  res.json({ contact: await contacts.deletePurchase(id, pid, req.user) });
 }));
 
 // ---------- Observações e log ----------

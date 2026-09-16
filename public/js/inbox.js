@@ -1000,15 +1000,17 @@
   const REC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
   function recThresholds() {
     const st = state.settings || {};
-    return { occasional_min: st.recurrence_occasional_min || 2, recurrent_min: st.recurrence_recurrent_min || 5, loyal_months: st.recurrence_loyal_months || 6, inactive_days: st.recurrence_inactive_days || 45 };
+    return { occasional_min: st.recurrence_occasional_min || 2, recurrent_min: st.recurrence_recurrent_min || 5, min_span_days: st.recurrence_min_span_days || 30, loyal_months: st.recurrence_loyal_months || 6, inactive_days: st.recurrence_inactive_days || 45 };
   }
   function tierOf(c) {
     const th = recThresholds();
     const n = Number(c.interactions || 0), months = Number(c.active_months || 0);
     const first = c.first_contact_at ? new Date(c.first_contact_at) : null;
     const monthsSince = first ? (Date.now() - first) / (30.44 * 86400e3) : 0;
+    const lastAt = c.last_seen_at ? new Date(c.last_seen_at) : null;
+    const spanDays = first && lastAt ? (lastAt - first) / 86400e3 : 0;
     let tier = 'new';
-    if (n >= th.recurrent_min && months >= 2) tier = monthsSince >= th.loyal_months ? 'loyal' : 'recurrent';
+    if (n >= th.recurrent_min && spanDays >= th.min_span_days) tier = monthsSince >= th.loyal_months ? 'loyal' : 'recurrent';
     else if (n >= th.occasional_min) tier = 'occasional';
     const last = c.last_seen_at ? new Date(c.last_seen_at) : null;
     const inactive = (tier === 'recurrent' || tier === 'loyal') && Boolean(last) && Date.now() - last > th.inactive_days * 86400e3;
@@ -1035,6 +1037,16 @@
     const since = t.tier !== 'new' && c.first_contact_at ? ` · ${sinceText(c.first_contact_at)}` : '';
     const title = t.tier === 'new' ? 'Primeiro contato com a SOS' : `${t.n} dia${t.n > 1 ? 's' : ''} com contato em ${t.months} m${t.months > 1 ? 'eses' : 'ês'}${t.inactive ? ` · sem falar ${sinceText(c.last_seen_at)}` : ''}`;
     return `<span class="rec-chip ${cls}" title="${esc(title)}">${REC_ICON}${esc(text)}${esc(since)}</span>`;
+  }
+  const money = (c) => 'R$ ' + (Number(c || 0) / 100).toFixed(2).replace('.', ',');
+  function renderKinds(ct) {
+    const kinds = Array.isArray(ct.consultations_by_kind) ? ct.consultations_by_kind : [];
+    const total = kinds.reduce((n, k) => n + k.total, 0);
+    const loose = kinds.reduce((n, k) => n + k.loose, 0);
+    const bought = Number(ct.credits_bought || 0);
+    $('d-kinds').innerHTML = `<h5>Consultas por tipo <span class="muted" style="font-weight:500">· ${total} no total${loose ? ` · ${loose} avulsa${loose > 1 ? 's' : ''}` : ''}</span></h5>
+      ${kinds.length ? `<div class="kind-grid">${kinds.map((k) => `<span class="kind-pill" title="${k.charged} do plano · ${k.loose} avulsa(s)"><b>${k.total}</b>${esc(k.kind)}</span>`).join('')}</div>` : '<div class="d-empty">Nenhuma consulta registrada ainda.</div>'}
+      <div class="kind-buy">${ct.purchases_count ? `Comprou <b>${ct.plans_bought}</b> plano${ct.plans_bought === 1 ? '' : 's'} · <b>${bought}</b> consulta${bought === 1 ? '' : 's'}${ct.spent_cents ? ` · <b>${money(ct.spent_cents)}</b>` : ''}${bought ? ` · usou ${total} (${Math.min(100, Math.round((total / Math.max(1, bought)) * 100))}%)` : ''}` : 'Nenhuma compra registrada.'}</div>`;
   }
   function renderHistory(ct) {
     const t = tierOf(ct);
@@ -1097,7 +1109,7 @@
     { key: 'birthdate', label: 'Nascimento', type: 'date', more: true },
   ];
   let contactCardId = null;
-  const dOpen = { 'd-notes': false, 'd-consults': false, 'd-log': false };
+  const dOpen = { 'd-notes': false, 'd-purchases': false, 'd-consults': false, 'd-log': false };
   let fieldsExpanded = false;
   let autoOpenedNotesFor = null;
 
@@ -1127,6 +1139,8 @@
     $('d-consults-count').textContent = ct.consultations_count ? `(${ct.consultations_count})` : '';
     renderPlanCard(ct);
     renderHistory(ct);
+    renderKinds(ct);
+    $('d-purchases-count').textContent = ct.purchases_count ? `(${ct.purchases_count})` : '';
     renderFields(ct);
     renderBlockButton(ct.blocked);
   }
@@ -1310,10 +1324,13 @@
     else if (p.left === 0) { cb.checked = false; cb.disabled = true; $('consult-charge-label').textContent = 'Plano sem saldo: fica como consulta avulsa'; }
     else { cb.checked = true; cb.disabled = false; $('consult-charge-label').textContent = `Debitar 1 consulta do plano (saldo ${p.left}/${p.total})`; }
     $('consult-sub').textContent = `${contactName(c)} · ${p ? p.name : 'sem plano'}`;
+    $('consult-price').value = '';
+    $('consult-price-wrap').hidden = cb.checked;
     $('consult-modal').hidden = false;
     $('consult-ref').focus();
   }
   function closeConsultModal() { $('consult-modal').hidden = true; }
+  $('consult-charge').addEventListener('change', () => { $('consult-price-wrap').hidden = $('consult-charge').checked; });
   $('consult-kinds').addEventListener('click', (e) => {
     const b = e.target.closest('[data-kind]');
     if (!b) return;
@@ -1329,6 +1346,7 @@
       const r = await api('POST', `/api/contacts/${consult.contactId}/consultations`, {
         conversation_id: consult.conversationId, kind: consult.kind, reference: $('consult-ref').value,
         charge: $('consult-charge').checked, note: $('consult-note').value,
+        price_cents: !$('consult-charge').checked && $('consult-price').value ? Math.round(Number($('consult-price').value) * 100) : null,
       });
       const p = planState(r.contact);
       toast(p && r.consultation.charged ? `Consulta registrada · saldo ${p.left}/${p.total}` : 'Consulta avulsa registrada');
@@ -1473,6 +1491,15 @@
               <div class="d-item-body">${esc(n.body)}</div>
               ${mine(n) ? `<div class="d-item-acts"><button type="button" class="d-item-act" data-note-edit="${n.id}">Editar</button><button type="button" class="d-item-act" data-note-del="${n.id}">Remover</button></div>` : ''}
             </div>`).join('') : '<div class="d-empty">Nenhuma observação fixada. Use o campo acima ou o alfinete de uma nota interna.</div>');
+      } else if (key === 'd-purchases') {
+        const { purchases } = await api('GET', `/api/contacts/${ct.id}/purchases`);
+        const admin = state.me.role === 'admin';
+        box.innerHTML = `<form class="d-note-form" id="d-purchase-form"><div class="grid-2" style="gap:6px;margin:0"><input class="input" id="d-pur-desc" placeholder="Compra (ex.: Plano 5 consultas)" maxlength="120" required><input class="input" id="d-pur-credits" type="number" min="0" max="10000" placeholder="Consultas" required></div><div class="grid-2" style="gap:6px;margin:0"><input class="input" id="d-pur-price" type="number" min="0" step="0.01" placeholder="Valor R$ (opcional)"><input class="input" id="d-pur-date" type="date" title="Data da compra (vazio = hoje)"></div><button type="submit" class="btn btn-sm">Registrar compra antiga (não mexe no saldo)</button></form>`
+          + (purchases.length ? purchases.map((p) => `<div class="d-item obs buy" data-purchase="${p.id}">
+              <div class="d-item-top"><b>${esc(p.description)}</b><span>${esc(new Date(p.created_at).toLocaleDateString('pt-BR'))}</span></div>
+              <div class="d-item-body">${p.credits} consulta${p.credits === 1 ? '' : 's'}${p.price_cents != null ? ' · ' + money(p.price_cents) : ' · <i>sem valor</i>'}${p.user_name ? ' · ' + esc(p.user_name) : ''}${p.note ? ' · ' + esc(p.note) : ''}</div>
+              <div class="d-item-acts"><button type="button" class="d-item-act" data-pur-price="${p.id}">${p.price_cents != null ? 'Alterar valor' : 'Informar valor'}</button>${admin ? `<button type="button" class="d-item-act" data-pur-del="${p.id}">Remover</button>` : ''}</div>
+            </div>`).join('') : '<div class="d-empty">Nenhuma compra. Planos atribuídos ou renovados entram aqui automaticamente.</div>');
       } else if (key === 'd-consults') {
         const { consultations } = await api('GET', `/api/contacts/${ct.id}/consultations`);
         box.innerHTML = consultations.length ? consultations.map((k) => `<div class="d-item ${k.reversed_at ? 'reversed' : ''}">
@@ -1529,6 +1556,35 @@
       if (!dOpen['d-notes']) document.querySelector('[data-dtoggle="d-notes"]').click();
     } catch (err) { toast(err.message, true); }
   }
+  $('d-purchases').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'd-purchase-form' || !state.contact) return;
+    e.preventDefault();
+    const price = $('d-pur-price').value;
+    const date = $('d-pur-date').value;
+    try {
+      await api('POST', `/api/contacts/${state.contact.id}/purchases`, { description: $('d-pur-desc').value, credits: Number($('d-pur-credits').value), price_cents: price ? Math.round(Number(price) * 100) : null, created_at: date ? new Date(date + 'T12:00:00').toISOString() : null });
+      toast('Compra registrada');
+    } catch (err) { toast(err.message, true); }
+  });
+  $('d-purchases').addEventListener('click', async (e) => {
+    const pr = e.target.closest('[data-pur-price]');
+    const del = e.target.closest('[data-pur-del]');
+    if (!state.contact || (!pr && !del)) return;
+    try {
+      if (del) {
+        if (!confirm('Remover esta compra do histórico?')) return;
+        await api('DELETE', `/api/contacts/${state.contact.id}/purchases/${del.dataset.purDel}`);
+        toast('Compra removida');
+      } else {
+        const v = prompt('Valor da compra (R$):', '');
+        if (v === null) return;
+        const n = Number(String(v).replace(',', '.'));
+        if (!Number.isFinite(n) || n < 0) return toast('Valor inválido', true);
+        await api('PATCH', `/api/contacts/${state.contact.id}/purchases/${pr.dataset.purPrice}`, { price_cents: Math.round(n * 100) });
+        toast('Valor salvo');
+      }
+    } catch (err) { toast(err.message, true); }
+  });
   function refreshContactSubs() { for (const k of Object.keys(dOpen)) if (dOpen[k]) loadSub(k); }
 
   // ---------- Visualizador de mídia (lightbox) ----------

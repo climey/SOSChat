@@ -111,6 +111,7 @@ public/                login, inbox, relatórios e configurações
 | GET | `/api/contacts/:id/events` | log de atividade do contato |
 | PATCH | `/api/whatsapp/accounts/:id` | `{name, auto_tag_id}` renomeia o número e define a etiqueta automática das conversas novas |
 | GET | `/api/reports/consultations?from&to&agent` | consultas por dia, tipo e atendente; situação dos planos |
+| GET/POST/PATCH/DELETE | `/api/contacts/:id/purchases` | compras do cliente (planos atribuídos/renovados e avulsas com valor entram sozinhas; compra antiga à mão) |
 | GET | `/api/reports/recurrence?from&to` | clientes por faixa (Novo/Ocasional/Recorrente/Fiel), inativos, mais frequentes, taxa de retorno |
 | GET | `/api/conversations?recurrence=new\|occasional\|recurrent\|loyal\|inactive` | filtro por recorrência do cliente |
 

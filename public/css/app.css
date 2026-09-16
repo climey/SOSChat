@@ -834,3 +834,12 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .rec-list .row .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rec-list .row .who small { display: block; color: var(--muted); }
 .rec-list .row:hover { background: var(--surface-2); }
+.d-ic.green { background: rgba(64,192,87,0.16); color: #69db7c; }
+.kind-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.kind-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 4px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+.kind-pill b { min-width: 22px; height: 22px; border-radius: 999px; background: var(--primary-soft); color: #ff8787; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; padding: 0 6px; }
+.kind-buy { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.kind-buy b { color: var(--text); }
+.d-item.buy { border-left-color: var(--green); }
+.d-item.log.purchase { border-left-color: var(--green); }
+.kind-matrix td.num.hot { color: #ff8787; font-weight: 700; }
