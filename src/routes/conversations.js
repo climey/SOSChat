@@ -225,7 +225,7 @@ router.post('/:id/audio', (req, res, next) => {
     const mediaId = `out-${message.id}`;
     await db.query(`INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`, [mediaId, voice.mimetype, voice.buffer.length, voice.buffer]);
     try {
-      const waId = await whatsapp.sendMedia(accountId, conv.wa_id, { buffer: voice.buffer, mimetype: voice.mimetype, kind: 'audio', ptt: true, seconds: voice.seconds, quoted });
+      const waId = await whatsapp.sendMedia(accountId, conv.wa_id, { buffer: voice.buffer, mimetype: voice.mimetype, kind: 'audio', ptt: true, seconds: voice.seconds, waveform: voice.waveform, quoted });
       message = (await db.query(`UPDATE messages SET wa_message_id = $2, media_id = $3, status = 'sent' WHERE id = $1 RETURNING *`, [message.id, waId, mediaId])).rows[0];
     } catch (err) {
       message = (await db.query(`UPDATE messages SET media_id = $3, status = 'failed', error = $2 WHERE id = $1 RETURNING *`, [message.id, String(err.message).slice(0, 500), mediaId])).rows[0];

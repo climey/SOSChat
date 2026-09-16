@@ -1103,13 +1103,8 @@
   const fmtCpf = (v) => v.length === 11 ? v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4') : v.length === 14 ? v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : v;
 
   const FIELDS = [
-    { key: 'cpf', label: 'CPF / CNPJ', inputmode: 'numeric' },
-    { key: 'email', label: 'E-mail', type: 'email' },
-    { key: 'phone2', label: 'Telefone fixo', type: 'tel' },
-    { key: 'company', label: 'Empresa' },
-    { key: 'city', label: 'Cidade' },
-    { key: 'address', label: 'Endereço', more: true },
-    { key: 'birthdate', label: 'Nascimento', type: 'date', more: true },
+    { key: 'cpf', label: 'CPF / CNPJ', inputmode: 'numeric', more: true },
+    { key: 'email', label: 'E-mail', type: 'email', more: true },
   ];
   let contactCardId = null;
   const dOpen = { 'd-notes': false, 'd-purchases': false, 'd-consults': false, 'd-log': false };
@@ -1425,11 +1420,10 @@
         <div class="d-field-label">${esc(f.label)}</div>
         ${ct[f.key] ? `<div class="d-field-value ${f.textarea ? 'multi' : ''}" title="Clique para editar">${esc(fieldValue(ct, f))}</div>` : '<button type="button" class="d-field-add">Adicionar</button>'}
       </div>`).join('');
-    const ro = `
-      <div class="d-field ro"><div class="d-field-label">Ativo pela última vez</div><div class="d-field-value">${CLOCK_SM}${esc(ct.last_seen_at ? agoText(ct.last_seen_at) : 'sem registro')}</div></div>
-      <div class="d-field ro"><div class="d-field-label">Cliente desde</div><div class="d-field-value">${CAL_SM}${esc(new Date(ct.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</div></div>`;
-    $('d-fields').innerHTML = rows + ro;
-    $('d-more').innerHTML = fieldsExpanded ? `${ARROW_UP}Ver menos campos` : `${ARROW_DOWN}Ver mais campos`;
+    $('d-fields').innerHTML = rows;
+    const hidden = FIELDS.filter((f) => f.more && !ct[f.key]);
+    $('d-more').hidden = !fieldsExpanded && !hidden.length;
+    $('d-more').innerHTML = fieldsExpanded ? `${ARROW_UP}Ver menos campos` : `${ARROW_DOWN}Ver mais campos (${hidden.map((f) => f.label).join(', ')})`;
   }
   $('d-more').addEventListener('click', () => { fieldsExpanded = !fieldsExpanded; if (state.contact) renderFields(state.contact); });
   $('d-fields').addEventListener('click', (e) => {

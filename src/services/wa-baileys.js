@@ -437,7 +437,7 @@ class Session {
     switch (file.kind) {
       case 'image': content = { image: file.buffer, caption: file.caption || undefined, mimetype: file.mimetype }; break;
       case 'video': content = { video: file.buffer, caption: file.caption || undefined, mimetype: file.mimetype }; break;
-      case 'audio': content = { audio: file.buffer, mimetype: file.mimetype, ptt: Boolean(file.ptt), seconds: file.seconds || undefined }; break;
+      case 'audio': content = { audio: file.buffer, mimetype: file.mimetype, ptt: Boolean(file.ptt), seconds: file.seconds || undefined, waveform: file.waveform || undefined }; break;
       default: content = { document: file.buffer, mimetype: file.mimetype, fileName: file.filename || 'arquivo', caption: file.caption || undefined };
     }
     const options = file.quoted?.wa_message_id ? { quoted: this.quotedStub(jid, file.quoted) } : undefined;
