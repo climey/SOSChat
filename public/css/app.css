@@ -460,9 +460,12 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .msg .quote .qname { color: #ff8787; font-weight: 600; display: block; margin-bottom: 1px; }
 .msg .quote .qbody { color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .msg-row { position: relative; }
-.msg-actions { position: absolute; top: -12px; display: none; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; z-index: 3; }
-.msg-row.in .msg-actions { left: 8px; }
-.msg-row.out .msg-actions, .msg-row.note .msg-actions { right: 44px; }
+/* Acoes ficam fora do balao, no canto superior: a direita das mensagens do cliente e a esquerda das suas */
+.msg-row { position: relative; }
+.msg-actions { position: absolute; top: 0; display: none; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; z-index: 3; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
+.msg-actions::before { content: ""; position: absolute; inset: -6px -10px; }
+.msg-row.in .msg-actions { left: calc(100% + 6px); }
+.msg-row.out .msg-actions, .msg-row.note .msg-actions { right: calc(100% + 6px); }
 .msg-row:hover .msg-actions { display: flex; }
 .msg-actions button { width: 26px; height: 26px; border: none; background: transparent; color: var(--muted); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
 .msg-actions button:hover { background: var(--surface-3); color: var(--text); }
@@ -667,7 +670,7 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .msg-row.sticker .sender { display: none; }
 .msg-row.sticker .foot { float: none; display: flex; justify-content: flex-end; margin: 2px 2px 0; }
 .msg-row.in.sticker .foot { justify-content: flex-start; }
-.msg-row.sticker .msg-actions { top: -8px; }
+.msg-row.sticker .msg-actions { top: 0; }
 
 /* ---------- Transferir conversa ---------- */
 .modal.transfer { max-width: 500px; }
