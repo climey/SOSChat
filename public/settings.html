@@ -74,6 +74,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9a2 2 0 0 0 2-2V5h14v2a2 2 0 0 0 2 2v6a2 2 0 0 0-2 2v2H5v-2a2 2 0 0 0-2-2z"/><line x1="13" y1="5" x2="13" y2="19" stroke-dasharray="2 2"/></svg>
             <span>Planos de consultas</span>
           </a>
+          <a href="#recorrencia" data-section="recorrencia">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <span>Recorrência de clientes</span>
+          </a>
           <a href="#alertas" data-section="alertas">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>Alertas de espera</span>
@@ -178,6 +182,22 @@
               <form class="inline-form" id="kind-form" data-admin-only>
                 <input class="input" id="kind-name" placeholder="Novo tipo (ex.: Renavam)" maxlength="30" required style="max-width:240px">
                 <button class="btn btn-primary" type="submit">Adicionar tipo</button>
+              </form>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="recorrencia" hidden>
+            <div class="card">
+              <h3>Recorrência de clientes</h3>
+              <p class="small muted">Cada cliente ganha uma faixa automática a partir dos <b>dias com contato</b> (dias em que ele mandou mensagem) e dos meses ativos. A faixa aparece como chip ao lado do nome e no bloco "Histórico do cliente". Para marcar casos especiais à mão, use as etiquetas <b>VIP</b> e <b>Parceiro</b>.</p>
+              <form id="rec-form">
+                <div class="grid-2">
+                  <div class="field"><label class="label">Ocasional a partir de (dias com contato)</label><input class="input" type="number" id="rec-occasional" min="2" max="100" required></div>
+                  <div class="field"><label class="label">Recorrente a partir de (dias com contato, em 2 meses ou mais)</label><input class="input" type="number" id="rec-recurrent" min="2" max="1000" required></div>
+                  <div class="field"><label class="label">Fiel quando recorrente há (meses desde o 1º contato)</label><input class="input" type="number" id="rec-loyal" min="1" max="120" required></div>
+                  <div class="field"><label class="label">Recorrente inativo após (dias sem contato)</label><input class="input" type="number" id="rec-inactive" min="7" max="3650" required></div>
+                </div>
+                <div class="row-actions"><button class="btn btn-primary" type="submit" data-admin-only>Salvar regras</button></div>
               </form>
             </div>
           </section>

@@ -10,7 +10,7 @@
     currentId: null,
     currentConv: null,
     messages: [],
-    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', sector: '', plan: '', q: '', hidden: 'none' },
+    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', sector: '', plan: '', recurrence: '', q: '', hidden: 'none' },
     plans: [], // catálogo de planos de consultas
     contact: null, // ficha completa do contato da conversa aberta
     accounts: new Map(), // id -> status do número (só provedor baileys)
@@ -90,6 +90,7 @@
     if (f.account) qs.set('account', f.account);
     if (f.sector) qs.set('sector', f.sector);
     if (f.plan) qs.set('plan', f.plan);
+    if (f.recurrence) qs.set('recurrence', f.recurrence);
     if (f.q) qs.set('q', f.q);
     if (f.hidden !== 'none') qs.set('hidden', f.hidden);
     const { conversations } = await api('GET', `/api/conversations?${qs}`);
@@ -110,7 +111,10 @@
       if (f.account) qs.set('account', f.account);
       if (f.sector) qs.set('sector', f.sector);
       if (f.plan) qs.set('plan', f.plan);
+      if (f.recurrence) qs.set('recurrence', f.recurrence);
+    if (f.recurrence) qs.set('recurrence', f.recurrence);
     if (f.plan) qs.set('plan', f.plan);
+    if (f.recurrence) qs.set('recurrence', f.recurrence);
       if (f.q) qs.set('q', f.q);
       if (f.hidden !== 'none') qs.set('hidden', f.hidden);
       try {
@@ -205,6 +209,7 @@
             <div class="meta">
               ${c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')}
               ${planChip(c)}
+              ${recChip(c)}
               ${c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : ''}
               ${c.status === 'open' && !c.attended ? '<span class="tag new">Na fila</span>' : ''}
               ${c.scheduled_count > 0 ? `<span class="chip-soft" title="${c.scheduled_count} mensagem(ns) agendada(s)">⏰ ${c.scheduled_count}</span>` : ''}
@@ -351,6 +356,7 @@
   els.accountFilter.addEventListener('change', () => { state.filters.account = els.accountFilter.value; loadConversations(); });
   $('sector-filter').addEventListener('change', () => { state.filters.sector = $('sector-filter').value; loadConversations(); });
   $('plan-filter').addEventListener('change', () => { state.filters.plan = $('plan-filter').value; loadConversations(); });
+  $('rec-filter').addEventListener('change', () => { state.filters.recurrence = $('rec-filter').value; loadConversations(); });
   els.btnFilters.addEventListener('click', () => {
     els.filtersDrawer.hidden = !els.filtersDrawer.hidden;
     els.btnFilters.classList.toggle('active', !els.filtersDrawer.hidden);
@@ -392,6 +398,7 @@
     els.chatTags.innerHTML =
       `<span class="sub">${esc(formatPhone(c.wa_id))}</span>` +
       planChip(c) +
+      recChip(c, true) +
       `<button type="button" class="tag-quick" id="btn-tag-quick" title="Adicionar ou remover etiquetas">${TAG_ICON}</button>` +
       c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('') +
       sectorChip(c, true) +
@@ -988,6 +995,64 @@
   const ARROW_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
   const ARROW_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
 
+  // ---- Recorrência do cliente (mesma regra do servidor, com os limites de Configurações) ----
+  const REC_LABEL = { new: 'Novo', occasional: 'Ocasional', recurrent: 'Recorrente', loyal: 'Fiel' };
+  const REC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+  function recThresholds() {
+    const st = state.settings || {};
+    return { occasional_min: st.recurrence_occasional_min || 2, recurrent_min: st.recurrence_recurrent_min || 5, loyal_months: st.recurrence_loyal_months || 6, inactive_days: st.recurrence_inactive_days || 45 };
+  }
+  function tierOf(c) {
+    const th = recThresholds();
+    const n = Number(c.interactions || 0), months = Number(c.active_months || 0);
+    const first = c.first_contact_at ? new Date(c.first_contact_at) : null;
+    const monthsSince = first ? (Date.now() - first) / (30.44 * 86400e3) : 0;
+    let tier = 'new';
+    if (n >= th.recurrent_min && months >= 2) tier = monthsSince >= th.loyal_months ? 'loyal' : 'recurrent';
+    else if (n >= th.occasional_min) tier = 'occasional';
+    const last = c.last_seen_at ? new Date(c.last_seen_at) : null;
+    const inactive = (tier === 'recurrent' || tier === 'loyal') && Boolean(last) && Date.now() - last > th.inactive_days * 86400e3;
+    return { tier, label: REC_LABEL[tier], inactive, monthsSince, n, months };
+  }
+  function sinceText(d) {
+    if (!d) return '';
+    const days = Math.floor((Date.now() - new Date(d)) / 86400e3);
+    if (days < 1) return 'hoje';
+    if (days < 30) return `há ${days} dia${days > 1 ? 's' : ''}`;
+    const months = Math.floor(days / 30.44);
+    if (months < 12) return `há ${months} m${months > 1 ? 'eses' : 'ês'}`;
+    const years = Math.floor(months / 12);
+    const rest = months % 12;
+    return `há ${years} ano${years > 1 ? 's' : ''}${rest ? ` e ${rest} m${rest > 1 ? 'eses' : 'ês'}` : ''}`;
+  }
+  /** Chip "Recorrente · há 8 meses". Novo só aparece no cabeçalho, para não poluir a lista. */
+  function recChip(c, header = false) {
+    if (c.interactions === undefined) return '';
+    const t = tierOf(c);
+    if (t.tier === 'new' && !header) return '';
+    const cls = t.inactive ? 'inactive' : t.tier;
+    const text = t.inactive ? `${t.label} inativo` : t.label;
+    const since = t.tier !== 'new' && c.first_contact_at ? ` · ${sinceText(c.first_contact_at)}` : '';
+    const title = t.tier === 'new' ? 'Primeiro contato com a SOS' : `${t.n} dia${t.n > 1 ? 's' : ''} com contato em ${t.months} m${t.months > 1 ? 'eses' : 'ês'}${t.inactive ? ` · sem falar ${sinceText(c.last_seen_at)}` : ''}`;
+    return `<span class="rec-chip ${cls}" title="${esc(title)}">${REC_ICON}${esc(text)}${esc(since)}</span>`;
+  }
+  function renderHistory(ct) {
+    const t = tierOf(ct);
+    const n = Number(ct.interactions || 0);
+    const span = ct.first_contact_at && ct.last_seen_at ? (new Date(ct.last_seen_at) - new Date(ct.first_contact_at)) / 86400e3 : 0;
+    const freq = n > 1 && span > 0 ? Math.max(1, Math.round(span / (n - 1))) : null;
+    const rows = [
+      ['Cliente desde', ct.first_contact_at ? `${new Date(ct.first_contact_at).toLocaleDateString('pt-BR')} (${sinceText(ct.first_contact_at)})` : 'sem registro'],
+      ['Atendimentos', `${n} dia${n === 1 ? '' : 's'} com contato em ${ct.active_months || 0} m${ct.active_months === 1 ? 'ês' : 'eses'}`],
+      ['Consultas', ct.consultations_count ? `${ct.consultations_count}${ct.last_consultation_at ? ` · última ${esc(ct.last_consultation_kind || '')} ${sinceText(ct.last_consultation_at)}` : ''}` : 'nenhuma registrada'],
+      ['Renovações de plano', String(ct.plan_renewals || 0)],
+      ['Último contato', ct.last_seen_at ? sinceText(ct.last_seen_at) : 'sem registro'],
+      ['Frequência', freq ? `1 contato a cada ${freq} dia${freq > 1 ? 's' : ''}` : 'ainda sem padrão'],
+    ];
+    $('d-hist').innerHTML = `<h5>Histórico do cliente <span class="rec-chip ${t.inactive ? 'inactive' : t.tier}">${REC_ICON}${esc(t.inactive ? t.label + ' inativo' : t.label)}</span></h5>
+      <div class="d-hist-grid">${rows.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${v}</div>`).join('')}</div>`;
+  }
+
   /** Situação do plano a partir de uma conversa ou de uma ficha (ambas trazem plan_credits/plan_left). */
   function planState(c) {
     if (!c || c.plan_credits === null || c.plan_credits === undefined) return null;
@@ -1061,6 +1126,7 @@
     $('d-notes-count').textContent = ct.notes_count ? `(${ct.notes_count})` : '';
     $('d-consults-count').textContent = ct.consultations_count ? `(${ct.consultations_count})` : '';
     renderPlanCard(ct);
+    renderHistory(ct);
     renderFields(ct);
     renderBlockButton(ct.blocked);
   }
@@ -2251,6 +2317,10 @@
     if (f.plan === 'without' && c.plan_credits != null) return false;
     if (f.plan === 'empty' && !(c.plan_credits != null && c.plan_left === 0)) return false;
     if (f.plan === 'expired' && !(c.plan_credits != null && c.plan_expires_at && new Date(c.plan_expires_at) < new Date())) return false;
+    if (f.recurrence) {
+      const t = tierOf(c);
+      if (f.recurrence === 'inactive' ? !t.inactive : t.tier !== f.recurrence) return false;
+    }
     if (f.hidden === 'none' && c.hidden) return false;
     if (f.hidden === 'only' && !c.hidden) return false;
     if (f.q) {
@@ -2309,6 +2379,7 @@
       const apply = (c) => {
         c.contact_name = contact.name; c.contact_blocked = contact.blocked;
         c.plan_name = contact.plan_name; c.plan_credits = contact.plan_credits; c.plan_left = contact.plan_left; c.plan_expires_at = contact.plan_expires_at;
+        c.interactions = contact.interactions; c.active_months = contact.active_months; c.first_contact_at = contact.first_contact_at; c.last_seen_at = contact.last_seen_at;
       };
       for (const c of state.conversations) if (c.contact_id === contact.id) { apply(c); touched = true; }
       if (state.currentConv && state.currentConv.contact_id === contact.id) {

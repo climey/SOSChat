@@ -59,6 +59,7 @@
         <button data-tab="messages">Mensagens</button>
         <button data-tab="origin">Origem</button>
         <button data-tab="consultations">Consultas e planos</button>
+        <button data-tab="clients">Clientes</button>
       </div>
 
       <form class="report-filters card" id="filters">
@@ -145,6 +146,19 @@
         <div class="grid-2">
           <div class="card"><h3>Planos ativos por tipo</h3><p class="small muted" style="margin:-6px 0 8px">Situação atual, independente do período.</p><div class="chart" id="cs-plans"></div></div>
           <div class="card"><h3>Precisam de atenção</h3><p class="small muted" style="margin:-6px 0 8px">Sem saldo, vencidos ou vencendo em 7 dias. Clique para abrir a conversa.</p><div class="plan-attention" id="cs-attention"></div></div>
+        </div>
+      </section>
+
+      <!-- Clientes (recorrência) -->
+      <section class="report-tab" data-tab="clients" hidden>
+        <div class="stats" id="cl-stats"></div>
+        <div class="grid-2">
+          <div class="card"><h3>Base de clientes por faixa</h3><p class="small muted" style="margin:-6px 0 8px">Situação atual, independente do período. Regras em Configurações → Recorrência.</p><div class="chart" id="cl-tiers"></div></div>
+          <div class="card"><h3>Recorrentes inativos</h3><p class="small muted" style="margin:-6px 0 8px">Clientes recorrentes ou fiéis que pararam de falar. Vale uma mensagem de reativação. Clique para abrir a conversa.</p><div class="rec-list" id="cl-inactive"></div></div>
+        </div>
+        <div class="card">
+          <h3>Clientes mais frequentes</h3>
+          <div style="overflow-x:auto"><table class="table" id="cl-top"></table></div>
         </div>
       </section>
 

@@ -20,6 +20,7 @@ const UPPER_KINDS = /placa|chassi|motor|renavam/i;
 
 const CONTACT_COLS = `ct.id, ct.wa_id, ct.name, ct.profile_name, ct.avatar_media_id, ct.blocked, ct.cpf, ct.email, ct.notes,
   ct.phone2, ct.company, ct.city, ct.address, ct.birthdate, ct.last_seen_at, ct.created_at,
+  ct.interactions, ct.active_months, ct.first_contact_at, ct.plan_renewals,
   ct.plan_id, ct.plan_name, ct.plan_credits, ct.plan_used, ct.plan_started_at, ct.plan_expires_at,
   CASE WHEN ct.plan_credits IS NULL THEN NULL ELSE GREATEST(ct.plan_credits - ct.plan_used, 0) END AS plan_left`;
 
@@ -37,7 +38,9 @@ async function getFull(id) {
        (SELECT COUNT(*)::int FROM conversations c WHERE c.contact_id = $1) AS conversations_count,
        (SELECT COUNT(*)::int FROM contact_notes n WHERE n.contact_id = $1) AS notes_count,
        (SELECT COUNT(*)::int FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL) AS consultations_count,
-       (SELECT COUNT(*)::int FROM contact_events e WHERE e.contact_id = $1) AS events_count`,
+       (SELECT COUNT(*)::int FROM contact_events e WHERE e.contact_id = $1) AS events_count,
+       (SELECT k.created_at FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL ORDER BY k.created_at DESC LIMIT 1) AS last_consultation_at,
+       (SELECT k.kind FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL ORDER BY k.created_at DESC LIMIT 1) AS last_consultation_kind`,
     [id]
   );
   return { ...contact, ...rows[0] };
@@ -148,10 +151,11 @@ async function renewPlan(id, user) {
   }
   const startedAt = new Date();
   await db.query(
-    'UPDATE contacts SET plan_used = 0, plan_started_at = $2, plan_expires_at = $3 WHERE id = $1',
+    'UPDATE contacts SET plan_used = 0, plan_started_at = $2, plan_expires_at = $3, plan_renewals = plan_renewals + 1 WHERE id = $1',
     [id, startedAt, expiresFrom(startedAt, validityDays)]
   );
   await logEvent(id, user.id, 'plan', `${user.name} renovou o plano ${contact.plan_name} (${contact.plan_credits} consulta(s))`);
+  if (!contact.plan_renewals) await logEvent(id, null, 'milestone', 'Primeira renovação de plano');
   return broadcast(id);
 }
 
@@ -227,6 +231,9 @@ async function registerConsultation(id, user, body) {
       [id, conversationId, user.id, kind, reference, charge, note]
     );
     if (charge) await client.query('UPDATE contacts SET plan_used = plan_used + 1 WHERE id = $1', [id]);
+    const { rows: cnt } = await client.query('SELECT COUNT(*)::int AS n FROM consultations WHERE contact_id = $1 AND reversed_at IS NULL', [id]);
+    const nth = cnt[0].n;
+    if ([1, 10, 25, 50, 100, 250, 500, 1000].includes(nth)) await logEvent(id, null, 'milestone', nth === 1 ? 'Primeira consulta registrada' : `${nth}ª consulta registrada`, client);
     const { rows: afterRows } = await client.query(`SELECT ${CONTACT_COLS} FROM contacts ct WHERE ct.id = $1`, [id]);
     const after = afterRows[0];
     const label = `${kind}${reference ? ' ' + reference : ''}`;

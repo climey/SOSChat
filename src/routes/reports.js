@@ -373,4 +373,50 @@ router.get('/consultations', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Recorrência dos clientes: faixas atuais, inativos, mais frequentes e taxa de retorno
+router.get('/recurrence', async (req, res, next) => {
+  try {
+    const recurrence = require('../services/recurrence');
+    const th = await recurrence.thresholds();
+    const { from, to, prevFrom, prevTo } = period(req.query);
+    const tierExpr = recurrence.tierSql(th);
+    const tiers = await db.query(
+      `SELECT COUNT(*) FILTER (WHERE tier = 'new')::int AS new, COUNT(*) FILTER (WHERE tier = 'occasional')::int AS occasional,
+              COUNT(*) FILTER (WHERE tier = 'recurrent')::int AS recurrent, COUNT(*) FILTER (WHERE tier = 'loyal')::int AS loyal,
+              COUNT(*) FILTER (WHERE tier IN ('recurrent', 'loyal') AND last_seen_at < NOW() - make_interval(days => ${th.inactive_days}))::int AS inactive,
+              COUNT(*)::int AS total
+         FROM (SELECT ${tierExpr} AS tier, ct.last_seen_at FROM contacts ct WHERE ct.interactions > 0) t`);
+    const newInPeriod = await db.query(
+      `SELECT COUNT(*)::int AS current, (SELECT COUNT(*)::int FROM contacts WHERE first_contact_at BETWEEN $3 AND $4) AS previous
+         FROM contacts WHERE first_contact_at BETWEEN $1 AND $2`, [from, to, prevFrom, prevTo]);
+    const ret = await db.query(
+      `SELECT COUNT(*)::int AS base,
+              COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                                              WHERE c.contact_id = ct.id AND m.direction = 'in' AND m.created_at BETWEEN $1 AND $2))::int AS returned
+         FROM contacts ct WHERE ct.first_contact_at BETWEEN $3 AND $4`, [from, to, prevFrom, prevTo]);
+    const active = await db.query(
+      `SELECT COUNT(DISTINCT c.contact_id)::int AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id
+        WHERE m.direction = 'in' AND m.created_at BETWEEN $1 AND $2`, [from, to]);
+    const inactive = await db.query(
+      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, ct.interactions, ct.active_months, ct.first_contact_at, ct.last_seen_at, ct.plan_name,
+              ${tierExpr} AS tier,
+              (SELECT c.id FROM conversations c WHERE c.contact_id = ct.id ORDER BY c.last_message_at DESC LIMIT 1) AS conversation_id
+         FROM contacts ct WHERE ${recurrence.whereSql('inactive', th)}
+        ORDER BY ct.interactions DESC, ct.last_seen_at ASC LIMIT 40`);
+    const top = await db.query(
+      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, ct.interactions, ct.active_months, ct.first_contact_at, ct.last_seen_at, ct.plan_name,
+              ${tierExpr} AS tier,
+              (SELECT COUNT(*)::int FROM consultations k WHERE k.contact_id = ct.id AND k.reversed_at IS NULL) AS consultations,
+              (SELECT c.id FROM conversations c WHERE c.contact_id = ct.id ORDER BY c.last_message_at DESC LIMIT 1) AS conversation_id
+         FROM contacts ct WHERE ct.interactions > 1
+        ORDER BY ct.interactions DESC, ct.active_months DESC LIMIT 20`);
+    res.json({
+      thresholds: th, tiers: tiers.rows[0],
+      new_clients: newInPeriod.rows[0], active_clients: active.rows[0].n,
+      return_rate: { base: ret.rows[0].base, returned: ret.rows[0].returned, pct: ret.rows[0].base ? Math.round((ret.rows[0].returned / ret.rows[0].base) * 100) : null },
+      inactive: inactive.rows, top: top.rows,
+    });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

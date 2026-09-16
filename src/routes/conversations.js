@@ -44,6 +44,7 @@ router.get('/', async (req, res, next) => {
       accountId: parseId(req.query.account),
       sectorId: parseId(req.query.sector),
       plan: ['with', 'without', 'empty', 'expired'].includes(req.query.plan) ? req.query.plan : null,
+      recurrence: ['new', 'occasional', 'recurrent', 'loyal', 'inactive'].includes(req.query.recurrence) ? req.query.recurrence : null,
       hidden: ['only', 'all'].includes(req.query.hidden) ? req.query.hidden : 'none',
       q: String(req.query.q || '').trim().slice(0, 100) || null,
       limit: req.query.limit,
@@ -65,6 +66,7 @@ router.get('/counts', async (req, res, next) => {
       accountId: parseId(req.query.account),
       sectorId: parseId(req.query.sector),
       plan: ['with', 'without', 'empty', 'expired'].includes(req.query.plan) ? req.query.plan : null,
+      recurrence: ['new', 'occasional', 'recurrent', 'loyal', 'inactive'].includes(req.query.recurrence) ? req.query.recurrence : null,
       hidden: ['only', 'all'].includes(req.query.hidden) ? req.query.hidden : 'none',
       q: String(req.query.q || '').trim().slice(0, 100) || null,
     }));

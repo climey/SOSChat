@@ -1,4 +1,5 @@
 const db = require('../db');
+const recurrence = require('./recurrence');
 
 /**
  * SELECT base. `userParam` é o índice do parâmetro com o id do atendente ($1, $2...), para trazer as
@@ -14,6 +15,7 @@ function selectSql(userParam) {
          COALESCE(cp.pinned, FALSE) AS pinned, COALESCE(cp.muted, FALSE) AS muted, COALESCE(cp.hidden, FALSE) AS hidden,
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id, ct.blocked AS contact_blocked,
          ct.plan_name, ct.plan_credits, ct.plan_expires_at,
+         ct.interactions, ct.active_months, ct.first_contact_at, ct.last_seen_at,
          CASE WHEN ct.plan_credits IS NULL THEN NULL ELSE GREATEST(ct.plan_credits - ct.plan_used, 0) END AS plan_left,
          u.name AS assigned_user_name, u.avatar_media_id AS assigned_user_avatar,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone,
@@ -96,6 +98,7 @@ async function list(filters = {}) {
   else if (filters.plan === 'without') where.push('ct.plan_credits IS NULL');
   else if (filters.plan === 'empty') where.push('ct.plan_credits IS NOT NULL AND ct.plan_used >= ct.plan_credits');
   else if (filters.plan === 'expired') where.push('ct.plan_credits IS NOT NULL AND ct.plan_expires_at < NOW()');
+  if (filters.recurrence) { const rs = recurrence.whereSql(filters.recurrence, await recurrence.thresholds()); if (rs) where.push(rs); }
   if (filters.hidden === 'only') where.push('COALESCE(cp.hidden, FALSE) = TRUE');
   else if (filters.hidden !== 'all') where.push('COALESCE(cp.hidden, FALSE) = FALSE');
   if (filters.tagId) {
@@ -139,6 +142,7 @@ async function counts(filters = {}) {
   else if (filters.plan === 'without') where.push('ct.plan_credits IS NULL');
   else if (filters.plan === 'empty') where.push('ct.plan_credits IS NOT NULL AND ct.plan_used >= ct.plan_credits');
   else if (filters.plan === 'expired') where.push('ct.plan_credits IS NOT NULL AND ct.plan_expires_at < NOW()');
+  if (filters.recurrence) { const rs = recurrence.whereSql(filters.recurrence, await recurrence.thresholds()); if (rs) where.push(rs); }
   if (filters.hidden === 'only') where.push('COALESCE(cp.hidden, FALSE) = TRUE');
   else if (filters.hidden !== 'all') where.push('COALESCE(cp.hidden, FALSE) = FALSE');
   if (filters.tagId) { params.push(filters.tagId); joins += ` JOIN conversation_tags ft ON ft.conversation_id = c.id AND ft.tag_id = $${params.length}`; }

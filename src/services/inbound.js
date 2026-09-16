@@ -1,6 +1,7 @@
 const db = require('../db');
 const realtime = require('../realtime');
 const conversations = require('./conversations');
+const recurrence = require('./recurrence');
 
 const STATUS_RANK = { pending: 0, sent: 1, delivered: 2, read: 3, failed: 4 };
 const PREVIEW_MAX = 120;
@@ -100,6 +101,7 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
       [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]
     );
     await client.query('UPDATE contacts SET last_seen_at = GREATEST(COALESCE(last_seen_at, $2::timestamptz), $2::timestamptz) WHERE id = $1', [contactId, sentAt]);
+    await recurrence.refreshContact(contactId, client);
 
     const conversation = await conversations.getById(conversationId, client);
     return { message: await withQuoted(msgRows[0], client), conversation, isNew };

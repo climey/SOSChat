@@ -76,6 +76,7 @@
         <select class="select" id="account-filter" hidden><option value="">Todos os números</option></select>
         <select class="select" id="sector-filter"><option value="">Todos os setores</option></select>
         <select class="select" id="plan-filter"><option value="">Plano: todos</option><option value="with">Com plano</option><option value="empty">Plano sem saldo</option><option value="expired">Plano vencido</option><option value="without">Sem plano</option></select>
+        <select class="select" id="rec-filter"><option value="">Clientes: todos</option><option value="new">Novos</option><option value="occasional">Ocasionais</option><option value="recurrent">Recorrentes</option><option value="loyal">Fiéis</option><option value="inactive">Recorrentes inativos</option></select>
         <div class="chips">
           <button class="chip" id="filter-all-status" data-status="all">Ver todas (inclui finalizadas)</button>
           <button class="chip" id="filter-hidden">Mostrar ocultas</button>
@@ -217,6 +218,7 @@
           <div class="d-tags-row" id="d-tags-view"></div>
         </section>
         <section class="d-sec" id="d-plan"></section>
+        <section class="d-sec" id="d-hist"></section>
         <button type="button" class="d-row" data-dtoggle="d-notes"><span class="d-ic blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l-1 7 3 3H7l3-3z"/></svg></span><span class="lbl">Observações do contato</span><span class="cnt" id="d-notes-count"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
         <div class="d-sub" id="d-notes" hidden></div>
         <button type="button" class="d-row" data-dtoggle="d-consults"><span class="d-ic red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span><span class="lbl">Consultas realizadas</span><span class="cnt" id="d-consults-count"></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>

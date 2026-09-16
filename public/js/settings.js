@@ -369,7 +369,7 @@
   });
 
   // ---------- Navegação por seção ----------
-  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'alertas'];
+  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'alertas'];
   // ---------- Planos de consultas ----------
   let plans = [];
   let planEditing = null;
@@ -421,6 +421,25 @@
     if (kinds.length <= 1) return toast('Deixe pelo menos um tipo', true);
     if (!confirm(`Remover o tipo "${b.dataset.kind}"?`)) return;
     try { await saveKinds(kinds.filter((k) => k !== b.dataset.kind)); toast('Tipo removido'); }
+    catch (err) { toast(err.message, true); }
+  });
+  async function loadRecurrence() {
+    const { settings } = await api('GET', '/api/settings');
+    $('rec-occasional').value = settings.recurrence_occasional_min ?? 2;
+    $('rec-recurrent').value = settings.recurrence_recurrent_min ?? 5;
+    $('rec-loyal').value = settings.recurrence_loyal_months ?? 6;
+    $('rec-inactive').value = settings.recurrence_inactive_days ?? 45;
+    const ro = me.role !== 'admin';
+    ['rec-occasional', 'rec-recurrent', 'rec-loyal', 'rec-inactive'].forEach((id) => { $(id).disabled = ro; });
+  }
+  $('rec-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+      recurrence_occasional_min: Number($('rec-occasional').value), recurrence_recurrent_min: Number($('rec-recurrent').value),
+      recurrence_loyal_months: Number($('rec-loyal').value), recurrence_inactive_days: Number($('rec-inactive').value),
+    };
+    if (body.recurrence_recurrent_min < body.recurrence_occasional_min) return toast('Recorrente precisa exigir mais dias que Ocasional', true);
+    try { await api('PUT', '/api/settings', body); toast('Regras salvas'); }
     catch (err) { toast(err.message, true); }
   });
   function resetPlanForm() {
@@ -478,7 +497,7 @@
   async function init() {
     me = await SOS.loadMe();
     await loadTags();
-    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds()]);
+    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence()]);
   }
   init().catch((err) => toast(err.message, true));
 })();

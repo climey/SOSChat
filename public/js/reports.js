@@ -302,6 +302,7 @@
     else if (state.tab === 'messages' && d.vol) rows = d.vol.series.map((r) => ({ periodo: fmtBucket(r.bucket, $('group').value), recebidas: r.messages_in, enviadas: r.messages_out }));
     else if (state.tab === 'origin' && d.origin) rows = d.origin.map((r) => ({ ddd: r.ddd, estado: UF_NAME[DDD_UF[r.ddd]] || '', regiao: UF_REGION[DDD_UF[r.ddd]] || '', conversas: r.conversations, clientes: r.contacts }));
     else if (state.tab === 'consultations' && d.cs) rows = d.cs.series.map((r) => ({ dia: fmtBucket(r.bucket, 'day'), consultas: r.total, debitadas: r.charged, avulsas: r.loose }));
+    else if (state.tab === 'clients' && d.clients) rows = d.clients.top.map((x) => ({ cliente: x.name, telefone: x.wa_id, faixa: REC_LABEL[x.tier] || x.tier, dias_com_contato: x.interactions, meses_ativos: x.active_months, consultas: x.consultations, cliente_desde: x.first_contact_at, ultimo_contato: x.last_seen_at }));
     else if (state.tab === 'now' && d.now) rows = d.now.oldest_waiting.map((c) => ({ cliente: c.contact_name || c.profile_name || c.wa_id, responsavel: c.assigned_user_name || '', esperando_s: c.waiting_seconds }));
     if (!rows.length) return toast('Nada para exportar nesta aba', true);
     const blob = new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' });
@@ -342,6 +343,38 @@
     }).join('') : '<div class="empty" style="height:120px">Nenhum cliente precisa de atenção</div>';
   }
 
+  // ---------- Clientes (recorrência) ----------
+  const REC_LABEL = { new: 'Novo', occasional: 'Ocasional', recurrent: 'Recorrente', loyal: 'Fiel' };
+  const REC_COLOR = { new: '#868e96', occasional: '#74c0fc', recurrent: '#40c057', loyal: '#da77f2', inactive: '#f59f00' };
+  const since = (d) => { if (!d) return ''; const days = Math.floor((Date.now() - new Date(d)) / 86400e3); if (days < 1) return 'hoje'; if (days < 30) return `há ${days} d`; const m = Math.floor(days / 30.44); return m < 12 ? `há ${m} m` : `há ${Math.floor(m / 12)} a`; };
+  async function loadClients(q) {
+    const r = await api('GET', `/api/reports/recurrence?${q}`);
+    state.data.clients = r;
+    const t = r.tiers;
+    $('cl-stats').innerHTML = [
+      tile('Clientes novos', fmtN(r.new_clients.current), 'primeiro contato no período', delta(r.new_clients.current, r.new_clients.previous)),
+      tile('Clientes ativos', fmtN(r.active_clients), 'falaram com a SOS no período', ''),
+      tile('Taxa de retorno', r.return_rate.pct === null ? '-' : `${r.return_rate.pct}%`, `${fmtN(r.return_rate.returned)} de ${fmtN(r.return_rate.base)} novos do período anterior voltaram`, ''),
+      tile('Recorrentes', fmtN(t.recurrent + t.loyal), `${fmtN(t.loyal)} fiéis · ${fmtN(t.occasional)} ocasionais`, ''),
+      tile('Recorrentes inativos', fmtN(t.inactive), `sem contato há mais de ${r.thresholds.inactive_days} dias`, ''),
+    ].join('');
+    hbarChart($('cl-tiers'), [
+      { label: 'Fiéis', value: t.loyal, color: REC_COLOR.loyal }, { label: 'Recorrentes', value: t.recurrent, color: REC_COLOR.recurrent },
+      { label: 'Ocasionais', value: t.occasional, color: REC_COLOR.occasional }, { label: 'Novos', value: t.new, color: REC_COLOR.new },
+    ]);
+    $('cl-inactive').innerHTML = r.inactive.length ? r.inactive.map((x) => `<a class="row" href="/?c=${x.conversation_id || ''}" title="Abrir conversa">
+        <span class="who">${esc(x.name)}<small>${esc(formatPhone(x.wa_id))} · ${x.interactions} dias com contato${x.plan_name ? ' · ' + esc(x.plan_name) : ''}</small></span>
+        <span class="rec-chip inactive">${esc(REC_LABEL[x.tier] || x.tier)}</span><span class="muted small">último ${esc(since(x.last_seen_at))}</span></a>`).join('')
+      : '<div class="empty" style="height:120px">Nenhum recorrente inativo</div>';
+    $('cl-top').innerHTML = `<thead><tr><th>Cliente</th><th>Faixa</th><th class="num">Dias com contato</th><th class="num">Meses ativos</th><th class="num">Consultas</th><th>Cliente desde</th><th>Último contato</th></tr></thead>
+      <tbody>${r.top.map((x) => `<tr>
+        <td><a href="/?c=${x.conversation_id || ''}">${esc(x.name)}</a><div class="muted small">${esc(formatPhone(x.wa_id))}</div></td>
+        <td><span class="rec-chip ${x.tier}">${esc(REC_LABEL[x.tier] || x.tier)}</span></td>
+        <td class="num">${fmtN(x.interactions)}</td><td class="num">${fmtN(x.active_months)}</td><td class="num">${fmtN(x.consultations)}</td>
+        <td>${x.first_contact_at ? new Date(x.first_contact_at).toLocaleDateString('pt-BR') : '-'}</td><td>${esc(since(x.last_seen_at))}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="muted">Ainda não há clientes com mais de um dia de contato</td></tr>'}</tbody>`;
+  }
+
   // ---------- Carga ----------
   async function load() {
     const q = params();
@@ -351,6 +384,7 @@
       else if (state.tab === 'messages') await loadMessages(q);
       else if (state.tab === 'origin') await loadOrigin(q);
       else if (state.tab === 'consultations') await loadConsultations(q);
+      else if (state.tab === 'clients') await loadClients(q);
     } catch (err) { toast(err.message, true); }
   }
   async function init() {
@@ -358,7 +392,7 @@
     setPreset('7');
     await loadFilterOptions();
     const tab = location.hash.slice(1);
-    showTab(['overview', 'now', 'agents', 'messages', 'origin', 'consultations'].includes(tab) ? tab : 'overview');
+    showTab(['overview', 'now', 'agents', 'messages', 'origin', 'consultations', 'clients'].includes(tab) ? tab : 'overview');
   }
   init().catch((err) => toast(err.message, true));
 })();
