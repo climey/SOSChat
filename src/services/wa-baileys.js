@@ -99,13 +99,33 @@ function unwrap(message) {
   return m;
 }
 
+/**
+ * Edição de mensagem: o WhatsApp manda um protocolMessage (MESSAGE_EDIT) com o novo conteúdo,
+ * normalmente embrulhado em editedMessage. Devolve o protocolMessage ou null.
+ */
+function findEdit(message) {
+  let m = message;
+  for (let i = 0; i < 4 && m; i++) {
+    const pm = m.protocolMessage;
+    if (pm && pm.editedMessage && (pm.type === proto.Message.ProtocolMessage.Type.MESSAGE_EDIT || pm.type === undefined)) return pm;
+    m = m.editedMessage?.message || m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || null;
+  }
+  return null;
+}
+
 /** Converte uma WAMessage da Baileys para o formato da Cloud API usado por inbound.extractContent. */
 function toCloudMessage(m) {
+  const ts = m.messageTimestamp;
+  const base = { id: m.key.id, timestamp: String(typeof ts === 'object' && ts ? ts.toNumber() : Number(ts) || Math.floor(Date.now() / 1000)) };
+  const edit = findEdit(m.message);
+  if (edit) {
+    const targetId = edit.key?.id || m.key.id;
+    const inner = toCloudMessage({ key: { ...m.key, id: targetId }, message: edit.editedMessage, messageTimestamp: ts });
+    return { ...base, type: 'edit', edit: { message_id: targetId, message: inner && inner.type !== 'edit' ? inner : null } };
+  }
   const message = unwrap(m.message);
   if (!message) return null;
   const type = getContentType(message);
-  const ts = m.messageTimestamp;
-  const base = { id: m.key.id, timestamp: String(typeof ts === 'object' && ts ? ts.toNumber() : Number(ts) || Math.floor(Date.now() / 1000)) };
   const c = message[type] || {};
   // Citação: o WhatsApp manda o id da mensagem citada em contextInfo.stanzaId
   const quotedId = c?.contextInfo?.stanzaId;
@@ -136,6 +156,8 @@ function toCloudMessage(m) {
     case 'albumMessage': // só anuncia um álbum; as imagens chegam em mensagens separadas
       return null; // eventos internos, sem conteúdo para o atendente
     default:
+      if (!type || message.protocolMessage) return null; // só metadados, nada para mostrar
+      console.warn('[baileys] tipo de mensagem não suportado:', type, Object.keys(message).join(','));
       return { ...base, type: 'unsupported' };
   }
 }
@@ -270,6 +292,11 @@ class Session {
         if (!waId) continue;
         const cloudMsg = toCloudMessage(m);
         if (!cloudMsg) continue;
+        if (cloudMsg.type === 'edit') {
+          // Edição (do cliente ou feita no celular): atualiza a mensagem original em vez de criar outra
+          if (cloudMsg.edit.message) await getInbound().handleEdit(cloudMsg.edit.message_id, cloudMsg.edit.message);
+          continue;
+        }
         if (m.key.fromMe) {
           // Espera a rota de envio gravar o wa_message_id; se a mensagem já existe (enviada pela inbox), nada a fazer
           await new Promise((r) => setTimeout(r, ECHO_DELAY_MS));
@@ -297,7 +324,8 @@ class Session {
         // Mensagem editada
         const edited = update?.message?.editedMessage?.message;
         if (edited) {
-          const cloudMsg = toCloudMessage({ key, message: edited, messageTimestamp: update.messageTimestamp });
+          let cloudMsg = toCloudMessage({ key, message: edited, messageTimestamp: update.messageTimestamp });
+          if (cloudMsg && cloudMsg.type === 'edit') cloudMsg = cloudMsg.edit.message;
           if (cloudMsg) await getInbound().handleEdit(key.id, cloudMsg);
           continue;
         }
@@ -572,7 +600,7 @@ function verifySignature() {
 
 module.exports = {
   start, stop, getStatus, getQr, pickAccount,
-  addAccount, renameAccount, setAutoTag, removeAccount,
+  addAccount, renameAccount, setAutoTag, removeAccount, toCloudMessage,
   refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
