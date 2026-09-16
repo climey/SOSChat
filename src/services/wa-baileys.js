@@ -163,6 +163,11 @@ function toCloudMessage(m) {
 }
 
 const MEDIA_TYPES = new Set(['image', 'video', 'audio', 'sticker', 'document']);
+/** Serializa uma mensagem para o log sem despejar bytes de mídia. */
+function describeMessage(message) {
+  const strip = (k, v) => (v && typeof v === 'object' && (v.type === 'Buffer' || ArrayBuffer.isView(v)) ? '<bytes>' : v);
+  try { return JSON.stringify(message, strip).slice(0, 4000); } catch { return String(message); }
+}
 const STATUS_MAP = { 2: 'sent', 3: 'delivered', 4: 'read', 5: 'read', 0: 'failed' };
 
 function acceptChat(key) {
@@ -292,6 +297,10 @@ class Session {
         if (!waId) continue;
         const cloudMsg = toCloudMessage(m);
         if (!cloudMsg) continue;
+        console.log(`[baileys:${this.account.id}] recebida ${cloudMsg.type} ${m.key.id}${m.key.fromMe ? ' (do celular)' : ''} campos=${Object.keys(m.message).join(',')}`);
+        if (cloudMsg.type === 'text' && /indispon|unavailable/i.test(cloudMsg.text?.body || '')) {
+          console.warn(`[baileys:${this.account.id}] texto suspeito de mídia indisponível ${m.key.id}:`, describeMessage(m.message), 'stub=', m.messageStubType, JSON.stringify(m.messageStubParameters || null));
+        }
         if (cloudMsg.type === 'edit') {
           // Edição (do cliente ou feita no celular): atualiza a mensagem original em vez de criar outra
           if (cloudMsg.edit.message) await getInbound().handleEdit(cloudMsg.edit.message_id, cloudMsg.edit.message);

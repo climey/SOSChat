@@ -76,6 +76,23 @@ router.delete('/accounts/:id', requireAdmin, requireMulti, async (req, res, next
 });
 
 // Conversas de números que já foram removidos (ficam sem número associado)
+// Diagnóstico (admin): últimas mensagens cujo texto contém um termo, com o estado da mídia
+router.get('/debug/messages', requireAdmin, async (req, res, next) => {
+  try {
+    const q = String(req.query.q || 'indispon').slice(0, 60);
+    const { rows } = await db.query(
+      `SELECT m.id, m.conversation_id, m.direction, m.type, m.body, m.media_id, m.media_mime, m.wa_message_id, m.status, m.created_at,
+              EXISTS (SELECT 1 FROM media_files f WHERE f.id = m.media_id) AS media_stored,
+              ct.wa_id, c.account_id
+         FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+        WHERE m.body ILIKE $1 OR (m.type = 'audio' AND m.created_at > NOW() - INTERVAL '2 days')
+        ORDER BY m.created_at DESC LIMIT 40`,
+      [`%${q}%`]
+    );
+    res.json({ messages: rows });
+  } catch (err) { next(err); }
+});
+
 router.get('/orphans', requireAdmin, async (req, res, next) => {
   try {
     res.json({ count: await conversations.countOrphans() });

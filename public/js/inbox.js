@@ -13,6 +13,7 @@
     filters: { status: 'inbox', assigned: 'all', tag: '', account: '', sector: '', plan: '', recurrence: '', q: '', hidden: 'none' },
     plans: [], // catálogo de planos de consultas
     contact: null, // ficha completa do contato da conversa aberta
+    contactNotes: [], // observações fixadas do contato da conversa aberta
     accounts: new Map(), // id -> status do número (só provedor baileys)
     prefs: new Map(), // conversa id -> { pinned, muted, hidden } deste atendente
     presence: new Map(), // user id -> { online, availability }
@@ -210,6 +211,7 @@
               ${c.tags.map((t) => `<span class="tag" style="color:${esc(t.color)}"><i class="dot"></i>${esc(t.name)}</span>`).join('')}
               ${planChip(c)}
               ${recChip(c)}
+              ${c.notes_count > 0 ? `<span class="obs-pin" title="${c.notes_count} observação(ões) fixada(s) na ficha">${PIN_ICON}</span>` : ''}
               ${c.status === 'resolved' ? '<span class="tag">Finalizada</span>' : ''}
               ${c.status === 'open' && !c.attended ? '<span class="tag new">Na fila</span>' : ''}
               ${c.scheduled_count > 0 ? `<span class="chip-soft" title="${c.scheduled_count} mensagem(ns) agendada(s)">⏰ ${c.scheduled_count}</span>` : ''}
@@ -413,6 +415,7 @@
     $('schedule-badge').textContent = c.scheduled_count || 0;
     renderBanner();
     renderPlanHint();
+    renderObsStrip();
     if (Number($('debit-prompt').dataset.conv) !== c.id) $('debit-prompt').hidden = true;
   }
 
@@ -1120,6 +1123,7 @@
       const { contact, conversations } = await api('GET', `/api/contacts/${c.contact_id}`);
       if (contactCardId !== c.contact_id) return;
       state.contact = contact;
+      if (contact.notes_count > 0) loadContactNotes(contact.id); else { state.contactNotes = []; renderObsStrip(); }
       renderContactCard(contact);
       if (contact.notes_count > 0 && !dOpen['d-notes'] && autoOpenedNotesFor !== contact.id) { autoOpenedNotesFor = contact.id; document.querySelector('[data-dtoggle="d-notes"]').click(); }
       const others = conversations.filter((x) => x.id !== c.id);
@@ -1867,6 +1871,32 @@
     $('msg-search-input').focus();
     $('msg-search-input').select();
   }
+  /** Faixa fixa no topo da conversa com as observações da ficha, para ninguém precisar abrir o painel. */
+  function renderObsStrip() {
+    const c = current();
+    const box = $('obs-strip');
+    if (!c || !(c.notes_count > 0)) { box.hidden = true; return; }
+    const notes = state.contact && state.contact.id === c.contact_id ? state.contactNotes : [];
+    const shown = notes.slice(0, 2);
+    const more = Math.max(0, (notes.length || c.notes_count) - shown.length);
+    box.innerHTML = `${PIN_ICON}<div class="obs-text">${shown.length
+      ? shown.map((n) => `<span><b>${esc(n.body)}</b><small> · ${esc(n.user_name || 'Sistema')}</small></span>`).join('')
+      : `<span>${c.notes_count} observação${c.notes_count > 1 ? 'ões' : ''} fixada${c.notes_count > 1 ? 's' : ''} na ficha</span>`}${more ? `<span class="muted">+${more} observação${more > 1 ? 'ões' : ''}</span>` : ''}</div><span class="obs-open">Ver ficha</span>`;
+    box.hidden = false;
+  }
+  $('obs-strip').addEventListener('click', () => {
+    setDetailsOpen(true);
+    document.querySelector('#d-tabs button[data-dtab="contact"]').click();
+    if (!dOpen['d-notes']) document.querySelector('[data-dtoggle="d-notes"]').click();
+    document.getElementById('d-notes').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  async function loadContactNotes(contactId) {
+    try {
+      const { notes } = await api('GET', `/api/contacts/${contactId}/notes`);
+      if (state.currentConv && state.currentConv.contact_id === contactId) { state.contactNotes = notes; renderObsStrip(); }
+    } catch { /* ignora */ }
+  }
+
   /** Oculta a janela do chat (volta para a tela vazia) sem mudar nada na conversa. */
   function closeChat() {
     if (!state.currentId) return;
@@ -1884,6 +1914,8 @@
     els.details.hidden = true;
     $('debit-prompt').hidden = true;
     $('plan-hint').hidden = true;
+    $('obs-strip').hidden = true;
+    state.contactNotes = [];
     $('tag-popup').hidden = true;
     $('sector-popup').hidden = true;
     $('plan-menu').hidden = true;
@@ -2436,11 +2468,12 @@
         c.contact_name = contact.name; c.contact_blocked = contact.blocked;
         c.plan_name = contact.plan_name; c.plan_credits = contact.plan_credits; c.plan_left = contact.plan_left; c.plan_expires_at = contact.plan_expires_at;
         c.interactions = contact.interactions; c.active_months = contact.active_months; c.first_contact_at = contact.first_contact_at; c.last_seen_at = contact.last_seen_at;
+        c.notes_count = contact.notes_count;
       };
       for (const c of state.conversations) if (c.contact_id === contact.id) { apply(c); touched = true; }
       if (state.currentConv && state.currentConv.contact_id === contact.id) {
         apply(state.currentConv);
-        if (contact.plan_left !== undefined) { state.contact = contact; renderContactCard(contact); refreshContactSubs(); }
+        if (contact.plan_left !== undefined) { state.contact = contact; renderContactCard(contact); refreshContactSubs(); if (contact.notes_count > 0) loadContactNotes(contact.id); else { state.contactNotes = []; } }
         renderChat();
         renderDetails();
       }
