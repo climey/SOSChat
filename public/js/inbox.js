@@ -653,7 +653,7 @@
     const m = state.messages.find((x) => x.id === id);
     if (!m) return;
     if (act.dataset.msgAct === 'reply') setReply(m);
-    if (act.dataset.msgAct === 'react') openEmojiPicker({ forReaction: id, anchor: act });
+    if (act.dataset.msgAct === 'react') { e.stopPropagation(); openEmojiPicker({ forReaction: id, anchor: act }); }
     if (act.dataset.msgAct === 'pin') pinNoteToContact(m);
     if (act.dataset.msgAct === 'edit') startEdit(m);
     if (act.dataset.msgAct === 'delete') deleteMessage(m);
@@ -820,7 +820,7 @@
     if (emojiTarget) { const id = emojiTarget; closeEmojiPicker(); await sendReaction(id, em.dataset.emoji); }
     else insertAtCaret(em.dataset.emoji);
   });
-  document.addEventListener('click', (e) => { if (!e.target.closest('#emoji-picker') && !e.target.closest('#btn-emoji')) closeEmojiPicker(); });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#emoji-picker') && !e.target.closest('#btn-emoji') && !e.target.closest('[data-msg-act="react"]')) closeEmojiPicker(); });
 
   // ---------- Respostas rápidas ----------
   let qrIndex = 0;

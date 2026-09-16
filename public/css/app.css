@@ -463,11 +463,11 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 /* Acoes ficam fora do balao, no canto superior: a direita das mensagens do cliente e a esquerda das suas */
 .msg-row { position: relative; }
 .msg-actions { position: absolute; top: 0; display: none; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px; z-index: 3; box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
-.msg-actions::before { content: ""; position: absolute; inset: -6px -10px; }
+.msg-actions::before { content: ""; position: absolute; inset: -6px -10px; z-index: 0; }
 .msg-row.in .msg-actions { left: calc(100% + 6px); }
 .msg-row.out .msg-actions, .msg-row.note .msg-actions { right: calc(100% + 6px); }
 .msg-row:hover .msg-actions { display: flex; }
-.msg-actions button { width: 26px; height: 26px; border: none; background: transparent; color: var(--muted); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.msg-actions button { position: relative; z-index: 1; width: 26px; height: 26px; border: none; background: transparent; color: var(--muted); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
 .msg-actions button:hover { background: var(--surface-3); color: var(--text); }
 .msg-actions button svg { width: 14px; height: 14px; }
 .reactions { display: flex; gap: 4px; margin-top: 4px; }
