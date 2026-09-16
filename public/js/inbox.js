@@ -1745,6 +1745,31 @@
     $('msg-search-input').focus();
     $('msg-search-input').select();
   }
+  /** Oculta a janela do chat (volta para a tela vazia) sem mudar nada na conversa. */
+  function closeChat() {
+    if (!state.currentId) return;
+    if (typingSocket && state.composeMode !== 'note') typingSocket.emit('typing', { conversation_id: state.currentId, active: false });
+    if (state.search.open) closeSearch();
+    clearReply();
+    clearAttachment();
+    state.currentId = null;
+    state.currentConv = null;
+    state.contact = null;
+    state.messages = [];
+    els.messages.innerHTML = '';
+    els.chatPanel.hidden = true;
+    els.chatEmpty.hidden = false;
+    els.details.hidden = true;
+    $('debit-prompt').hidden = true;
+    $('plan-hint').hidden = true;
+    $('tag-popup').hidden = true;
+    $('sector-popup').hidden = true;
+    $('plan-menu').hidden = true;
+    history.replaceState(null, '', location.pathname);
+    renderList();
+  }
+  $('btn-close-chat').addEventListener('click', closeChat);
+
   function closeSearch() {
     Object.assign(state.search, { open: false, q: '', hits: [], idx: -1 });
     $('msg-search').hidden = true;
