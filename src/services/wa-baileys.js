@@ -429,6 +429,20 @@ class Session {
     await this.sock.sendMessage(jid, { react: { text: emoji || '', key: { remoteJid: jid, fromMe: Boolean(fromMe), id: waMessageId } } });
   }
 
+  /** Edita o texto de uma mensagem enviada (o WhatsApp aceita até 15 minutos depois do envio). */
+  async editMessage(to, waMessageId, text) {
+    if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado.`);
+    const jid = toJid(to);
+    await this.sock.sendMessage(jid, { text, edit: { remoteJid: jid, fromMe: true, id: waMessageId } });
+  }
+
+  /** Apaga para todos uma mensagem enviada. */
+  async deleteMessage(to, waMessageId) {
+    if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado.`);
+    const jid = toJid(to);
+    await this.sock.sendMessage(jid, { delete: { remoteJid: jid, fromMe: true, id: waMessageId } });
+  }
+
   /** Envia mídia. file: { buffer, mimetype, filename, caption, kind: image|video|audio|document } */
   async sendMedia(to, file) {
     if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado. Escaneie o QR code em Configurações.`);
@@ -578,6 +592,12 @@ function isConfigured() {
 function sendText(accountId, to, body, opts) {
   return getSession(accountId).sendText(to, body, opts);
 }
+function editMessage(accountId, to, waMessageId, text) {
+  return getSession(accountId).editMessage(to, waMessageId, text);
+}
+function deleteMessage(accountId, to, waMessageId) {
+  return getSession(accountId).deleteMessage(to, waMessageId);
+}
 
 function sendReaction(accountId, to, waMessageId, fromMe, emoji) {
   return getSession(accountId).sendReaction(to, waMessageId, fromMe, emoji);
@@ -613,5 +633,5 @@ module.exports = {
   refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
-  isConfigured, sendText, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature,
+  isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature,
 };

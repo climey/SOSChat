@@ -182,4 +182,63 @@ async function addNote(conversationId, user, body) {
   return { message, conversation: conv };
 }
 
-module.exports = { sendText, addNote, react, transfer, loadQuoted, touchAfterSend, resolveAccount, SendError, MESSAGE_MAX };
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+const DELETE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+async function ownMessage(conversationId, user, messageId) {
+  const conv = await conversations.getById(conversationId);
+  if (!conv) throw new SendError(404, 'Conversa não encontrada');
+  const { rows } = await db.query('SELECT * FROM messages WHERE id = $1 AND conversation_id = $2', [messageId, conversationId]);
+  const m = rows[0];
+  if (!m) throw new SendError(404, 'Mensagem não encontrada');
+  if (m.direction !== 'out') throw new SendError(400, 'Só mensagens enviadas pela equipe podem ser alteradas');
+  if (m.deleted_at) throw new SendError(400, 'Esta mensagem já foi apagada');
+  if (m.sender_user_id && m.sender_user_id !== user.id && user.role !== 'admin') throw new SendError(403, 'Só quem enviou (ou um admin) pode alterar esta mensagem');
+  return { conv, m };
+}
+
+/** Edita o texto de uma mensagem enviada; o WhatsApp aceita até 15 minutos depois do envio. */
+async function editMessage(conversationId, user, messageId, body) {
+  body = String(body || '').trim();
+  if (!body) throw new SendError(400, 'Mensagem vazia');
+  if (body.length > MESSAGE_MAX) throw new SendError(400, `Mensagem excede ${MESSAGE_MAX} caracteres`);
+  const { conv, m } = await ownMessage(conversationId, user, messageId);
+  if (m.type === 'note') {
+    const { rows } = await db.query('UPDATE messages SET body = $2, edited_at = NOW() WHERE id = $1 RETURNING *', [m.id, body]);
+    realtime.broadcast('message:updated', rows[0]);
+    return rows[0];
+  }
+  if (m.type !== 'text') throw new SendError(400, 'Só mensagens de texto podem ser editadas');
+  if (!m.wa_message_id || m.status === 'failed' || m.status === 'pending') throw new SendError(400, 'Esta mensagem ainda não foi entregue ao WhatsApp');
+  if (Date.now() - new Date(m.created_at).getTime() > EDIT_WINDOW_MS) throw new SendError(400, 'O WhatsApp só permite editar até 15 minutos depois do envio');
+  if (body === m.body) return m;
+  const accountId = await resolveAccount(conv);
+  if (whatsapp.multiAccount && !accountId) throw new SendError(502, 'Nenhum número de WhatsApp conectado.');
+  try { await whatsapp.editMessage(accountId, conv.wa_id, m.wa_message_id, body); }
+  catch (err) { throw new SendError(502, `Não foi possível editar: ${err.message}`); }
+  const updated = await require('./inbound').handleEdit(m.wa_message_id, { type: 'text', text: { body } });
+  return updated || m;
+}
+
+/** Apaga para todos uma mensagem enviada (ou apaga uma nota interna). */
+async function deleteMessage(conversationId, user, messageId) {
+  const { conv, m } = await ownMessage(conversationId, user, messageId);
+  const inbound = require('./inbound');
+  if (m.type === 'note' || !m.wa_message_id || m.status === 'failed') {
+    const { rows } = await db.query(
+      `UPDATE messages SET deleted_at = NOW(), body = $2, media_id = NULL WHERE id = $1 RETURNING *`,
+      [m.id, m.type === 'note' ? '[Nota apagada]' : '[Mensagem apagada]']
+    );
+    realtime.broadcast('message:updated', rows[0]);
+    return rows[0];
+  }
+  if (Date.now() - new Date(m.created_at).getTime() > DELETE_WINDOW_MS) throw new SendError(400, 'O WhatsApp só permite apagar para todos até 2 dias depois do envio');
+  const accountId = await resolveAccount(conv);
+  if (whatsapp.multiAccount && !accountId) throw new SendError(502, 'Nenhum número de WhatsApp conectado.');
+  try { await whatsapp.deleteMessage(accountId, conv.wa_id, m.wa_message_id); }
+  catch (err) { throw new SendError(502, `Não foi possível apagar: ${err.message}`); }
+  const updated = await inbound.handleRevoke(m.wa_message_id);
+  return updated || m;
+}
+
+module.exports = { sendText, addNote, react, transfer, editMessage, deleteMessage, loadQuoted, touchAfterSend, resolveAccount, SendError, MESSAGE_MAX };

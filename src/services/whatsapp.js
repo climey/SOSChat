@@ -23,6 +23,8 @@ module.exports = {
   getStatus,
   pickAccount: () => (isBaileys ? provider.pickAccount() : null),
   sendText: (accountId, to, body, opts) => (isBaileys ? provider.sendText(accountId, to, body, opts) : provider.sendText(to, body, opts)),
+  editMessage: (accountId, to, waMessageId, text) => (isBaileys ? provider.editMessage(accountId, to, waMessageId, text) : provider.editMessage(to, waMessageId, text)),
+  deleteMessage: (accountId, to, waMessageId) => (isBaileys ? provider.deleteMessage(accountId, to, waMessageId) : provider.deleteMessage(to, waMessageId)),
   sendReaction: (accountId, to, waMessageId, fromMe, emoji) => (isBaileys ? provider.sendReaction(accountId, to, waMessageId, fromMe, emoji) : provider.sendReaction(to, waMessageId, fromMe, emoji)),
   markAsRead: (accountId, waMessageId, waId) => (isBaileys ? provider.markAsRead(accountId, waMessageId, waId) : provider.markAsRead(waMessageId)),
   sendMedia: (accountId, to, file) => (isBaileys ? provider.sendMedia(accountId, to, file) : provider.sendMedia(to, file)),

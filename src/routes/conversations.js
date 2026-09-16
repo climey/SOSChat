@@ -255,6 +255,28 @@ router.post('/:id/messages/:mid/react', async (req, res, next) => {
   }
 });
 
+// Editar o texto de uma mensagem enviada ({ body }) e apagar para todos
+router.patch('/:id/messages/:mid', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id), mid = parseId(req.params.mid);
+    if (!id || !mid) return res.status(404).json({ error: 'Mensagem não encontrada' });
+    res.json({ message: await outbound.editMessage(id, req.user, mid, req.body?.body) });
+  } catch (err) {
+    if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+router.delete('/:id/messages/:mid', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id), mid = parseId(req.params.mid);
+    if (!id || !mid) return res.status(404).json({ error: 'Mensagem não encontrada' });
+    res.json({ message: await outbound.deleteMessage(id, req.user, mid) });
+  } catch (err) {
+    if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 // Transferir para outro atendente ({ user_id, note })
 router.post('/:id/transfer', async (req, res, next) => {
   try {

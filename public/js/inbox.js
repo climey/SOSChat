@@ -381,6 +381,7 @@
     state.messages = messages;
     if (state.search.open) closeSearch();
     clearReply();
+    cancelEdit();
     loadContactCard(conversation);
     upsertConversation(conversation);
     renderChat();
@@ -496,10 +497,16 @@
         ? `<div class="sender">${isNote ? 'Nota interna · ' : ''}${esc(m.sender_name)}</div>` : '';
       const dimmed = state.search.q && !state.search.hits.includes(m.id) ? 'dimmed' : '';
       const canAct = !isNote && !m.deleted_at && m.wa_message_id;
+      const mine = m.direction === 'out' && !m.deleted_at && (!m.sender_user_id || m.sender_user_id === state.me.id || state.me.role === 'admin');
+      const age = Date.now() - new Date(m.created_at).getTime();
+      const canEdit = mine && !isNote && m.type === 'text' && m.wa_message_id && m.status !== 'failed' && m.status !== 'pending' && age <= EDIT_WINDOW_MS;
+      const canDelete = mine && (isNote || !m.wa_message_id || age <= DELETE_WINDOW_MS);
       const actions = canAct ? `<div class="msg-actions">
           <button type="button" data-msg-act="reply" title="Responder">${REPLY_ICON}</button>
           <button type="button" data-msg-act="react" title="Reagir">😊</button>
-        </div>` : (isNote && !m.deleted_at && m.body ? `<div class="msg-actions"><button type="button" data-msg-act="pin" title="Fixar na ficha do contato (vira observação permanente)">📌</button></div>` : '');
+          ${canEdit ? `<button type="button" data-msg-act="edit" title="Editar (até 15 min depois do envio)">${EDIT_ICON}</button>` : ''}
+          ${canDelete ? `<button type="button" data-msg-act="delete" title="Apagar para todos">${TRASH_ICON}</button>` : ''}
+        </div>` : (isNote && !m.deleted_at && m.body ? `<div class="msg-actions"><button type="button" data-msg-act="pin" title="Fixar na ficha do contato (vira observação permanente)">📌</button>${mine ? `<button type="button" data-msg-act="edit" title="Editar nota">${EDIT_ICON}</button><button type="button" data-msg-act="delete" title="Apagar nota">${TRASH_ICON}</button>` : ''}</div>` : '');
       const stickerCls = m.type === 'sticker' && m.media_id && !m.deleted_at ? 'sticker' : '';
       return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed} ${stickerCls}" data-id="${m.id}">
         <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : ''}
@@ -616,7 +623,56 @@
     if (act.dataset.msgAct === 'reply') setReply(m);
     if (act.dataset.msgAct === 'react') openEmojiPicker({ forReaction: id, anchor: act });
     if (act.dataset.msgAct === 'pin') pinNoteToContact(m);
+    if (act.dataset.msgAct === 'edit') startEdit(m);
+    if (act.dataset.msgAct === 'delete') deleteMessage(m);
   });
+  const EDIT_WINDOW_MS = 15 * 60 * 1000;
+  const DELETE_WINDOW_MS = 48 * 60 * 60 * 1000;
+  const EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+  const TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+  /** Edição no próprio compositor, como no WhatsApp: o texto atual entra na caixa e Enter salva. */
+  function startEdit(m) {
+    clearReply();
+    clearAttachment();
+    setComposeMode(m.type === 'note' ? 'note' : 'message');
+    state.editing = m;
+    const p = $('edit-preview');
+    p.innerHTML = `<div class="info"><div class="qname">${m.type === 'note' ? 'Editando nota interna' : 'Editando mensagem'} <small class="muted">· Enter salva · Esc cancela</small></div><div class="qbody">${esc(m.body || '')}</div></div><button type="button" class="icon-btn" id="edit-cancel" title="Cancelar edição">✕</button>`;
+    p.hidden = false;
+    $('edit-cancel').addEventListener('click', cancelEdit);
+    els.composeText.value = m.body || '';
+    els.composeSend.textContent = 'Salvar';
+    autosize();
+    els.composeText.focus();
+    els.composeText.setSelectionRange(els.composeText.value.length, els.composeText.value.length);
+  }
+  function cancelEdit() {
+    if (!state.editing) return;
+    state.editing = null;
+    $('edit-preview').hidden = true;
+    $('edit-preview').innerHTML = '';
+    els.composeText.value = '';
+    els.composeSend.textContent = 'Enviar';
+    autosize();
+  }
+  async function saveEdit(text) {
+    const m = state.editing;
+    if (!m) return;
+    if (!text) { toast('A mensagem não pode ficar vazia', true); return; }
+    els.composeSend.disabled = true;
+    try {
+      await api('PATCH', `/api/conversations/${m.conversation_id}/messages/${m.id}`, { body: text });
+      cancelEdit();
+      toast('Mensagem editada');
+    } catch (err) { toast(err.message, true); }
+    finally { els.composeSend.disabled = false; els.composeText.focus(); }
+  }
+  async function deleteMessage(m) {
+    const isNote = m.type === 'note';
+    if (!confirm(isNote ? 'Apagar esta nota interna?' : 'Apagar esta mensagem para todos? O cliente verá "Mensagem apagada".')) return;
+    try { await api('DELETE', `/api/conversations/${m.conversation_id}/messages/${m.id}`); toast(isNote ? 'Nota apagada' : 'Mensagem apagada para todos'); }
+    catch (err) { toast(err.message, true); }
+  }
   function setReply(m) {
     state.reply = m;
     const p = $('reply-preview');
@@ -1102,13 +1158,8 @@
   }
   const fmtCpf = (v) => v.length === 11 ? v.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4') : v.length === 14 ? v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : v;
 
-  const FIELDS = [
-    { key: 'cpf', label: 'CPF / CNPJ', inputmode: 'numeric', more: true },
-    { key: 'email', label: 'E-mail', type: 'email', more: true },
-  ];
   let contactCardId = null;
   const dOpen = { 'd-notes': false, 'd-purchases': false, 'd-consults': false, 'd-log': false };
-  let fieldsExpanded = false;
   let autoOpenedNotesFor = null;
 
   async function loadContactCard(c) {
@@ -1140,7 +1191,6 @@
     renderHistory(ct);
     renderKinds(ct);
     $('d-purchases-count').textContent = ct.purchases_count ? `(${ct.purchases_count})` : '';
-    renderFields(ct);
     renderBlockButton(ct.blocked);
   }
   function renderBlockButton(blocked) {
@@ -1405,65 +1455,6 @@
     if (b.dataset.hint === 'reply') { const q = state.quickReplies.find((x) => x.shortcut === 'renovar'); if (q) { setComposeMode('message'); applyQuick(q.id); } }
     else renewPlan({ id: c.contact_id, plan_name: c.plan_name, plan_credits: c.plan_credits });
   });
-
-  // ---- Campos da ficha ----
-  function fieldValue(ct, f) {
-    const v = ct[f.key];
-    if (!v) return '';
-    if (f.key === 'birthdate') return new Date(String(v).slice(0, 10) + 'T00:00:00').toLocaleDateString('pt-BR');
-    if (f.key === 'cpf') return fmtCpf(String(v));
-    return String(v);
-  }
-  function renderFields(ct) {
-    const rows = FIELDS.filter((f) => fieldsExpanded || !f.more || ct[f.key]).map((f) => `
-      <div class="d-field" data-key="${f.key}">
-        <div class="d-field-label">${esc(f.label)}</div>
-        ${ct[f.key] ? `<div class="d-field-value ${f.textarea ? 'multi' : ''}" title="Clique para editar">${esc(fieldValue(ct, f))}</div>` : '<button type="button" class="d-field-add">Adicionar</button>'}
-      </div>`).join('');
-    $('d-fields').innerHTML = rows;
-    const hidden = FIELDS.filter((f) => f.more && !ct[f.key]);
-    $('d-more').hidden = !fieldsExpanded && !hidden.length;
-    $('d-more').innerHTML = fieldsExpanded ? `${ARROW_UP}Ver menos campos` : `${ARROW_DOWN}Ver mais campos (${hidden.map((f) => f.label).join(', ')})`;
-  }
-  $('d-more').addEventListener('click', () => { fieldsExpanded = !fieldsExpanded; if (state.contact) renderFields(state.contact); });
-  $('d-fields').addEventListener('click', (e) => {
-    const row = e.target.closest('.d-field:not(.ro)');
-    if (!row || row.querySelector('.d-field-edit')) return;
-    if (!e.target.closest('.d-field-value') && !e.target.closest('.d-field-add')) return;
-    editField(row);
-  });
-  function editField(row) {
-    const f = FIELDS.find((x) => x.key === row.dataset.key);
-    const ct = state.contact;
-    if (!f || !ct) return;
-    const raw = ct[f.key] ? (f.key === 'birthdate' ? String(ct[f.key]).slice(0, 10) : String(ct[f.key])) : '';
-    const el = document.createElement(f.textarea ? 'textarea' : 'input');
-    el.className = (f.textarea ? 'textarea' : 'input') + ' d-field-edit';
-    if (!f.textarea) el.type = f.type || 'text';
-    if (f.inputmode) el.inputMode = f.inputmode;
-    if (f.textarea) el.rows = 3;
-    el.value = raw;
-    el.placeholder = f.label;
-    row.querySelector('.d-field-value, .d-field-add').replaceWith(el);
-    el.focus();
-    let done = false;
-    const finish = async (save) => {
-      if (done) return;
-      done = true;
-      if (!save || el.value.trim() === raw.trim()) { renderFields(ct); return; }
-      try {
-        const { contact } = await api('PATCH', `/api/contacts/${ct.id}`, { [f.key]: el.value });
-        state.contact = contact;
-        renderContactCard(contact);
-        toast('Ficha salva');
-      } catch (err) { toast(err.message, true); renderFields(ct); }
-    };
-    el.addEventListener('blur', () => finish(true));
-    el.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
-      if (ev.key === 'Enter' && !f.textarea) { ev.preventDefault(); el.blur(); }
-    });
-  }
 
   // ---- Observações, consultas e log (carregados ao abrir) ----
   els.details.addEventListener('click', (e) => {
@@ -1897,6 +1888,7 @@
     if (typingSocket && state.composeMode !== 'note') typingSocket.emit('typing', { conversation_id: state.currentId, active: false });
     if (state.search.open) closeSearch();
     clearReply();
+    cancelEdit();
     clearAttachment();
     state.currentId = null;
     state.currentConv = null;
@@ -2222,6 +2214,7 @@
     const text = els.composeText.value.trim();
     const id = state.currentId;
     if (!id) return;
+    if (state.editing) { await saveEdit(text); return; }
     if (attach.file && state.composeMode !== 'note') { await sendAttachment(id, text); return; }
     if (!text) return;
     els.composeSend.disabled = true;
@@ -2246,6 +2239,7 @@
   });
   els.composeText.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); els.compose.requestSubmit(); }
+    if (e.key === 'Escape' && state.editing) { e.preventDefault(); cancelEdit(); }
   });
   function autosize() {
     els.composeText.style.height = 'auto';

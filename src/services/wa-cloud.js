@@ -132,4 +132,13 @@ function getStatus() {
   return { provider: 'cloud', status: isConfigured() ? 'connected' : 'mock', me: wa.phoneNumberId || null };
 }
 
-module.exports = { isConfigured, sendText, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature, getStatus };
+async function editMessage(to, waMessageId, text) {
+  if (!isConfigured()) { console.log(`[whatsapp:mock] editar ${waMessageId} -> ${text}`); return; }
+  throw new Error('A API oficial da Meta não permite editar mensagens');
+}
+async function deleteMessage(to, waMessageId) {
+  if (!isConfigured()) { console.log(`[whatsapp:mock] apagar ${waMessageId}`); return; }
+  throw new Error('A API oficial da Meta não permite apagar mensagens');
+}
+
+module.exports = { isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature, getStatus };

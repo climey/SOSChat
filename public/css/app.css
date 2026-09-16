@@ -862,3 +862,6 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .obs-strip .obs-open { font-size: 12px; color: var(--amber); white-space: nowrap; text-decoration: underline; }
 .obs-pin { display: inline-flex; align-items: center; color: var(--amber); }
 .obs-pin svg { width: 13px; height: 13px; }
+.edit-preview { border-left-color: var(--amber); }
+.edit-preview .qname { color: #ffd43b; }
+.msg-row.deleted .msg-actions { display: none; }
