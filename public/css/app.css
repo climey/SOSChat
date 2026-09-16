@@ -843,3 +843,11 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .d-item.buy { border-left-color: var(--green); }
 .d-item.log.purchase { border-left-color: var(--green); }
 .kind-matrix td.num.hot { color: #ff8787; font-weight: 700; }
+/* Campo de senha com botao de mostrar/ocultar */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap .input { width: 100%; padding-right: 40px; }
+.inline-form .pw-wrap { flex: 1; min-width: 160px; }
+.pw-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; border: none; background: transparent; color: var(--muted); border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; }
+.pw-toggle:hover { color: var(--text); background: var(--surface-2); }
+.pw-toggle svg { width: 17px; height: 17px; }
+.pw-toggle.on { color: #ff8787; }

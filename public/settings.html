@@ -108,7 +108,7 @@
               <form class="inline-form" id="user-form" data-admin-only>
                 <input class="input" id="user-name" placeholder="Nome" required>
                 <input class="input" id="user-email" type="email" placeholder="E-mail" required>
-                <input class="input" id="user-password" type="password" placeholder="Senha (mín. 8)" minlength="8" required autocomplete="new-password">
+                <span class="pw-wrap"><input class="input" id="user-password" type="password" placeholder="Senha (mín. 8)" minlength="8" required autocomplete="new-password"><button type="button" class="pw-toggle" title="Mostrar senha" aria-label="Mostrar senha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></span>
                 <select class="select" id="user-role"><option value="agent">Atendente</option><option value="admin">Admin</option></select>
                 <button class="btn btn-primary" type="submit">Adicionar</button>
               </form>
@@ -226,7 +226,7 @@
   <form class="modal" id="pw-form">
     <h3>Redefinir senha</h3>
     <p class="muted" id="pw-user"></p>
-    <div class="field"><label class="label">Nova senha</label><input class="input" id="pw-value" type="password" minlength="8" required autocomplete="new-password"></div>
+    <div class="field"><label class="label">Nova senha</label><span class="pw-wrap"><input class="input" id="pw-value" type="password" minlength="8" required autocomplete="new-password"><button type="button" class="pw-toggle" title="Mostrar senha" aria-label="Mostrar senha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></span></div>
     <div class="actions">
       <button type="button" class="btn" id="pw-cancel">Cancelar</button>
       <button type="submit" class="btn btn-primary">Salvar</button>
