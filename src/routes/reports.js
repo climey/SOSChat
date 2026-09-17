@@ -409,9 +409,9 @@ router.get('/recurrence', async (req, res, next) => {
     const tiers = await db.query(
       `SELECT COUNT(*) FILTER (WHERE tier = 'new')::int AS new, COUNT(*) FILTER (WHERE tier = 'occasional')::int AS occasional,
               COUNT(*) FILTER (WHERE tier = 'recurrent')::int AS recurrent, COUNT(*) FILTER (WHERE tier = 'loyal')::int AS loyal,
-              COUNT(*) FILTER (WHERE tier IN ('recurrent', 'loyal') AND last_seen_at < NOW() - make_interval(days => ${th.inactive_days}))::int AS inactive,
+              COUNT(*) FILTER (WHERE inactive)::int AS inactive,
               COUNT(*)::int AS total
-         FROM (SELECT ${tierExpr} AS tier, ct.last_seen_at FROM contacts ct WHERE ct.interactions > 0) t`);
+         FROM (SELECT ${tierExpr} AS tier, ${recurrence.whereSql('inactive', th)} AS inactive FROM contacts ct WHERE ct.interactions > 0 OR ct.credits_bought > 0) t`);
     const newInPeriod = await db.query(
       `SELECT COUNT(*)::int AS current, (SELECT COUNT(*)::int FROM contacts WHERE first_contact_at BETWEEN $3 AND $4) AS previous
          FROM contacts WHERE first_contact_at BETWEEN $1 AND $2`, [from, to, prevFrom, prevTo]);
@@ -424,18 +424,18 @@ router.get('/recurrence', async (req, res, next) => {
       `SELECT COUNT(DISTINCT c.contact_id)::int AS n FROM messages m JOIN conversations c ON c.id = m.conversation_id
         WHERE m.direction = 'in' AND m.created_at BETWEEN $1 AND $2`, [from, to]);
     const inactive = await db.query(
-      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, ct.interactions, ct.active_months, ct.first_contact_at, ct.last_seen_at, ct.plan_name,
+      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, ct.credits_bought, ct.purchases_count, ct.first_purchase_at, ct.last_purchase_at, ct.plan_name,
               ${tierExpr} AS tier,
               (SELECT c.id FROM conversations c WHERE c.contact_id = ct.id ORDER BY c.last_message_at DESC LIMIT 1) AS conversation_id
          FROM contacts ct WHERE ${recurrence.whereSql('inactive', th)}
-        ORDER BY ct.interactions DESC, ct.last_seen_at ASC LIMIT 40`);
+        ORDER BY ct.credits_bought DESC, ct.last_purchase_at ASC LIMIT 40`);
     const top = await db.query(
-      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, ct.interactions, ct.active_months, ct.first_contact_at, ct.last_seen_at, ct.plan_name,
+      `SELECT ct.id, COALESCE(ct.name, ct.profile_name, ct.wa_id) AS name, ct.wa_id, ct.credits_bought, ct.purchases_count, ct.first_purchase_at, ct.last_purchase_at, ct.plan_name,
               ${tierExpr} AS tier,
               (SELECT COUNT(*)::int FROM consultations k WHERE k.contact_id = ct.id AND k.reversed_at IS NULL) AS consultations,
               (SELECT c.id FROM conversations c WHERE c.contact_id = ct.id ORDER BY c.last_message_at DESC LIMIT 1) AS conversation_id
-         FROM contacts ct WHERE ct.interactions > 1
-        ORDER BY ct.interactions DESC, ct.active_months DESC LIMIT 20`);
+         FROM contacts ct WHERE ct.credits_bought > 0
+        ORDER BY ct.credits_bought DESC, ct.purchases_count DESC LIMIT 20`);
     res.json({
       thresholds: th, tiers: tiers.rows[0],
       new_clients: newInPeriod.rows[0], active_clients: active.rows[0].n,

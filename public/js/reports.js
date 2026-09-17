@@ -302,7 +302,7 @@
     else if (state.tab === 'messages' && d.vol) rows = d.vol.series.map((r) => ({ periodo: fmtBucket(r.bucket, $('group').value), recebidas: r.messages_in, enviadas: r.messages_out }));
     else if (state.tab === 'origin' && d.origin) rows = d.origin.map((r) => ({ ddd: r.ddd, estado: UF_NAME[DDD_UF[r.ddd]] || '', regiao: UF_REGION[DDD_UF[r.ddd]] || '', conversas: r.conversations, clientes: r.contacts }));
     else if (state.tab === 'consultations' && d.cs) rows = d.cs.clients_by_kind.map((x) => ({ cliente: x.name, telefone: x.wa_id, ...x.kinds, total_consultas: x.total, ...(d.cs.purchases.buyers.find((b) => b.id === x.id) ? { compras: d.cs.purchases.buyers.find((b) => b.id === x.id).purchases, consultas_compradas: d.cs.purchases.buyers.find((b) => b.id === x.id).credits, valor_reais: d.cs.purchases.buyers.find((b) => b.id === x.id).revenue_cents / 100 } : {}) }));
-    else if (state.tab === 'clients' && d.clients) rows = d.clients.top.map((x) => ({ cliente: x.name, telefone: x.wa_id, faixa: REC_LABEL[x.tier] || x.tier, dias_com_contato: x.interactions, meses_ativos: x.active_months, consultas: x.consultations, cliente_desde: x.first_contact_at, ultimo_contato: x.last_seen_at }));
+    else if (state.tab === 'clients' && d.clients) rows = d.clients.top.map((x) => ({ cliente: x.name, telefone: x.wa_id, faixa: REC_LABEL[x.tier] || x.tier, consultas_compradas: x.credits_bought, compras: x.purchases_count, consultas_usadas: x.consultations, cliente_desde: x.first_purchase_at, ultima_compra: x.last_purchase_at }));
     else if (state.tab === 'now' && d.now) rows = d.now.oldest_waiting.map((c) => ({ cliente: c.contact_name || c.profile_name || c.wa_id, responsavel: c.assigned_user_name || '', esperando_s: c.waiting_seconds }));
     if (!rows.length) return toast('Nada para exportar nesta aba', true);
     const blob = new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' });
@@ -364,22 +364,22 @@
       tile('Clientes ativos', fmtN(r.active_clients), 'falaram com a SOS no período', ''),
       tile('Taxa de retorno', r.return_rate.pct === null ? '-' : `${r.return_rate.pct}%`, `${fmtN(r.return_rate.returned)} de ${fmtN(r.return_rate.base)} novos do período anterior voltaram`, ''),
       tile('Recorrentes', fmtN(t.recurrent + t.loyal), `${fmtN(t.loyal)} fiéis · ${fmtN(t.occasional)} ocasionais`, ''),
-      tile('Recorrentes inativos', fmtN(t.inactive), `sem contato há mais de ${r.thresholds.inactive_days} dias`, ''),
+      tile('Recorrentes inativos', fmtN(t.inactive), `sem comprar há mais de ${r.thresholds.inactive_days} dias`, ''),
     ].join('');
     hbarChart($('cl-tiers'), [
       { label: 'Fiéis', value: t.loyal, color: REC_COLOR.loyal }, { label: 'Recorrentes', value: t.recurrent, color: REC_COLOR.recurrent },
       { label: 'Ocasionais', value: t.occasional, color: REC_COLOR.occasional }, { label: 'Novos', value: t.new, color: REC_COLOR.new },
     ]);
     $('cl-inactive').innerHTML = r.inactive.length ? r.inactive.map((x) => `<a class="row" href="/?c=${x.conversation_id || ''}" title="Abrir conversa">
-        <span class="who">${esc(x.name)}<small>${esc(formatPhone(x.wa_id))} · ${x.interactions} dias com contato${x.plan_name ? ' · ' + esc(x.plan_name) : ''}</small></span>
-        <span class="rec-chip inactive">${esc(REC_LABEL[x.tier] || x.tier)}</span><span class="muted small">último ${esc(since(x.last_seen_at))}</span></a>`).join('')
+        <span class="who">${esc(x.name)}<small>${esc(formatPhone(x.wa_id))} · ${x.credits_bought} consultas em ${x.purchases_count} compras</small></span>
+        <span class="rec-chip inactive">${esc(REC_LABEL[x.tier] || x.tier)}</span><span class="muted small">última compra ${esc(since(x.last_purchase_at))}</span></a>`).join('')
       : '<div class="empty" style="height:120px">Nenhum recorrente inativo</div>';
-    $('cl-top').innerHTML = `<thead><tr><th>Cliente</th><th>Faixa</th><th class="num">Dias com contato</th><th class="num">Meses ativos</th><th class="num">Consultas</th><th>Cliente desde</th><th>Último contato</th></tr></thead>
+    $('cl-top').innerHTML = `<thead><tr><th>Cliente</th><th>Faixa</th><th class="num">Consultas compradas</th><th class="num">Compras</th><th class="num">Consultas usadas</th><th>Cliente desde</th><th>Última compra</th></tr></thead>
       <tbody>${r.top.map((x) => `<tr>
         <td><a href="/?c=${x.conversation_id || ''}">${esc(x.name)}</a><div class="muted small">${esc(formatPhone(x.wa_id))}</div></td>
         <td><span class="rec-chip ${x.tier}">${esc(REC_LABEL[x.tier] || x.tier)}</span></td>
-        <td class="num">${fmtN(x.interactions)}</td><td class="num">${fmtN(x.active_months)}</td><td class="num">${fmtN(x.consultations)}</td>
-        <td>${x.first_contact_at ? new Date(x.first_contact_at).toLocaleDateString('pt-BR') : '-'}</td><td>${esc(since(x.last_seen_at))}</td>
+        <td class="num">${fmtN(x.credits_bought)}</td><td class="num">${fmtN(x.purchases_count)}</td><td class="num">${fmtN(x.consultations)}</td>
+        <td>${x.first_purchase_at ? new Date(x.first_purchase_at).toLocaleDateString('pt-BR') : '-'}</td><td>${esc(since(x.last_purchase_at))}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="muted">Ainda não há clientes com mais de um dia de contato</td></tr>'}</tbody>`;
   }
 

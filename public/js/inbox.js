@@ -1132,21 +1132,34 @@
   const REC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
   function recThresholds() {
     const st = state.settings || {};
-    return { occasional_min: st.recurrence_occasional_min || 2, recurrent_min: st.recurrence_recurrent_min || 5, min_span_days: st.recurrence_min_span_days || 30, loyal_months: st.recurrence_loyal_months || 6, inactive_days: st.recurrence_inactive_days || 45 };
+    return {
+      occasional_credits: st.recurrence_occasional_credits || 2,
+      recurrent_credits: st.recurrence_recurrent_credits || 10,
+      recurrent_purchases: st.recurrence_recurrent_purchases || 3,
+      recurrent_span_days: st.recurrence_recurrent_span_days ?? 30,
+      loyal_credits: st.recurrence_loyal_credits || 25,
+      loyal_purchases: st.recurrence_loyal_purchases || 5,
+      loyal_months: st.recurrence_loyal_months ?? 6,
+      inactive_days: st.recurrence_inactive_days || 45,
+    };
   }
+  /** Mesma regra do servidor: a faixa vem das consultas adquiridas. */
   function tierOf(c) {
     const th = recThresholds();
-    const n = Number(c.interactions || 0), months = Number(c.active_months || 0);
-    const first = c.first_contact_at ? new Date(c.first_contact_at) : null;
+    const credits = Number(c.credits_bought || 0);
+    const purchases = Number(c.purchases_count || 0);
+    const first = c.first_purchase_at ? new Date(c.first_purchase_at).getTime() : null;
+    const last = c.last_purchase_at ? new Date(c.last_purchase_at).getTime() : null;
+    const spanDays = first && last ? (last - first) / 86400e3 : 0;
     const monthsSince = first ? (Date.now() - first) / (30.44 * 86400e3) : 0;
-    const lastAt = c.last_seen_at ? new Date(c.last_seen_at) : null;
-    const spanDays = first && lastAt ? (lastAt - first) / 86400e3 : 0;
-    let tier = 'new';
-    if (n >= th.recurrent_min && spanDays >= th.min_span_days) tier = monthsSince >= th.loyal_months ? 'loyal' : 'recurrent';
-    else if (n >= th.occasional_min) tier = 'occasional';
-    const last = c.last_seen_at ? new Date(c.last_seen_at) : null;
-    const inactive = (tier === 'recurrent' || tier === 'loyal') && Boolean(last) && Date.now() - last > th.inactive_days * 86400e3;
-    return { tier, label: REC_LABEL[tier], inactive, monthsSince, n, months };
+    const isRecurrent = credits >= th.recurrent_credits && purchases >= th.recurrent_purchases && spanDays >= th.recurrent_span_days;
+    const isLoyal = isRecurrent && credits >= th.loyal_credits && purchases >= th.loyal_purchases && monthsSince >= th.loyal_months;
+    const tier = isLoyal ? 'loyal' : isRecurrent ? 'recurrent' : credits >= th.occasional_credits ? 'occasional' : 'new';
+    const gap = purchases > 1 && spanDays > 0 ? spanDays / (purchases - 1) : null;
+    const limitDays = Math.max(th.inactive_days, gap ? gap * 2 : 0);
+    const daysSinceLast = last ? (Date.now() - last) / 86400e3 : null;
+    const inactive = (tier === 'recurrent' || tier === 'loyal') && daysSinceLast !== null && daysSinceLast > limitDays;
+    return { tier, label: REC_LABEL[tier], inactive, credits, purchases, monthsSince, gap, limitDays };
   }
   function sinceText(d) {
     if (!d) return '';
@@ -1161,13 +1174,13 @@
   }
   /** Chip "Recorrente · há 8 meses". Novo só aparece no cabeçalho, para não poluir a lista. */
   function recChip(c, header = false) {
-    if (c.interactions === undefined) return '';
+    if (c.credits_bought === undefined) return '';
     const t = tierOf(c);
     if (t.tier === 'new' && !header) return '';
     const cls = t.inactive ? 'inactive' : t.tier;
     const text = t.inactive ? `${t.label} inativo` : t.label;
-    const since = t.tier !== 'new' && c.first_contact_at ? ` · ${sinceText(c.first_contact_at)}` : '';
-    const title = t.tier === 'new' ? 'Primeiro contato com a SOS' : `${t.n} dia${t.n > 1 ? 's' : ''} com contato em ${t.months} m${t.months > 1 ? 'eses' : 'ês'}${t.inactive ? ` · sem falar ${sinceText(c.last_seen_at)}` : ''}`;
+    const since = t.tier !== 'new' && c.first_purchase_at ? ` · cliente ${sinceText(c.first_purchase_at)}` : '';
+    const title = `${t.credits} consulta${t.credits === 1 ? '' : 's'} adquirida${t.credits === 1 ? '' : 's'} em ${t.purchases} compra${t.purchases === 1 ? '' : 's'}${t.inactive ? ` · sem comprar ${sinceText(c.last_purchase_at)}` : ''}`;
     return `<span class="rec-chip ${cls}" title="${esc(title)}">${REC_ICON}${esc(text)}${esc(since)}</span>`;
   }
   const money = (c) => 'R$ ' + (Number(c || 0) / 100).toFixed(2).replace('.', ',');
@@ -1183,18 +1196,29 @@
   function renderHistory(ct) {
     const t = tierOf(ct);
     const n = Number(ct.interactions || 0);
-    const span = ct.first_contact_at && ct.last_seen_at ? (new Date(ct.last_seen_at) - new Date(ct.first_contact_at)) / 86400e3 : 0;
-    const freq = n > 1 && span > 0 ? Math.max(1, Math.round(span / (n - 1))) : null;
+    const th = recThresholds();
+    const step = (() => {
+      if (t.tier === 'loyal') return '';
+      const alvo = t.tier === 'recurrent' ? 'Fiel' : 'Recorrente';
+      const credits = t.tier === 'recurrent' ? th.loyal_credits : th.recurrent_credits;
+      const purchases = t.tier === 'recurrent' ? th.loyal_purchases : th.recurrent_purchases;
+      const faltam = [];
+      if (t.credits < credits) faltam.push(`${credits - t.credits} consulta${credits - t.credits > 1 ? 's' : ''}`);
+      if (t.purchases < purchases) faltam.push(`${purchases - t.purchases} compra${purchases - t.purchases > 1 ? 's' : ''}`);
+      if (t.tier === 'recurrent' && t.monthsSince < th.loyal_months) faltam.push(`${Math.ceil(th.loyal_months - t.monthsSince)} mês(es) de casa`);
+      return faltam.length ? `Para ${alvo}: faltam ${faltam.join(', ')}` : '';
+    })();
     const rows = [
-      ['Cliente desde', ct.first_contact_at ? `${new Date(ct.first_contact_at).toLocaleDateString('pt-BR')} (${sinceText(ct.first_contact_at)})` : 'sem registro'],
-      ['Atendimentos', `${n} dia${n === 1 ? '' : 's'} com contato em ${ct.active_months || 0} m${ct.active_months === 1 ? 'ês' : 'eses'}`],
-      ['Consultas', ct.consultations_count ? `${ct.consultations_count}${ct.last_consultation_at ? ` · última ${esc(ct.last_consultation_kind || '')} ${sinceText(ct.last_consultation_at)}` : ''}` : 'nenhuma registrada'],
-      ['Renovações de plano', String(ct.plan_renewals || 0)],
-      ['Último contato', ct.last_seen_at ? sinceText(ct.last_seen_at) : 'sem registro'],
-      ['Frequência', freq ? `1 contato a cada ${freq} dia${freq > 1 ? 's' : ''}` : 'ainda sem padrão'],
+      ['Consultas adquiridas', `${t.credits} em ${t.purchases} compra${t.purchases === 1 ? '' : 's'}`],
+      ['Cliente desde', ct.first_purchase_at ? `${new Date(ct.first_purchase_at).toLocaleDateString('pt-BR')} (${sinceText(ct.first_purchase_at)})` : 'ainda não comprou'],
+      ['Última compra', ct.last_purchase_at ? sinceText(ct.last_purchase_at) : 'nenhuma'],
+      ['Compra a cada', t.gap ? `${Math.round(t.gap)} dias (em média)` : 'ainda sem padrão'],
+      ['Consultas usadas', ct.consultations_count ? `${ct.consultations_count}${ct.last_consultation_at ? ` · última ${esc(ct.last_consultation_kind || '')} ${sinceText(ct.last_consultation_at)}` : ''}` : 'nenhuma registrada'],
+      ['Total gasto', ct.spent_cents ? money(ct.spent_cents) : 'sem valores informados'],
+      ['Atendimentos', `${n} dia${n === 1 ? '' : 's'} com contato · último ${ct.last_seen_at ? sinceText(ct.last_seen_at) : 'sem registro'}`],
     ];
-    $('d-hist').innerHTML = `<h5>Histórico do cliente <span class="rec-chip ${t.inactive ? 'inactive' : t.tier}">${REC_ICON}${esc(t.inactive ? t.label + ' inativo' : t.label)}</span></h5>
-      <div class="d-hist-grid">${rows.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${v}</div>`).join('')}</div>`;
+  $('d-hist').innerHTML = `<h5>Histórico do cliente <span class="rec-chip ${t.inactive ? 'inactive' : t.tier}">${REC_ICON}${esc(t.inactive ? t.label + ' inativo' : t.label)}</span></h5>
+      <div class="d-hist-grid">${rows.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${v}</div>`).join('')}</div>${step ? `<div class="d-hist-step">${esc(step)}</div>` : ''}`;
   }
 
   /** Situação do plano a partir de uma conversa ou de uma ficha (ambas trazem plan_credits/plan_left). */
@@ -2532,6 +2556,7 @@
         c.contact_name = contact.name; c.contact_blocked = contact.blocked;
         c.plan_name = contact.plan_name; c.plan_credits = contact.plan_credits; c.plan_left = contact.plan_left; c.plan_expires_at = contact.plan_expires_at;
         c.interactions = contact.interactions; c.active_months = contact.active_months; c.first_contact_at = contact.first_contact_at; c.last_seen_at = contact.last_seen_at;
+        c.credits_bought = contact.credits_bought; c.purchases_count = contact.purchases_count; c.first_purchase_at = contact.first_purchase_at; c.last_purchase_at = contact.last_purchase_at;
         c.notes_count = contact.notes_count;
       };
       for (const c of state.conversations) if (c.contact_id === contact.id) { apply(c); touched = true; }

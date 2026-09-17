@@ -21,6 +21,7 @@ const UPPER_KINDS = /placa|chassi|motor|renavam/i;
 const CONTACT_COLS = `ct.id, ct.wa_id, ct.name, ct.profile_name, ct.avatar_media_id, ct.blocked, ct.cpf, ct.email, ct.notes,
   ct.phone2, ct.company, ct.city, ct.address, ct.birthdate, ct.last_seen_at, ct.created_at,
   ct.interactions, ct.active_months, ct.first_contact_at, ct.plan_renewals,
+  ct.credits_bought, ct.purchases_count, ct.first_purchase_at, ct.last_purchase_at,
   ct.plan_id, ct.plan_name, ct.plan_credits, ct.plan_used, ct.plan_started_at, ct.plan_expires_at,
   CASE WHEN ct.plan_credits IS NULL THEN NULL ELSE GREATEST(ct.plan_credits - ct.plan_used, 0) END AS plan_left`;
 
@@ -41,9 +42,7 @@ async function getFull(id) {
        (SELECT COUNT(*)::int FROM contact_events e WHERE e.contact_id = $1) AS events_count,
        (SELECT k.created_at FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL ORDER BY k.created_at DESC LIMIT 1) AS last_consultation_at,
        (SELECT k.kind FROM consultations k WHERE k.contact_id = $1 AND k.reversed_at IS NULL ORDER BY k.created_at DESC LIMIT 1) AS last_consultation_kind,
-       (SELECT COUNT(*)::int FROM purchases p WHERE p.contact_id = $1) AS purchases_count,
        (SELECT COUNT(*)::int FROM purchases p WHERE p.contact_id = $1 AND p.kind = 'plan') AS plans_bought,
-       (SELECT COALESCE(SUM(p.credits), 0)::int FROM purchases p WHERE p.contact_id = $1) AS credits_bought,
        (SELECT COALESCE(SUM(p.price_cents), 0)::int FROM purchases p WHERE p.contact_id = $1) AS spent_cents,
        (SELECT COALESCE(json_agg(json_build_object('kind', x.kind, 'total', x.total, 'charged', x.charged, 'loose', x.loose) ORDER BY x.total DESC), '[]'::json)
           FROM (SELECT k.kind, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE k.charged)::int AS charged, COUNT(*) FILTER (WHERE NOT k.charged)::int AS loose
@@ -380,11 +379,14 @@ function cleanPrice(v) {
   if (!Number.isFinite(n) || n < 0) throw new ContactError(400, 'Valor inválido');
   return n;
 }
+const recurrence = require('./recurrence');
+
 async function addPurchase(id, user, p, client = db) {
   const { rows } = await client.query(
     `INSERT INTO purchases (contact_id, user_id, kind, description, credits, price_cents, consultation_id, note) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
     [id, user ? user.id : null, p.kind === 'single' ? 'single' : 'plan', String(p.description || 'Compra').trim().slice(0, 120), Math.max(0, Number(p.credits) || 0), cleanPrice(p.price_cents), p.consultation_id || null, p.note ? String(p.note).trim().slice(0, 300) : null]
   );
+  await recurrence.refreshPurchases(id, client);
   return rows[0];
 }
 async function listPurchases(id, limit = 200) {
@@ -407,6 +409,7 @@ async function addManualPurchase(id, user, body) {
     const d = new Date(body.created_at);
     if (Number.isNaN(d.getTime())) throw new ContactError(400, 'Data inválida');
     await db.query('UPDATE purchases SET created_at = $2 WHERE id = $1', [purchase.id, d]);
+    await recurrence.refreshPurchases(id);
   }
   await logEvent(id, user.id, 'purchase', `${user.name} registrou a compra: ${description} (${credits} consulta(s))`);
   const contactAfter = await broadcast(id);
@@ -424,6 +427,7 @@ async function updatePurchase(id, purchaseId, user, body) {
   if (body.credits !== undefined) { const n = Number(body.credits); if (!Number.isInteger(n) || n < 0) throw new ContactError(400, 'Quantidade inválida'); push('credits', n); }
   if (!sets.length) throw new ContactError(400, 'Nada para atualizar');
   await db.query(`UPDATE purchases SET ${sets.join(', ')} WHERE id = $1`, params);
+  await recurrence.refreshPurchases(id);
   await logEvent(id, user.id, 'purchase', `${user.name} ajustou a compra ${rows[0].description}`);
   const contact = await broadcast(id);
   return { purchase: (await listPurchases(id)).find((x) => x.id === purchaseId), contact };
@@ -431,6 +435,7 @@ async function updatePurchase(id, purchaseId, user, body) {
 async function deletePurchase(id, purchaseId, user) {
   const { rows } = await db.query('DELETE FROM purchases WHERE id = $1 AND contact_id = $2 RETURNING *', [purchaseId, id]);
   if (!rows.length) throw new ContactError(404, 'Compra não encontrada');
+  await recurrence.refreshPurchases(id);
   await logEvent(id, user.id, 'purchase', `${user.name} removeu a compra ${rows[0].description}`);
   return broadcast(id);
 }

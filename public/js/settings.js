@@ -473,23 +473,28 @@
     try { await saveKinds(kinds.filter((k) => k !== b.dataset.kind)); toast('Tipo removido'); }
     catch (err) { toast(err.message, true); }
   });
+  const REC_FIELDS = {
+    'rec-occasional': 'recurrence_occasional_credits',
+    'rec-rec-credits': 'recurrence_recurrent_credits',
+    'rec-rec-purchases': 'recurrence_recurrent_purchases',
+    'rec-rec-span': 'recurrence_recurrent_span_days',
+    'rec-loyal-credits': 'recurrence_loyal_credits',
+    'rec-loyal-purchases': 'recurrence_loyal_purchases',
+    'rec-loyal': 'recurrence_loyal_months',
+    'rec-inactive': 'recurrence_inactive_days',
+  };
   async function loadRecurrence() {
     const { settings } = await api('GET', '/api/settings');
-    $('rec-occasional').value = settings.recurrence_occasional_min ?? 2;
-    $('rec-recurrent').value = settings.recurrence_recurrent_min ?? 5;
-    $('rec-span').value = settings.recurrence_min_span_days ?? 30;
-    $('rec-loyal').value = settings.recurrence_loyal_months ?? 6;
-    $('rec-inactive').value = settings.recurrence_inactive_days ?? 45;
     const ro = me.role !== 'admin';
-    ['rec-occasional', 'rec-recurrent', 'rec-span', 'rec-loyal', 'rec-inactive'].forEach((id) => { $(id).disabled = ro; });
+    for (const [id, key] of Object.entries(REC_FIELDS)) { $(id).value = settings[key]; $(id).disabled = ro; }
   }
   $('rec-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = {
-      recurrence_occasional_min: Number($('rec-occasional').value), recurrence_recurrent_min: Number($('rec-recurrent').value),
-      recurrence_loyal_months: Number($('rec-loyal').value), recurrence_inactive_days: Number($('rec-inactive').value), recurrence_min_span_days: Number($('rec-span').value),
-    };
-    if (body.recurrence_recurrent_min < body.recurrence_occasional_min) return toast('Recorrente precisa exigir mais dias que Ocasional', true);
+    const body = {};
+    for (const [id, key] of Object.entries(REC_FIELDS)) body[key] = Number($(id).value);
+    if (body.recurrence_loyal_credits < body.recurrence_recurrent_credits) return toast('Fiel precisa exigir pelo menos tantas consultas quanto Recorrente', true);
+    if (body.recurrence_loyal_purchases < body.recurrence_recurrent_purchases) return toast('Fiel precisa exigir pelo menos tantas compras quanto Recorrente', true);
+    if (body.recurrence_recurrent_credits < body.recurrence_occasional_credits) return toast('Recorrente precisa exigir mais consultas que Ocasional', true);
     try { await api('PUT', '/api/settings', body); toast('Regras salvas'); }
     catch (err) { toast(err.message, true); }
   });

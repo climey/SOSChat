@@ -204,14 +204,17 @@
           <section class="settings-section" data-section="recorrencia" hidden>
             <div class="card">
               <h3>Recorrência de clientes</h3>
-              <p class="small muted">Cada cliente ganha uma faixa automática a partir dos <b>dias com contato</b> (dias em que ele mandou mensagem). <b>Ocasional</b>: voltou a falar em outro dia. <b>Recorrente</b>: atingiu a quantidade de dias com contato e esses contatos estão espalhados por pelo menos o período mínimo (5 dias seguidos não contam). <b>Fiel</b>: recorrente há tempo. <b>Inativo</b>: recorrente ou fiel que parou de mandar mensagem. A faixa aparece como chip ao lado do nome e no bloco "Histórico do cliente". Para marcar casos especiais à mão, use as etiquetas <b>VIP</b> e <b>Parceiro</b>.</p>
+              <p class="small muted">A faixa vem do que o cliente <b>compra</b>, não de quantas vezes ele escreve. <b>Ocasional</b>: comprou o mínimo de consultas. <b>Recorrente</b>: volume + número de compras + intervalo entre a primeira e a última (comprar um plano grande de uma vez não basta). <b>Fiel</b>: mais volume, mais compras e tempo de casa. <b>Inativo</b>: recorrente ou fiel que parou de comprar, respeitando o ritmo dele (o dobro do intervalo médio, quando maior que o limite). Para casos especiais use as etiquetas <b>VIP</b> e <b>Parceiro</b>.</p>
               <form id="rec-form">
                 <div class="grid-2">
-                  <div class="field"><label class="label">Ocasional a partir de (dias com contato)</label><input class="input" type="number" id="rec-occasional" min="2" max="100" required></div>
-                  <div class="field"><label class="label">Recorrente a partir de (dias com contato)</label><input class="input" type="number" id="rec-recurrent" min="2" max="1000" required></div>
-                  <div class="field"><label class="label">Período mínimo entre o 1º e o último contato (dias)</label><input class="input" type="number" id="rec-span" min="1" max="3650" required></div>
-                  <div class="field"><label class="label">Fiel quando recorrente há (meses desde o 1º contato)</label><input class="input" type="number" id="rec-loyal" min="1" max="120" required></div>
-                  <div class="field"><label class="label">Recorrente inativo após (dias sem contato)</label><input class="input" type="number" id="rec-inactive" min="7" max="3650" required></div>
+                  <div class="field"><label class="label">Ocasional a partir de (consultas adquiridas)</label><input class="input" type="number" id="rec-occasional" min="1" max="1000" required></div>
+                  <div class="field"><label class="label">Recorrente: consultas adquiridas</label><input class="input" type="number" id="rec-rec-credits" min="1" max="100000" required></div>
+                  <div class="field"><label class="label">Recorrente: número de compras</label><input class="input" type="number" id="rec-rec-purchases" min="1" max="1000" required></div>
+                  <div class="field"><label class="label">Recorrente: dias entre a 1ª e a última compra</label><input class="input" type="number" id="rec-rec-span" min="0" max="3650" required></div>
+                  <div class="field"><label class="label">Fiel: consultas adquiridas</label><input class="input" type="number" id="rec-loyal-credits" min="1" max="100000" required></div>
+                  <div class="field"><label class="label">Fiel: número de compras</label><input class="input" type="number" id="rec-loyal-purchases" min="1" max="1000" required></div>
+                  <div class="field"><label class="label">Fiel: meses desde a 1ª compra</label><input class="input" type="number" id="rec-loyal" min="0" max="120" required></div>
+                  <div class="field"><label class="label">Inativo após (dias sem comprar)</label><input class="input" type="number" id="rec-inactive" min="7" max="3650" required></div>
                 </div>
                 <div class="row-actions"><button class="btn btn-primary" type="submit" data-admin-only>Salvar regras</button></div>
               </form>

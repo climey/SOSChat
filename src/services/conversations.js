@@ -16,6 +16,7 @@ function selectSql(userParam) {
          ct.id AS contact_id, ct.wa_id, ct.name AS contact_name, ct.profile_name, ct.avatar_media_id, ct.blocked AS contact_blocked,
          ct.plan_name, ct.plan_credits, ct.plan_expires_at,
          ct.interactions, ct.active_months, ct.first_contact_at, ct.last_seen_at,
+         ct.credits_bought, ct.purchases_count, ct.first_purchase_at, ct.last_purchase_at,
          (SELECT COUNT(*)::int FROM contact_notes n WHERE n.contact_id = ct.id) AS notes_count,
          CASE WHEN ct.plan_credits IS NULL THEN NULL ELSE GREATEST(ct.plan_credits - ct.plan_used, 0) END AS plan_left,
          u.name AS assigned_user_name, u.avatar_media_id AS assigned_user_avatar,
