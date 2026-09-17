@@ -16,7 +16,8 @@ router.get('/:mediaId', async (req, res, next) => {
     const { rows } = await db.query(
       `SELECT 1 FROM messages WHERE media_id = $1
        UNION ALL SELECT 1 FROM contacts WHERE avatar_media_id = $1
-       UNION ALL SELECT 1 FROM users WHERE avatar_media_id = $1 LIMIT 1`,
+       UNION ALL SELECT 1 FROM users WHERE avatar_media_id = $1
+       UNION ALL SELECT 1 FROM quick_replies WHERE media_id = $1 LIMIT 1`,
       [mediaId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Mídia não encontrada' });

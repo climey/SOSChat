@@ -254,19 +254,36 @@
   // ---------- Respostas rápidas ----------
   let qrEditing = null;
   let quickReplies = [];
+  let qrFilter = 'all';
+  let qrPendingFile = null;
+  const qrKindLabel = { image: 'Imagem', video: 'Vídeo', audio: 'Áudio', document: 'Documento' };
+  function qrMediaCell(r) {
+    if (!r.media_id) return '<span class="muted small">-</span>';
+    if (r.media_kind === 'image') return `<img class="qr-thumb" src="/api/media/${esc(r.media_id)}" alt="" loading="lazy" title="${esc(r.media_name || '')}">`;
+    return `<span class="qr-file" title="${esc(r.media_name || '')}">${esc(qrKindLabel[r.media_kind] || 'Arquivo')}</span>`;
+  }
   async function loadQuickReplies() {
     ({ quick_replies: quickReplies } = await api('GET', '/api/quick-replies'));
-    const mine = (r) => me.role === 'admin' || r.created_by === me.id;
+    const canEdit = (r) => (r.visibility === 'personal' ? r.created_by === me.id : me.role === 'admin' || r.created_by === me.id);
+    const shown = quickReplies.filter((r) => qrFilter === 'all' || (qrFilter === 'mine' ? r.visibility === 'personal' : r.visibility === 'team'));
+    document.querySelectorAll('#qr-filter .chip').forEach((b) => b.classList.toggle('active', b.dataset.qrfilter === qrFilter));
     $('qr-table').innerHTML = `
-      <thead><tr><th>Atalho</th><th>Título</th><th>Texto</th><th>Criada por</th><th></th></tr></thead>
-      <tbody>${quickReplies.map((r) => `<tr data-id="${r.id}">
+      <thead><tr><th>Atalho</th><th>Título</th><th>Mídia</th><th>Texto</th><th>Visível para</th><th>Criada por</th><th></th></tr></thead>
+      <tbody>${shown.map((r) => `<tr data-id="${r.id}">
         <td><code>/${esc(r.shortcut)}</code></td><td>${esc(r.title)}</td>
-        <td class="muted" style="max-width:320px;white-space:pre-wrap">${esc(r.body)}</td>
+        <td>${qrMediaCell(r)}</td>
+        <td class="muted" style="max-width:280px;white-space:pre-wrap">${esc(r.body || '')}</td>
+        <td>${r.visibility === 'personal' ? '<span class="tag new">Só eu</span>' : '<span class="tag">Equipe</span>'}</td>
         <td class="muted small">${esc(r.created_by_name || 'sistema')}</td>
-        <td class="row-actions">${mine(r) ? '<button class="btn btn-sm" data-act="edit">Editar</button><button class="btn btn-sm btn-ghost" data-act="del">Excluir</button>' : ''}</td>
-      </tr>`).join('') || '<tr><td colspan="5" class="muted">Nenhuma resposta rápida</td></tr>'}</tbody>`;
+        <td class="row-actions">${canEdit(r) ? '<button class="btn btn-sm" data-act="edit">Editar</button><button class="btn btn-sm btn-ghost" data-act="del">Excluir</button>' : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="muted">Nenhuma resposta rápida</td></tr>'}</tbody>`;
   }
-
+  $('qr-filter').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-qrfilter]');
+    if (!b) return;
+    qrFilter = b.dataset.qrfilter;
+    loadQuickReplies();
+  });
   // ---------- Setores ----------
   let sectors = [];
   async function loadSectors() {
@@ -315,19 +332,49 @@
       loadSectors();
     } catch (err) { toast(err.message, true); }
   });
+  function qrShowMedia(r) {
+    const has = Boolean(r && r.media_id);
+    $('qr-media-info').textContent = qrPendingFile ? `${qrPendingFile.name} (será enviada ao salvar)` : (has ? `${r.media_name || 'Mídia'} · ${qrKindLabel[r.media_kind] || ''}` : 'Nenhuma mídia anexada');
+    $('qr-media-remove').hidden = !has && !qrPendingFile;
+  }
   function resetQrForm() {
     qrEditing = null;
+    qrPendingFile = null;
     $('qr-form').reset();
+    $('qr-file').value = '';
     $('qr-submit').textContent = 'Adicionar';
     $('qr-cancel').hidden = true;
+    qrShowMedia(null);
   }
+  $('qr-pick').addEventListener('click', () => $('qr-file').click());
+  $('qr-file').addEventListener('change', () => {
+    const f = $('qr-file').files[0];
+    if (!f) return;
+    if (f.size > 16 * 1024 * 1024) { toast('Arquivo acima de 16 MB', true); $('qr-file').value = ''; return; }
+    qrPendingFile = f;
+    qrShowMedia(quickReplies.find((x) => x.id === qrEditing) || null);
+  });
+  $('qr-media-remove').addEventListener('click', async () => {
+    if (qrPendingFile) { qrPendingFile = null; $('qr-file').value = ''; qrShowMedia(quickReplies.find((x) => x.id === qrEditing) || null); return; }
+    if (!qrEditing) return;
+    if (!confirm('Remover a mídia desta resposta?')) return;
+    try { await api('DELETE', `/api/quick-replies/${qrEditing}/media`); toast('Mídia removida'); await loadQuickReplies(); qrShowMedia(quickReplies.find((x) => x.id === qrEditing) || null); }
+    catch (err) { toast(err.message, true); }
+  });
   $('qr-cancel').addEventListener('click', resetQrForm);
   $('qr-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const payload = { shortcut: $('qr-shortcut').value, title: $('qr-title').value, body: $('qr-body').value };
+    const payload = { shortcut: $('qr-shortcut').value, title: $('qr-title').value, body: $('qr-body').value, visibility: $('qr-visibility').value };
+    if (!payload.body.trim() && !qrPendingFile && !(qrEditing && quickReplies.find((x) => x.id === qrEditing)?.media_id)) { toast('Escreva o texto ou anexe uma mídia', true); return; }
     try {
-      if (qrEditing) await api('PATCH', `/api/quick-replies/${qrEditing}`, payload);
-      else await api('POST', '/api/quick-replies', payload);
+      let saved;
+      if (qrEditing) ({ quick_reply: saved } = await api('PATCH', `/api/quick-replies/${qrEditing}`, payload));
+      else ({ quick_reply: saved } = await api('POST', '/api/quick-replies', payload));
+      if (qrPendingFile) {
+        const fd = new FormData();
+        fd.append('file', qrPendingFile, qrPendingFile.name);
+        await SOS.upload(`/api/quick-replies/${saved.id}/media`, fd);
+      }
       toast(qrEditing ? 'Resposta atualizada' : 'Resposta criada');
       resetQrForm();
       loadQuickReplies();
@@ -341,8 +388,11 @@
     try {
       if (btn.dataset.act === 'edit') {
         qrEditing = id;
-        $('qr-shortcut').value = r.shortcut; $('qr-title').value = r.title; $('qr-body').value = r.body;
+        qrPendingFile = null;
+        $('qr-file').value = '';
+        $('qr-shortcut').value = r.shortcut; $('qr-title').value = r.title; $('qr-body').value = r.body || ''; $('qr-visibility').value = r.visibility || 'team';
         $('qr-submit').textContent = 'Salvar'; $('qr-cancel').hidden = false; $('qr-body').focus();
+        qrShowMedia(r);
         return;
       }
       if (!confirm(`Excluir a resposta /${r.shortcut}?`)) return;

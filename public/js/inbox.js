@@ -833,32 +833,73 @@
       .replace(/\{atendente\}/gi, first(state.me.name))
       .replace(/\{telefone\}/gi, c ? formatPhone(c.wa_id) : '');
   }
+  /** Aba do painel de respostas rápidas: todas (equipe + minhas) ou só as minhas. */
+  let qrTab = 'all';
   function qrMatches(q) {
-    const term = q.toLowerCase();
-    return state.quickReplies.filter((r) => !term || r.shortcut.includes(term) || r.title.toLowerCase().includes(term) || r.body.toLowerCase().includes(term));
+    const term = (q || '').toLowerCase();
+    return state.quickReplies.filter((r) => {
+      if (qrTab === 'mine' && r.visibility !== 'personal') return false;
+      if (!term) return true;
+      return r.shortcut.includes(term) || r.title.toLowerCase().includes(term) || (r.body || '').toLowerCase().includes(term);
+    });
+  }
+  const QR_KIND_LABEL = { image: 'Imagem', video: 'Vídeo', audio: 'Áudio', document: 'Documento' };
+  function qrMediaHtml(r) {
+    if (!r.media_id) return '';
+    if (r.media_kind === 'image') return `<img class="qr-thumb" src="/api/media/${esc(r.media_id)}" alt="" loading="lazy">`;
+    const label = QR_KIND_LABEL[r.media_kind] || 'Arquivo';
+    return `<span class="qr-file" title="${esc(r.media_name || label)}">${esc(label)}</span>`;
   }
   function renderQuickPopup(term) {
     const list = qrMatches(term);
     const pop = $('qr-popup');
     qrIndex = Math.min(qrIndex, Math.max(0, list.length - 1));
-    pop.innerHTML = list.length
-      ? list.map((r, i) => `<div class="qr-item ${i === qrIndex ? 'active' : ''}" data-id="${r.id}"><div class="qr-head"><span class="qr-sc">/${esc(r.shortcut)}</span>${esc(r.title)}</div><div class="qr-body">${esc(r.body)}</div></div>`).join('')
-      : `<div class="qr-empty">${state.quickReplies.length ? 'Nenhuma resposta combina' : 'Nenhuma resposta rápida cadastrada. Crie em Configurações.'}</div>`;
+    const mine = state.quickReplies.filter((r) => r.visibility === 'personal').length;
+    const tabs = `<div class="qr-tabs" id="qr-tabs">
+      <button type="button" class="${qrTab === 'all' ? 'active' : ''}" data-qrtab="all">Todas <span>${state.quickReplies.length}</span></button>
+      <button type="button" class="${qrTab === 'mine' ? 'active' : ''}" data-qrtab="mine">Minhas <span>${mine}</span></button></div>`;
+    const items = list.length
+      ? list.map((r, i) => `<div class="qr-item ${i === qrIndex ? 'active' : ''}" data-id="${r.id}">
+          ${qrMediaHtml(r)}
+          <div class="qr-text"><div class="qr-head"><span class="qr-sc">/${esc(r.shortcut)}</span>${esc(r.title)}
+            ${r.visibility === 'personal' ? '<span class="qr-tag">minha</span>' : ''}</div>
+          <div class="qr-body">${esc(r.body || (r.media_name || 'Mídia'))}</div></div></div>`).join('')
+      : `<div class="qr-empty">${qrTab === 'mine' ? 'Você ainda não tem respostas próprias. Crie em Configurações.' : (state.quickReplies.length ? 'Nenhuma resposta combina' : 'Nenhuma resposta rápida cadastrada. Crie em Configurações.')}</div>`;
+    pop.innerHTML = tabs + `<div class="qr-list">${items}</div>`;
     pop.hidden = false;
-    pop.dataset.term = term;
+    pop.dataset.term = term || '';
   }
   function closeQuickPopup() { $('qr-popup').hidden = true; }
-  function applyQuick(id) {
+  /** Aplica a resposta: texto vai para a caixa e a mídia vira anexo pendente, para o atendente revisar antes de enviar. */
+  async function applyQuick(id) {
     const r = state.quickReplies.find((x) => x.id === Number(id));
     if (!r) return;
     const v = els.composeText.value;
-    els.composeText.value = /^\/\S*$/.test(v.trim()) ? fillVars(r.body) : v + (v.endsWith(' ') || !v ? '' : ' ') + fillVars(r.body);
+    const text = r.body ? fillVars(r.body) : '';
+    if (text) els.composeText.value = /^\/\S*$/.test(v.trim()) || !v ? text : v + (v.endsWith(' ') ? '' : ' ') + text;
+    else if (/^\/\S*$/.test(v.trim())) els.composeText.value = '';
     closeQuickPopup();
     autosize();
     els.composeText.focus();
+    if (r.media_id) await attachQuickMedia(r);
+  }
+  async function attachQuickMedia(r) {
+    if (state.composeMode === 'note') { toast('Mídia só em mensagens, não em notas', true); return; }
+    try {
+      const res = await fetch(`/api/media/${encodeURIComponent(r.media_id)}`, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('Não foi possível carregar a mídia da resposta');
+      const blob = await res.blob();
+      const file = new File([blob], r.media_name || 'arquivo', { type: r.media_mime || blob.type || 'application/octet-stream' });
+      setAttachment(file);
+    } catch (err) { toast(err.message, true); }
   }
   $('btn-quick').addEventListener('click', (e) => { e.stopPropagation(); if ($('qr-popup').hidden) { qrIndex = 0; renderQuickPopup(''); } else closeQuickPopup(); });
-  $('qr-popup').addEventListener('click', (e) => { const it = e.target.closest('.qr-item'); if (it) applyQuick(it.dataset.id); });
+  $('qr-popup').addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-qrtab]');
+    if (tab) { e.stopPropagation(); qrTab = tab.dataset.qrtab; qrIndex = 0; renderQuickPopup($('qr-popup').dataset.term || ''); return; }
+    const it = e.target.closest('.qr-item');
+    if (it) applyQuick(it.dataset.id);
+  });
   document.addEventListener('click', (e) => { if (!e.target.closest('#qr-popup') && !e.target.closest('#btn-quick')) closeQuickPopup(); });
   els.composeText.addEventListener('input', () => {
     const v = els.composeText.value;
@@ -2473,6 +2514,9 @@
     });
     socket.on('settings:updated', (s) => { Object.assign(state.settings, s); renderList(); });
     socket.on('sectors:updated', () => loadSectors());
+    socket.on('quick-replies:updated', async () => {
+      try { const { quick_replies: qr } = await api('GET', '/api/quick-replies'); state.quickReplies = qr || []; if (!$('qr-popup').hidden) renderQuickPopup($('qr-popup').dataset.term || ''); } catch { /* ignora */ }
+    });
     socket.on('user:avatar', ({ user_id, avatar_media_id, version }) => {
       if (avatar_media_id && version) avatarVersion.set(avatar_media_id, version);
       for (const u of state.users) if (u.id === user_id) u.avatar_media_id = avatar_media_id;
