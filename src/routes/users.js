@@ -24,6 +24,32 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+/** Quem está online, ausente ou offline, com a carga de cada um. */
+router.get('/team', async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT u.id, u.name, u.email, u.role, u.availability, u.avatar_media_id, u.last_online_at,
+              (SELECT COUNT(*)::int FROM conversations c WHERE c.assigned_user_id = u.id AND c.status = 'open') AS open_conversations,
+              (SELECT COUNT(*)::int FROM conversations c WHERE c.assigned_user_id = u.id AND c.status = 'open'
+                 AND c.last_message_direction IS DISTINCT FROM 'out') AS waiting_conversations,
+              (SELECT MAX(m.created_at) FROM messages m WHERE m.sender_user_id = u.id) AS last_reply_at
+         FROM users u WHERE u.active = TRUE ORDER BY u.name`
+    );
+    const users = rows.map((u) => {
+      const online = realtime.isOnline(u.id);
+      return { ...u, online, status: online ? (u.availability === 'away' ? 'away' : 'available') : 'offline' };
+    });
+    res.json({
+      users,
+      summary: {
+        available: users.filter((u) => u.status === 'available').length,
+        away: users.filter((u) => u.status === 'away').length,
+        offline: users.filter((u) => u.status === 'offline').length,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
 // Foto de perfil (própria; admin pode definir a de qualquer atendente). multipart: file (imagem até 2 MB)
 const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024, files: 1 } });
 async function setAvatar(req, res, next, targetId) {

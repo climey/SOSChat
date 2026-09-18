@@ -14,6 +14,7 @@
     plans: [], // catálogo de planos de consultas
     contact: null, // ficha completa do contato da conversa aberta
     contactNotes: [], // observações fixadas do contato da conversa aberta
+    team: [], // atendentes e a presença de cada um
     accounts: new Map(), // id -> status do número (só provedor baileys)
     prefs: new Map(), // conversa id -> { pinned, muted, hidden } deste atendente
     presence: new Map(), // user id -> { online, availability }
@@ -916,6 +917,64 @@
     else if ((e.key === 'Enter' || e.key === 'Tab') && list.length) { e.preventDefault(); e.stopImmediatePropagation(); applyQuick(list[qrIndex].id); }
     else if (e.key === 'Escape') closeQuickPopup();
   }, true);
+
+  // ---------- Painel da equipe ----------
+  const TEAM_LABEL = { available: 'Disponível', away: 'Ausente', offline: 'Offline' };
+  let teamTimer = null;
+  async function loadTeam() {
+    try {
+      const { users, summary } = await api('GET', '/api/users/team');
+      state.team = users;
+      $('team-online').hidden = !summary.available;
+      $('team-online').textContent = summary.available;
+      if (!$('team-modal').hidden) renderTeam(summary);
+    } catch { /* ignora */ }
+  }
+  function renderTeam(summary) {
+    const users = state.team || [];
+    const s = summary || {
+      available: users.filter((u) => u.status === 'available').length,
+      away: users.filter((u) => u.status === 'away').length,
+      offline: users.filter((u) => u.status === 'offline').length,
+    };
+    $('team-summary').innerHTML = [
+      ['available', 'online agora', s.available],
+      ['away', 'ausente', s.away],
+      ['offline', 'offline', s.offline],
+    ].map(([k, label, n]) => `<div class="team-stat ${k}"><b>${n}</b><span>${esc(label)}</span></div>`).join('');
+    const order = { available: 0, away: 1, offline: 2 };
+    const list = [...users].sort((a, b) => (order[a.status] - order[b.status]) || a.name.localeCompare(b.name));
+    $('team-list').innerHTML = list.map((u) => {
+      const me = u.id === state.me.id;
+      const dot = u.status === 'offline' ? '' : (u.status === 'away' ? 'away' : 'online');
+      const when = u.status === 'offline'
+        ? (u.last_online_at ? `visto ${sinceText(u.last_online_at)}` : 'nunca entrou')
+        : (u.last_reply_at ? `última resposta ${sinceText(u.last_reply_at)}` : 'sem respostas ainda');
+      const load = u.open_conversations
+        ? `${u.open_conversations} conversa${u.open_conversations > 1 ? 's' : ''}${u.waiting_conversations ? ` · ${u.waiting_conversations} esperando` : ''}`
+        : 'sem conversas atribuídas';
+      return `<div class="team-row ${u.status}">
+        <span class="agent">${esc(initials(u.name))}${userImg(u.avatar_media_id)}<span class="pdot ${dot}"></span></span>
+        <div class="team-info">
+          <div class="team-name">${esc(u.name)}${me ? ' <span class="muted">(você)</span>' : ''}${u.role === 'admin' ? ' <span class="tag">admin</span>' : ''}</div>
+          <div class="team-meta">${esc(load)} · ${esc(when)}</div>
+        </div>
+        <span class="team-status ${u.status}">${esc(TEAM_LABEL[u.status])}</span>
+      </div>`;
+    }).join('') || '<div class="d-empty">Nenhum atendente cadastrado</div>';
+  }
+  function openTeam() {
+    $('team-modal').hidden = false;
+    renderTeam();
+    loadTeam();
+    clearInterval(teamTimer);
+    teamTimer = setInterval(loadTeam, 30000);
+  }
+  function closeTeam() { $('team-modal').hidden = true; clearInterval(teamTimer); }
+  $('btn-team').addEventListener('click', () => ($('team-modal').hidden ? openTeam() : closeTeam()));
+  $('team-close').addEventListener('click', closeTeam);
+  $('team-modal').addEventListener('click', (e) => { if (e.target === $('team-modal')) closeTeam(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('team-modal').hidden) closeTeam(); });
 
   // ---------- Presença e "está digitando" ----------
   let typingSocket = null;
@@ -2523,7 +2582,18 @@
     const socket = io({ withCredentials: true });
     typingSocket = socket;
     socket.on('presence:all', (ids) => { for (const id of ids) setPresence(id, { online: true }); renderList(); if (current()) renderChat(); });
-    socket.on('presence', ({ user_id, online, availability }) => {
+    socket.on('presence', ({ user_id, online, availability, last_online_at }) => {
+      const t = (state.team || []).find((u) => u.id === user_id);
+      if (t) {
+        t.online = online;
+        if (availability) t.availability = availability;
+        if (last_online_at) t.last_online_at = last_online_at;
+        t.status = online ? (t.availability === 'away' ? 'away' : 'available') : 'offline';
+        const on = state.team.filter((u) => u.status === 'available').length;
+        $('team-online').hidden = !on;
+        $('team-online').textContent = on;
+        if (!$('team-modal').hidden) renderTeam();
+      } else loadTeam();
       setPresence(user_id, availability ? { online, availability } : { online });
       if (user_id === state.me.id) renderMyPresence();
       renderList();
@@ -2913,6 +2983,7 @@
     renderMyPresence();
     await loadSectors();
     loadPlans();
+    loadTeam();
     els.tagFilter.innerHTML = '<option value="">Todas as tags</option>' + tags.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
     els.dAssignee.innerHTML = '<option value="">Sem responsável</option>' + users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
     try {

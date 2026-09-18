@@ -1,6 +1,12 @@
 const { Server } = require('socket.io');
 const cookie = require('cookie');
 const { COOKIE_NAME, loadUserFromToken } = require('./middleware/auth');
+const db = require('./db');
+
+/** Marca no banco a última vez que o atendente esteve conectado (o painel Equipe usa isso). */
+function touchLastOnline(userId) {
+  db.query('UPDATE users SET last_online_at = NOW() WHERE id = $1', [userId]).catch(() => {});
+}
 
 let io = null;
 const online = new Map(); // userId -> Set(socket ids)
@@ -28,7 +34,8 @@ function init(httpServer) {
     const set = online.get(socket.user.id) || new Set();
     set.add(socket.id);
     online.set(socket.user.id, set);
-    broadcast('presence', { user_id: socket.user.id, online: true });
+    touchLastOnline(socket.user.id);
+    broadcast('presence', { user_id: socket.user.id, online: true, availability: socket.user.availability || 'available' });
     socket.emit('presence:all', presenceList());
 
     // "Fulano está digitando" na conversa X (repassado aos outros, some sozinho após 4s)
@@ -41,7 +48,7 @@ function init(httpServer) {
     socket.on('disconnect', () => {
       const s = online.get(socket.user.id);
       if (s) { s.delete(socket.id); if (!s.size) online.delete(socket.user.id); }
-      if (!online.has(socket.user.id)) broadcast('presence', { user_id: socket.user.id, online: false });
+      if (!online.has(socket.user.id)) { touchLastOnline(socket.user.id); broadcast('presence', { user_id: socket.user.id, online: false, last_online_at: new Date().toISOString() }); }
     });
   });
 

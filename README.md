@@ -104,6 +104,7 @@ public/                login, inbox, relatórios e configurações
 | POST | `/api/conversations/:id/read` | zera não lidas e marca como lida na Meta |
 | GET | `/api/reports/summary\|volume\|agents\|tags?from&to&group` | relatórios |
 | GET/POST/PATCH/DELETE | `/api/tags`, `/api/users`, `/api/plans` | administração (planos: catálogo de consultas) |
+| GET | `/api/users/team` | equipe agora: quem está online, ausente ou offline, carga e última vez visto |
 | GET/POST/PATCH/DELETE | `/api/quick-replies`, `/api/quick-replies/:id/media` | respostas rápidas da equipe ou pessoais, com mídia anexada |
 | GET/PATCH/DELETE | `/api/contacts/:id` | ficha do contato (campos extras, exclusão só admin) |
 | PUT/PATCH/DELETE, POST renew | `/api/contacts/:id/plan` | atribuir, ajustar, remover e renovar o plano de consultas |

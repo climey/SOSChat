@@ -22,6 +22,11 @@
       <span class="rail-label">Caixa de entrada</span>
       <span class="rail-badge" id="rail-unread" hidden>0</span>
     </a>
+    <button class="rail-btn" id="btn-team" title="Equipe: quem está online agora">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span class="rail-badge" id="team-online" hidden>0</span>
+      <span class="rail-label">Equipe</span>
+    </button>
     <a href="/reports.html" class="rail-btn" data-page="/reports.html" title="Relatórios">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       <span class="rail-label">Relatórios</span>
@@ -326,6 +331,18 @@
   <button type="button" data-plan="change"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><polyline points="9 14 11 16 15 12"/></svg>Trocar de plano</button>
   <div class="sep"></div>
   <button type="button" data-plan="remove" class="danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Remover plano</button>
+</div>
+
+<div class="modal-bg" id="team-modal" hidden>
+  <div class="modal wide" id="team-panel">
+    <div class="drawer-head" style="padding:0 0 10px">
+      <button type="button" class="icon-btn" id="team-close" title="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <h3 style="margin:0">Equipe agora</h3>
+    </div>
+    <div class="team-summary" id="team-summary"></div>
+    <div class="team-list" id="team-list"></div>
+    <p class="small muted" style="margin:12px 0 0">Online é quem está com o SOS Chat aberto. Quem marca "Ausente" continua conectado, mas avisa que não está atendendo.</p>
+  </div>
 </div>
 
 <div class="conv-menu tag-popup" id="tag-popup" hidden></div>
