@@ -98,7 +98,7 @@ async function start() {
   server.listen(config.port, () => {
     console.log(`SOS Chat rodando em ${config.appUrl} (${config.isProd ? 'produção' : 'desenvolvimento'})`);
     const veh = require('./services/vehicle-lookup');
-    console.log(`[pré-consulta] fontes: placa = ${veh.sourcesStatus().placa}; chassi = ${veh.sourcesStatus().chassi}. ${veh.chromeStatus()}`);
+    console.log(`[pré-consulta] fontes — placa: ${veh.sourcesStatus().placa}; chassi: ${veh.sourcesStatus().chassi}. ${veh.chromeStatus()}`);
     console.log(`WhatsApp: provedor ${whatsapp.provider}${whatsapp.provider === 'cloud' ? (whatsapp.isConfigured() ? ' (Cloud API configurada)' : ' (modo simulado, sem credenciais)') : ' (QR code em Configurações)'}`);
   });
 }

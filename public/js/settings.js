@@ -505,7 +505,6 @@
     $('veh-mode').value = settings.vehicle_lookup_mode || 'suggest';
     $('veh-template').value = settings.vehicle_preview_template || '';
     $('veh-fix-template').value = settings.vehicle_fix_template || '';
-    if (settings.vehicle_sources) $('veh-sources').textContent = `Fontes em uso — placa: ${settings.vehicle_sources.placa}; chassi: ${settings.vehicle_sources.chassi}. (Definidas pelas variáveis APIPLACAS_TOKEN e WEBXCAR_API_KEY no servidor.)`;
     vehDefaultTemplate = settings.vehicle_preview_template_default || vehDefaultTemplate;
     const ro = me.role !== 'admin';
     $('veh-mode').disabled = ro; $('veh-template').disabled = ro; $('veh-fix-template').disabled = ro; $('veh-reset').hidden = ro;
@@ -530,9 +529,9 @@
       const v = await api('GET', `/api/vehicles/${encodeURIComponent($('veh-test-plate').value)}/resolve`);
       const lk = v.lookup;
       if (lk && lk.status === 'found') out.textContent = `${lk.cached ? '(do cache) ' : ''}${JSON.stringify(lk.data.fields, null, 2)}\n\n--- mensagem que o cliente receberia ---\n${lk.message}`;
-      else if (v.alternatives && v.alternatives.length) out.textContent = `${v.valid ? 'Formato certo, mas não existe no site.' : 'Formato errado: ' + v.errors.join('; ')}\nCorreções que existem no site:\n` + v.alternatives.map((a) => `  ${a.ref} → ${a.data.fields.marca} ${a.data.fields.modelo} ${a.data.fields.ano || ''}`).join('\n') + `\n\n--- mensagem que o cliente receberia ---\n${v.alternatives[0].message}`;
+      else if (v.alternatives && v.alternatives.length) out.textContent = `${v.valid ? 'Formato certo, mas não existe na base.' : 'Formato errado: ' + v.errors.join('; ')}\nCorreções que existem na base:\n` + v.alternatives.map((a) => `  ${a.ref} → ${a.data.fields.marca} ${a.data.fields.modelo} ${a.data.fields.ano || ''}`).join('\n') + `\n\n--- mensagem que o cliente receberia ---\n${v.alternatives[0].message}`;
       else if (lk && lk.status === 'error') out.textContent = `Erro: ${lk.error || 'não foi possível buscar'}`;
-      else out.textContent = (v.valid ? 'Veículo não encontrado no site.' : 'Formato errado: ' + v.errors.join('; ')) + (v.tested && v.tested.length ? ` Também testei ${v.tested.join(', ')}: nada.` : '');
+      else out.textContent = (v.valid ? 'Veículo não encontrado na base.' : 'Formato errado: ' + v.errors.join('; ')) + (v.tested && v.tested.length ? ` Também testei ${v.tested.join(', ')}: nada.` : '');
     } catch (err) { out.textContent = 'Erro: ' + err.message; }
   });
   function resetPlanForm() {

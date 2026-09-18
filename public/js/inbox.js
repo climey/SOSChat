@@ -2077,34 +2077,34 @@
     const v = state.vehicles.get(kind + ':' + plate);
     if (!v) { loadVehicle(plate, false, kind); return '<div class="veh-card loading">Buscando dados do veículo…</div>'; }
     if (v === 'loading') return '<div class="veh-card loading">Buscando dados do veículo…</div>';
-    if (v.status === 'not_found') return `<div class="veh-card none">Placa ${esc(plate)} não encontrada no site de consulta. Confira com o cliente ou siga direto para a consulta completa.</div>`;
-    if (v.status !== 'found') return `<div class="veh-card none">Não foi possível buscar o veículo agora (${esc(v.error || 'site fora do ar')}). <button type="button" class="btn btn-sm btn-ghost" data-veh-retry="${esc(plate)}" data-veh-kind="${kind}">Tentar de novo</button></div>`;
+    if (v.status === 'not_found') return `<div class="veh-card none">Placa ${esc(plate)} não encontrada na base de consulta. Confira com o cliente ou siga direto para a consulta completa.</div>`;
+    if (v.status !== 'found') return `<div class="veh-card none">${esc(v.error || 'Não foi possível buscar o veículo agora.')} <button type="button" class="btn btn-sm btn-ghost" data-veh-retry="${esc(plate)}" data-veh-kind="${kind}">Tentar de novo</button></div>`;
     return foundCardHtml(v, plate, kind, { sent: v.sent_at && c && v.conversation_id === c.id });
   }
   /**
    * Chassi: conferência e busca no mesmo cartão. Se o chassi não existir, mostra as correções
-   * prováveis que existem no site, cada uma com o botão de enviar ao cliente.
+   * prováveis que existem na base, cada uma com o botão de enviar ao cliente.
    */
   function chassiCardHtml(r, i) {
     const c = current();
     const key = 'chassi:' + r.value;
     const v = state.vehicles.get(key);
-    if (!v) { loadVehicle(r.value, false, 'chassi', true); return '<div class="veh-card loading">Conferindo o chassi no site…</div>'; }
-    if (v === 'loading') return '<div class="veh-card loading">Conferindo o chassi no site…</div>';
+    if (!v) { loadVehicle(r.value, false, 'chassi', true); return '<div class="veh-card loading">Conferindo o chassi…</div>'; }
+    if (v === 'loading') return '<div class="veh-card loading">Conferindo o chassi…</div>';
     const mine = (x) => Boolean(x && x.sent_at && c && v.conversation_id === c.id);
     if (v.lookup && v.lookup.status === 'found') return foundCardHtml(v.lookup, r.value, 'chassi', { sent: mine(v.lookup) });
     if (v.alternatives && v.alternatives.length) {
-      return `<div class="veh-alts"><div class="veh-head">Chassi <b>${esc(r.value)}</b> não existe no site. ${v.alternatives.length === 1 ? 'Provavelmente é este veículo:' : 'Pode ser um destes:'}</div>
+      return `<div class="veh-alts"><div class="veh-head">Chassi <b>${esc(r.value)}</b> não existe na base. ${v.alternatives.length === 1 ? 'Provavelmente é este veículo:' : 'Pode ser um destes:'}</div>
         ${v.alternatives.map((a) => foundCardHtml(a, a.ref, 'chassi', { original: r.value, reload: r.value, sent: mine(a) })).join('')}</div>`;
     }
     if (v.status === 'error' || (v.lookup && v.lookup.status === 'error')) {
-      return `<div class="veh-card none">Não foi possível buscar o veículo agora (${esc(v.error || (v.lookup && v.lookup.error) || 'site fora do ar')}). <button type="button" class="btn btn-sm btn-ghost" data-veh-retry="${esc(r.value)}" data-veh-kind="chassi">Tentar de novo</button></div>`;
+      return `<div class="veh-card none">${esc(v.error || (v.lookup && v.lookup.error) || 'Não foi possível buscar o veículo agora.')} <button type="button" class="btn btn-sm btn-ghost" data-veh-retry="${esc(r.value)}" data-veh-kind="chassi">Tentar de novo</button></div>`;
     }
     const tested = v.tested && v.tested.length ? ` Também testei ${v.tested.map((t) => `<code>${esc(t)}</code>`).join(', ')}: nada.` : '';
-    return `<div class="veh-card none">Chassi ${esc(r.value)} não encontrado no site de consulta.${tested} O melhor é pedir para o cliente conferir no documento.
+    return `<div class="veh-card none">Chassi ${esc(r.value)} não encontrado na base de consulta.${tested} O melhor é pedir para o cliente conferir no documento.
       <button type="button" class="btn btn-sm btn-primary" data-ref-ask="${i}" title="Preenche a mensagem pedindo para o cliente conferir">Pedir para conferir</button></div>`;
   }
-  /** Resultado da conferência do chassi no site, para decidir a cor do aviso. */
+  /** Resultado da conferência do chassi na base, para decidir a cor do aviso. */
   function chassiOutcome(r) {
     const v = state.vehicles.get('chassi:' + r.value);
     if (!v || v === 'loading') return 'pending';
@@ -2177,7 +2177,7 @@
         const card = chassiCardHtml(r, i);
         let head;
         if (!r.ok) head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>Chassi ${esc(r.raw || shown)}</b> parece errado: ${esc(r.errors.join('; '))}</span>`;
-        else if (outcome === 'missing') head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>Chassi ${esc(shown)}</b> tem o formato certo, mas não existe no site de consulta</span>`;
+        else if (outcome === 'missing') head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>Chassi ${esc(shown)}</b> tem o formato certo, mas não existe na base de consulta</span>`;
         else head = `<span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text"><b>Chassi ${esc(shown)}</b> ${outcome === 'found' ? 'confere: veículo encontrado' : 'parece correto'}${r.warnings[0] && outcome !== 'found' ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : ''}</span>`;
         const actions = r.ok
           ? `<button type="button" class="btn btn-sm ${outcome === 'fixed' || outcome === 'missing' ? '' : 'btn-primary'}" data-ref-copy="${esc(shown)}" title="Copia para você fazer a pré-consulta">Copiar</button>

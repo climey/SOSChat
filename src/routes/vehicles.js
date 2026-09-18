@@ -8,6 +8,12 @@ router.use(requireAuth);
 
 const parseId = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
 const parseKind = (v) => (v === 'chassi' || v === 'placa' ? v : null);
+/** Atendente não vê de onde veio o dado nem o motivo técnico de uma falha; administrador vê (para diagnóstico). */
+function forUser(obj, user) {
+  if (!obj || typeof obj !== 'object' || user.role === 'admin') return obj;
+  const { source, detail, failures, ...rest } = obj;
+  return rest;
+}
 
 /** Diagnóstico da pré-consulta (admin): consulta na fonte configurada, sem cache. ?ref=ABC1234 ou chassi */
 router.get('/debug/probe', async (req, res, next) => {
@@ -27,12 +33,12 @@ router.get('/:ref', async (req, res, next) => {
     if (result.status === 'invalid') return res.status(400).json({ error: result.error });
     const { template, mode } = await vehicles.settings();
     const convId = parseId(req.query.conversation);
-    res.json({
+    res.json(forUser({
       ...result,
       mode,
       message: result.status === 'found' ? vehicles.renderMessage(template, result.ref, result.data, result.kind) : null,
       sent_at: convId ? await vehicles.previewSentAt(convId, result.ref, result.kind) : null,
-    });
+    }, req.user));
   } catch (err) { next(err); }
 });
 
@@ -45,11 +51,11 @@ router.get('/:ref/resolve', async (req, res, next) => {
     const result = await vehicles.resolve(req.params.ref, { force: req.query.force === '1', kind: parseKind(req.query.kind) });
     const { template, fixTemplate, mode } = await vehicles.settings();
     const convId = parseId(req.query.conversation);
-    const decorate = async (lk, original) => ({
+    const decorate = async (lk, original) => forUser({
       ...lk,
       message: lk.status === 'found' ? vehicles.renderMessage(original ? fixTemplate : template, lk.ref, lk.data, result.kind, { original }) : null,
       sent_at: convId ? await vehicles.previewSentAt(convId, lk.ref, result.kind) : null,
-    });
+    }, req.user);
     res.json({
       ...result,
       mode,

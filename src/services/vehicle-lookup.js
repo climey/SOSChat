@@ -2,12 +2,13 @@
  * Pré-consulta de placa ou chassi: busca os dados básicos do veículo, guarda em cache e monta a
  * mensagem de confirmação para o cliente.
  *
- * Fontes, por tipo, na ordem de preferência (a primeira configurada vence):
- *   chassi → WebXCar (WEBXCAR_API_KEY) → Ke Placa
- *   placa  → API Placas (APIPLACAS_TOKEN) → Ke Placa
- * O Ke Placa é um site público atrás da Cloudflare que só aceita navegador de verdade: a busca é feita
- * por um Chromium headless que abre sob demanda; de IPs de datacenter costuma ser barrado, por isso é
- * só o último recurso. Todas as fontes são normalizadas para os mesmos campos (marca, modelo, ano...).
+ * Fontes, por tipo: primeiro o Ke Placa (site público, grátis); se ele FALHAR (bloqueio, fora do ar),
+ * cai para a API paga configurada — chassi → WebXCar (WEBXCAR_API_KEY), placa → API Placas (APIPLACAS_TOKEN).
+ * "Não encontrado" no Ke Placa é resposta final (não gasta crédito). Nas fontes pagas, a conferência de
+ * correções de chassi testa só a melhor candidata.
+ * O Ke Placa fica atrás da Cloudflare e só aceita navegador de verdade: a busca é feita por um Chromium
+ * headless que abre sob demanda; de IPs de datacenter costuma ser barrado. Todas as fontes são
+ * normalizadas para os mesmos campos (marca, modelo, ano...). O atendente não vê de onde veio o dado.
  *
  * Cuidados: uma busca por vez no Ke Placa, com intervalo mínimo; cache por 30 dias; tempo limite curto.
  */
@@ -322,60 +323,78 @@ async function fetchKeplaca(kind, ref) {
 }
 
 const SOURCES = {
-  webxcar: { label: 'WebXCar', kinds: ['chassi'], enabled: () => Boolean(process.env.WEBXCAR_API_KEY), fetch: fetchWebxcar },
-  apiplacas: { label: 'API Placas', kinds: ['placa'], enabled: () => Boolean(process.env.APIPLACAS_TOKEN), fetch: fetchApiPlacas },
-  keplaca: { label: 'Ke Placa (site, via Chromium)', kinds: ['placa', 'chassi'], enabled: () => true, fetch: fetchKeplaca },
+  keplaca: { label: 'Ke Placa (site, via Chromium)', kinds: ['placa', 'chassi'], paid: false, enabled: () => true, fetch: fetchKeplaca },
+  webxcar: { label: 'WebXCar', kinds: ['chassi'], paid: true, enabled: () => Boolean(process.env.WEBXCAR_API_KEY), fetch: fetchWebxcar },
+  apiplacas: { label: 'API Placas', kinds: ['placa'], paid: true, enabled: () => Boolean(process.env.APIPLACAS_TOKEN), fetch: fetchApiPlacas },
 };
-/** Fonte usada para cada tipo: a primeira configurada. */
-function sourceFor(kind) {
-  for (const [name, src] of Object.entries(SOURCES)) if (src.kinds.includes(kind) && src.enabled()) return name;
-  return 'keplaca';
+/** Fontes de um tipo, na ordem de tentativa: a grátis primeiro, a paga só se a grátis falhar. */
+function sourcesFor(kind) {
+  return Object.entries(SOURCES).filter(([, src]) => src.kinds.includes(kind) && src.enabled()).map(([name]) => name);
 }
+function sourceFor(kind) { return sourcesFor(kind)[0]; }
 function sourcesStatus() {
-  return { placa: SOURCES[sourceFor('placa')].label, chassi: SOURCES[sourceFor('chassi')].label };
+  const label = (kind) => sourcesFor(kind).map((n) => SOURCES[n].label).join(' → ');
+  return { placa: label('placa'), chassi: label('chassi') };
 }
 
-async function fetchFromSite(kind, ref) {
-  return SOURCES[sourceFor(kind)].fetch(kind, ref);
+/**
+ * Tenta as fontes em ordem; passa para a próxima só quando a anterior FALHA (erro, bloqueio).
+ * Devolve { status, data, source, detail }. Se todas falharem, lança o erro da última, listando as tentativas.
+ */
+async function fetchFromSite(kind, ref, { paidOk = true } = {}) {
+  const names = sourcesFor(kind).filter((n) => paidOk || !SOURCES[n].paid);
+  const failures = [];
+  for (const name of names) {
+    try {
+      const r = await SOURCES[name].fetch(kind, ref);
+      return { ...r, source: name, failures };
+    } catch (err) {
+      failures.push(`${SOURCES[name].label}: ${String(err.message || err)}`);
+      console.warn(`[pré-consulta] ${kind} ${ref} falhou em ${name}: ${String(err.message || err).slice(0, 300)}`);
+    }
+  }
+  throw new Error(failures.join(' | ') || 'nenhuma fonte configurada');
 }
 
 /**
  * Busca a placa ou o chassi (cache de 30 dias).
  * Devolve { kind, ref, plate, status: found|not_found|error|invalid, data, fetched_at, cached, error }.
  */
-async function lookup(raw, { force = false, kind: hint = null } = {}) {
+async function lookup(raw, { force = false, kind: hint = null, paidOk = true } = {}) {
   const ref = normalizeRef(raw);
   const kind = kindOf(ref, hint);
   if (!kind || (kind === 'placa' && !isPlate(ref)) || (kind === 'chassi' && !isChassi(ref))) {
     return { kind, ref, plate: ref, status: 'invalid', data: null, error: kind === 'chassi' ? 'Chassi inválido (17 caracteres, sem I, O e Q)' : (kind === 'placa' ? 'Placa inválida' : 'Informe uma placa (7 caracteres) ou um chassi (17)') };
   }
-  const source = sourceFor(kind);
   if (!force) {
+    // qualquer fonte serve no cache (o resultado mais recente que não foi erro)
     const { rows } = await db.query(
-      `SELECT status, data, fetched_at FROM vehicle_lookups WHERE kind = $1 AND plate = $2 AND source = $3 AND fetched_at > NOW() - make_interval(days => $4)`,
-      [kind, ref, source, CACHE_DAYS]
+      `SELECT status, data, source, fetched_at FROM vehicle_lookups WHERE kind = $1 AND plate = $2 AND status <> 'error' AND fetched_at > NOW() - make_interval(days => $3)
+       ORDER BY fetched_at DESC LIMIT 1`,
+      [kind, ref, CACHE_DAYS]
     );
-    if (rows.length && rows[0].status !== 'error') return { kind, ref, plate: ref, source, status: rows[0].status, data: rows[0].data, fetched_at: rows[0].fetched_at, cached: true };
+    if (rows.length) return { kind, ref, plate: ref, source: rows[0].source, status: rows[0].status, data: rows[0].data, fetched_at: rows[0].fetched_at, cached: true };
   }
   let result;
   try {
-    result = await fetchFromSite(kind, ref);
+    result = await fetchFromSite(kind, ref, { paidOk });
   } catch (err) {
     const detail = String(err.message || err).slice(0, 400);
-    console.warn(`[pré-consulta] ${kind} ${ref} (${source}): ${detail}`);
+    const source = sourceFor(kind) || 'keplaca';
     await db.query(
       `INSERT INTO vehicle_lookups (kind, plate, source, status, data, error, fetched_at) VALUES ($1, $2, $3, 'error', NULL, $4, NOW())
        ON CONFLICT (kind, plate, source) DO UPDATE SET status = 'error', error = EXCLUDED.error, fetched_at = NOW()`,
       [kind, ref, source, detail]
     );
-    return { kind, ref, plate: ref, source, status: 'error', data: null, error: `Não foi possível consultar agora: ${detail}`, cached: false };
+    // o atendente recebe um aviso genérico; o motivo fica no log, no cache e no diagnóstico do administrador
+    return { kind, ref, plate: ref, source, status: 'error', data: null, error: 'Não foi possível consultar agora. Tente de novo em instantes.', detail, cached: false };
   }
   await db.query(
     `INSERT INTO vehicle_lookups (kind, plate, source, status, data, error, fetched_at) VALUES ($1, $2, $3, $4, $5, NULL, NOW())
      ON CONFLICT (kind, plate, source) DO UPDATE SET status = EXCLUDED.status, data = EXCLUDED.data, error = NULL, fetched_at = NOW()`,
-    [kind, ref, source, result.status, result.data ? JSON.stringify(result.data) : null]
+    [kind, ref, result.source, result.status, result.data ? JSON.stringify(result.data) : null]
   );
-  return { kind, ref, plate: ref, source, status: result.status, data: result.data, fetched_at: new Date().toISOString(), cached: false };
+  return { kind, ref, plate: ref, source: result.source, status: result.status, data: result.data, fetched_at: new Date().toISOString(), cached: false, failures: result.failures };
 }
 
 /**
@@ -466,11 +485,16 @@ async function resolve(raw, { kind: hint = null, force = false } = {}) {
   if (check.ok) out.lookup = await lookup(ref, { kind, force });
   const needAlternatives = !check.ok || (out.lookup && out.lookup.status === 'not_found');
   if (!needAlternatives) return out;
-  const candidates = (check.ok ? RefCheck.chassiSuggestions(ref) : check.suggestions).filter((c) => c !== ref).slice(0, MAX_ALTERNATIVES);
+  // se a fonte grátis falhou na busca principal, as candidatas iriam para a API paga: testa só a melhor
+  const paidFallback = out.lookup && out.lookup.status !== 'error' && out.lookup.source && SOURCES[out.lookup.source] && SOURCES[out.lookup.source].paid;
+  const freeFailed = Boolean(out.lookup && out.lookup.status === 'error') || paidFallback;
+  const max = freeFailed ? 1 : MAX_ALTERNATIVES;
+  const candidates = (check.ok ? RefCheck.chassiSuggestions(ref) : check.suggestions).filter((c) => c !== ref).slice(0, max);
   for (const cand of candidates) {
-    const lk = await lookup(cand, { kind, force });
+    const lk = await lookup(cand, { kind, force, paidOk: out.tested.length === 0 || !freeFailed });
     out.tested.push(cand);
     if (lk.status === 'found') out.alternatives.push({ ref: cand, status: lk.status, data: lk.data, cached: lk.cached });
+    if (lk.status === 'error' && lk.source && SOURCES[lk.source] && SOURCES[lk.source].paid) break;
   }
   return out;
 }
@@ -516,7 +540,7 @@ async function probe(raw) {
   const t = Date.now();
   try {
     const r = await fetchFromSite(kind, ref);
-    return { ok: true, ref, kind, source, status: r.status, detail: r.detail || null, fields: r.data ? r.data.fields : null, ms: Date.now() - t, sources: sourcesStatus(), chrome: chromeStatus() };
+    return { ok: true, ref, kind, source: r.source, failures: r.failures, status: r.status, detail: r.detail || null, fields: r.data ? r.data.fields : null, ms: Date.now() - t, sources: sourcesStatus(), chrome: chromeStatus() };
   } catch (err) {
     return { ok: false, ref, kind, source, error: String(err.message || err).slice(0, 400), ms: Date.now() - t, sources: sourcesStatus(), chrome: chromeStatus() };
   }
@@ -530,5 +554,5 @@ async function shutdown() {
 
 module.exports = {
   lookup, resolve, parse, renderMessage, sendPreview, previewSentAt, maybeAutoPreview, settings, normalizePlate, normalizeRef, isPlate, isChassi, kindOf,
-  DEFAULT_TEMPLATE, DEFAULT_FIX_TEMPLATE, SYSTEM_USER, _setFetcher, _setHttp, browserAvailable, chromeStatus, sourceFor, sourcesStatus, fetchViaBrowser, probe, shutdown,
+  DEFAULT_TEMPLATE, DEFAULT_FIX_TEMPLATE, SYSTEM_USER, _setFetcher, _setHttp, browserAvailable, chromeStatus, sourceFor, sourcesFor, sourcesStatus, fetchViaBrowser, probe, shutdown,
 };

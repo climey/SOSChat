@@ -52,7 +52,6 @@ async function getAll() {
   for (const r of rows) out[r.key] = parseValue(r.key, r.value);
   out.vehicle_preview_template_default = require('../services/vehicle-lookup').DEFAULT_TEMPLATE;
   out.vehicle_fix_template_default = require('../services/vehicle-lookup').DEFAULT_FIX_TEMPLATE;
-  out.vehicle_sources = require('../services/vehicle-lookup').sourcesStatus();
   return out;
 }
 
