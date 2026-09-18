@@ -483,7 +483,7 @@ const MAX_ALTERNATIVES = 3;
  * caractere sobrando...) e devolve as que existem. Para placa, é só a busca.
  * Devolve { kind, ref, valid, errors, warnings, lookup, alternatives: [{ ref, status, data }], tested: [...] }.
  */
-async function resolve(raw, { kind: hint = null, force = false } = {}) {
+async function resolve(raw, { kind: hint = null, force = false, extra = [] } = {}) {
   const RefCheck = require('../../public/js/refcheck.js');
   const ref = normalizeRef(raw);
   const kind = kindOf(ref, hint) || (ref.length >= 15 ? 'chassi' : 'placa');
@@ -500,7 +500,8 @@ async function resolve(raw, { kind: hint = null, force = false } = {}) {
   const paidFallback = out.lookup && out.lookup.status !== 'error' && out.lookup.source && SOURCES[out.lookup.source] && SOURCES[out.lookup.source].paid;
   const freeFailed = Boolean(out.lookup && out.lookup.status === 'error') || paidFallback;
   const max = freeFailed ? 1 : MAX_ALTERNATIVES;
-  const candidates = (check.ok ? RefCheck.chassiSuggestions(ref) : check.suggestions).filter((c) => c !== ref).slice(0, max);
+  const extras = (Array.isArray(extra) ? extra : []).map(normalizeRef).filter((c) => isChassi(c) && c !== ref);
+  const candidates = [...new Set([...(check.ok ? RefCheck.chassiSuggestions(ref) : check.suggestions), ...extras])].filter((c) => c !== ref).slice(0, max);
   for (const cand of candidates) {
     const lk = await lookup(cand, { kind, force, paidOk: out.tested.length === 0 || !freeFailed });
     out.tested.push(cand);

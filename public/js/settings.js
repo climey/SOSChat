@@ -503,15 +503,17 @@
   async function loadVehicle() {
     const { settings } = await api('GET', '/api/settings');
     $('veh-mode').value = settings.vehicle_lookup_mode || 'suggest';
+    $('img-mode').value = settings.image_read_mode || 'auto';
+    if (settings.image_read_available === false) $('img-mode-note').textContent = 'A leitura de fotos ainda não está configurada no servidor (chave da API). Até lá, esta opção não tem efeito.';
     $('veh-template').value = settings.vehicle_preview_template || '';
     $('veh-fix-template').value = settings.vehicle_fix_template || '';
     vehDefaultTemplate = settings.vehicle_preview_template_default || vehDefaultTemplate;
     const ro = me.role !== 'admin';
-    $('veh-mode').disabled = ro; $('veh-template').disabled = ro; $('veh-fix-template').disabled = ro; $('veh-reset').hidden = ro;
+    $('veh-mode').disabled = ro; $('img-mode').disabled = ro; $('veh-template').disabled = ro; $('veh-fix-template').disabled = ro; $('veh-reset').hidden = ro;
   }
   $('veh-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try { await api('PUT', '/api/settings', { vehicle_lookup_mode: $('veh-mode').value, vehicle_preview_template: $('veh-template').value, vehicle_fix_template: $('veh-fix-template').value }); toast('Pré-consulta salva'); }
+    try { await api('PUT', '/api/settings', { vehicle_lookup_mode: $('veh-mode').value, image_read_mode: $('img-mode').value, vehicle_preview_template: $('veh-template').value, vehicle_fix_template: $('veh-fix-template').value }); toast('Pré-consulta salva'); }
     catch (err) { toast(err.message, true); }
   });
   $('veh-reset').addEventListener('click', async () => {

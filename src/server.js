@@ -68,6 +68,7 @@ app.use('/api/sectors', require('./routes/sectors'));
 app.use('/api/contacts', require('./routes/contacts'));
 app.use('/api/plans', require('./routes/plans'));
 app.use('/api/vehicles', require('./routes/vehicles'));
+app.use('/api/readings', require('./routes/readings'));
 if (config.enableDevSimulator) {
   app.use('/api/dev', require('./routes/dev'));
   console.log('[dev] simulador de mensagens habilitado em POST /api/dev/simulate-inbound');

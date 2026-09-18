@@ -20,6 +20,8 @@ Sem credenciais do WhatsApp o sistema roda em **modo simulado**: envios só apar
 
 ## Deploy no Railway
 
+Leitura de fotos (placa/chassi/motor) usa a API da Anthropic: defina `ANTHROPIC_API_KEY` (chave sem validade, criada em console.anthropic.com). Sem ela, a opção em Configurações não tem efeito e nada mais muda. Modelo padrão `claude-opus-5` (`VISION_MODEL` para trocar); custo na casa de centavos por foto.
+
 A pré-consulta de placa/chassi tenta primeiro o site Ke Placa (grátis, por um Chromium headless no servidor — o site só aceita navegador real e costuma barrar IPs de datacenter) e, só se ele falhar, usa a API paga configurada: **WebXCar** para chassi (`WEBXCAR_API_KEY`) e **API Placas** para placa (`APIPLACAS_TOKEN`). "Não encontrado" no Ke Placa é resposta final e não gasta crédito. O atendente não vê a fonte nem o motivo técnico de falhas; o administrador vê em `GET /api/vehicles/debug/probe?ref=…`. O `Dockerfile` (usado pelo Railway, ver `railway.json`) parte do Debian e instala o Chromium pelo apt, já com `CHROME_PATH=/usr/bin/chromium`. Em outro ambiente, defina `CHROME_PATH` apontando para o Chrome/Chromium. O log de boot mostra `[pré-consulta] Chromium: …` ou os caminhos tentados; sem Chromium, a pré-consulta avisa "site barrou a consulta" e o resto do sistema segue normal.
 
 1. Crie um projeto no Railway e adicione um serviço **PostgreSQL**. Ele injeta `DATABASE_URL` automaticamente.
@@ -106,6 +108,8 @@ public/                login, inbox, relatórios e configurações
 | POST | `/api/conversations/:id/read` | zera não lidas e marca como lida na Meta |
 | GET | `/api/reports/summary\|volume\|agents\|tags?from&to&group` | relatórios |
 | GET/POST/PATCH/DELETE | `/api/tags`, `/api/users`, `/api/plans` | administração (planos: catálogo de consultas) |
+| GET | `/api/readings?conversation=ID` | leituras de numeração feitas nas fotos da conversa |
+| POST | `/api/readings/:messageId` | lê (ou relê) placa/chassi/motor na foto da mensagem |
 | GET | `/api/vehicles/:ref/resolve?conversation=ID` | conferência + busca: valida o chassi, busca no site e testa as correções prováveis (as que existem voltam com mensagem pronta) |
 | GET | `/api/vehicles/:ref?conversation=ID` | dados básicos do veículo pela placa ou chassi (cache de 30 dias) e a mensagem de confirmação pronta |
 | POST | `/api/vehicles/:ref/send` | `{conversation_id, kind?, original?}` envia ao cliente a confirmação do veículo (com `original`, a mensagem de correção) |
@@ -134,6 +138,7 @@ Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` 
 - [x] **Etapa 1.9:** painel do contato no estilo Umbler (foto, abas Contato/Detalhes da conversa, observações, log de atividade, campos editáveis, bloquear/excluir) e **planos de consultas**: catálogo em Configurações, cartão de saldo no contato com chip `2/3` na lista e no cabeçalho, botão "Registrar consulta" (tipos configuráveis: Placa, Chassi, Motor, CRLV, CPF, CNPJ, Telefone, Nome completo, com detecção automática na conversa) que debita e gera nota interna, oferta de débito ao enviar PDF, aviso e etiqueta *Renovação* ao zerar, filtro por plano e relatório "Consultas e planos"
 - [x] **Etapa 1.10:** Conferência de chassi, placa, Renavam, CPF e CNPJ na conversa: aviso quando o dado do cliente parece errado, sugestão de correção com um clique, mensagem pronta pedindo para conferir e validação ao vivo no modal de consulta
 - [x] **Etapa 1.11:** Pré-consulta de placa ou chassi: ao chegar uma placa ou um chassi válido, busca os dados básicos do veículo no Ke Placa (cache de 30 dias, uma busca por vez), mostra o cartão ao atendente e envia a mensagem de confirmação ao cliente com um clique ou automaticamente; modelo da mensagem editável Conferência e pré-consulta unificadas: chassi errado ou inexistente tem as correções prováveis testadas no site e a que existe vai para o cliente confirmar (também no modo automático, quando só uma existe).
+- [x] **Etapa 1.12:** Leitura de numeração em fotos: foto do cliente com placa, chassi ou motor é lida pelo Claude (visão) e entra no mesmo fluxo de conferência, cartão do veículo e confirmação; modos automático/manual/desligado; precisa de `ANTHROPIC_API_KEY`.
 - [ ] **Etapa 2:** templates da Cloud API (janela de 24h), distribuição automática, saudação e horário de atendimento
 - [ ] **Etapa 3:** integração com a plataforma de consultas (detectar placa/chassi na mensagem e mostrar dados do veículo no painel lateral)
 - [ ] **Etapa 4:** filas/departamentos, horário de atendimento com mensagem automática, distribuição automática

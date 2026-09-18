@@ -403,10 +403,12 @@
     state.currentId = id;
     emitViewing(id);
     state.vehicles.clear();
-    const [{ conversation }, { messages }] = await Promise.all([
+    const [{ conversation }, { messages }, readings] = await Promise.all([
       api('GET', `/api/conversations/${id}`),
       api('GET', `/api/conversations/${id}/messages`),
+      api('GET', `/api/readings?conversation=${id}`).catch(() => ({ readings: [] })),
     ]);
+    state.readings = new Map((readings.readings || []).map((r) => [r.message_id, r]));
     rememberPrefs(conversation);
     state.currentConv = conversation;
     state.messages = messages;
@@ -2082,6 +2084,7 @@
     $('msg-search-input').select();
   }
   // ---------- Conferência de chassi, placa, Renavam, CPF e CNPJ ----------
+  state.readings = new Map(); // message id -> leitura da foto
   const refDismissed = new Map(); // conversa -> id da última mensagem cujo aviso o atendente fechou (esconde tudo até ali)
   const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
   const WARN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
@@ -2124,7 +2127,7 @@
     const c = current();
     const key = 'chassi:' + r.value;
     const v = state.vehicles.get(key);
-    if (!v) { loadVehicle(r.value, false, 'chassi', true); return '<div class="veh-card loading">Conferindo o chassi…</div>'; }
+    if (!v) { loadVehicle(r.value, false, 'chassi', true, r.alternativas || []); return '<div class="veh-card loading">Conferindo o chassi…</div>'; }
     if (v === 'loading') return '<div class="veh-card loading">Conferindo o chassi…</div>';
     const mine = (x) => Boolean(x && x.sent_at && c && v.conversation_id === c.id);
     if (v.lookup && v.lookup.status === 'found') return foundCardHtml(v.lookup, r.value, 'chassi', { sent: mine(v.lookup) });
@@ -2148,12 +2151,12 @@
     if (v.status === 'error' || (v.lookup && v.lookup.status === 'error')) return 'error';
     return 'missing';
   }
-  async function loadVehicle(plate, force = false, kind = 'placa', resolve = false) {
+  async function loadVehicle(plate, force = false, kind = 'placa', resolve = false, extra = []) {
     const c = current();
     const key = kind + ':' + plate;
     state.vehicles.set(key, 'loading');
     try {
-      const v = await api('GET', `/api/vehicles/${encodeURIComponent(plate)}${resolve ? '/resolve' : ''}?kind=${kind}&conversation=${c ? c.id : ''}${force ? '&force=1' : ''}`);
+      const v = await api('GET', `/api/vehicles/${encodeURIComponent(plate)}${resolve ? '/resolve' : ''}?kind=${kind}&conversation=${c ? c.id : ''}${force ? '&force=1' : ''}${extra.length ? '&extra=' + encodeURIComponent(extra.join(',')) : ''}`);
       state.vehicles.set(key, { ...v, conversation_id: c ? c.id : null });
     } catch (err) {
       state.vehicles.set(key, { status: 'error', error: err.message });
@@ -2188,50 +2191,103 @@
   /** Última mensagem do cliente que contém algo consultável (chassi, placa...), já validado. */
   function latestReferences() {
     if (!window.RefCheck) return null;
-    const inbound = state.messages.filter((m) => m.direction === 'in' && m.type === 'text' && m.body && !m.deleted_at && m.id > (refDismissed.get(m.conversation_id) || 0)).slice(-8).reverse();
+    const imgMode = state.settings.image_read_mode || 'auto';
+    const inbound = state.messages.filter((m) => m.direction === 'in' && !m.deleted_at && ((m.type === 'text' && m.body) || (m.type === 'image' && m.media_id && imgMode !== 'off')) && m.id > (refDismissed.get(m.conversation_id) || 0)).slice(-8).reverse();
     for (const m of inbound) {
+      if (m.type === 'image') {
+        const rd = state.readings.get(m.id);
+        if (!rd) { if (imgMode === 'manual') return { message: m, image: 'unread', list: [] }; continue; }
+        if (rd.status === 'pending') return { message: m, image: 'pending', list: [] };
+        if (rd.status === 'error') return { message: m, image: 'error', error: rd.error, list: [] };
+        const list = readingRefs(rd);
+        if (list.length) return { message: m, image: 'done', list: list.slice(0, 3) };
+        continue; // foto sem numeração: olha a mensagem anterior
+      }
       const list = RefCheck.detect(m.body);
       if (list.length) return { message: m, list: list.slice(0, 2) };
     }
     return null;
+  }
+  /** Itens lidos de uma foto viram referências como as digitadas (validadas), marcadas como vindas da foto. */
+  function readingRefs(rd) {
+    return (rd.items || []).map((it) => {
+      const fn = it.kind === 'motor' ? null : RefCheck.validatorFor(it.kind);
+      const base = fn ? fn(it.value) : { kind: 'motor', label: 'Motor', value: String(it.value || '').toUpperCase(), ok: !/\?/.test(it.value), errors: /\?/.test(it.value) ? ['parte ilegível na foto'] : [], warnings: [], suggestions: [] };
+      const suggestions = [...new Set([...(base.suggestions || []), ...(it.alternativas || [])])].slice(0, 4);
+      return { ...base, raw: it.value, suggestions, fromImage: true, confidence: it.confidence, alternativas: it.alternativas || [], observacao: it.observacao || '' };
+    }).filter((r) => r.value);
+  }
+  const CONF_LABEL = { alta: 'confiança alta', media: 'confiança média', baixa: 'confiança baixa' };
+  /** Prefixo dos avisos de dado lido de foto. */
+  function fromImageHtml(r) {
+    if (!r.fromImage) return '';
+    return `<span class="ref-photo" title="Numeração lida automaticamente da foto enviada pelo cliente">📷 lido da foto · ${CONF_LABEL[r.confidence] || 'confiança média'}${r.observacao ? ' · ' + esc(r.observacao) : ''}</span> `;
+  }
+  async function readImage(messageId) {
+    const c = current();
+    state.readings.set(messageId, { message_id: messageId, status: 'pending', items: [] });
+    renderRefHint();
+    try {
+      const { reading } = await api('POST', `/api/readings/${messageId}`);
+      state.readings.set(messageId, reading);
+    } catch (err) {
+      state.readings.set(messageId, { message_id: messageId, status: 'error', items: [], error: err.message });
+      toast(err.message, true);
+    }
+    if (current() === c) renderRefHint();
   }
   function renderRefHint() {
     const c = current();
     const box = $('ref-hint');
     const found = c ? latestReferences() : null;
     if (!found) { box.hidden = true; return; }
+    box.dataset.msg = found.message.id;
+    if (found.image && found.image !== 'done') {
+      const mid = found.message.id;
+      box.className = `ref-hint ${found.image === 'error' ? 'bad' : 'good'}`;
+      box.innerHTML = (found.image === 'pending'
+        ? `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Lendo a numeração da foto…</span></div>`
+        : found.image === 'error'
+          ? `<div class="ref-row"><span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text">${esc(found.error || 'Não consegui ler a foto')}</span><button type="button" class="btn btn-sm" data-read-image="${mid}">Tentar de novo</button></div>`
+          : `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Foto recebida do cliente</span><button type="button" class="btn btn-sm btn-primary" data-read-image="${mid}" title="Lê placa, chassi ou motor na foto">Ler numeração</button></div>`)
+        + '<button type="button" class="icon-btn ref-close" id="ref-close" title="Fechar aviso">✕</button>';
+      box.hidden = false;
+      return;
+    }
     const lookupOn = state.settings.vehicle_lookup_mode !== 'off';
     const anyBad = found.list.some((r) => !r.ok || (lookupOn && r.kind === 'chassi' && ['missing', 'fixed'].includes(chassiOutcome(r))));
     box.className = `ref-hint ${anyBad ? 'bad' : 'good'}`;
-    box.dataset.msg = found.message.id;
     box.innerHTML = found.list.map((r, i) => {
       const shown = r.display || r.value;
+      const photo = fromImageHtml(r);
       // chassi com pré-consulta ligada: conferência e busca no mesmo bloco
       if (lookupOn && r.kind === 'chassi') {
         const outcome = chassiOutcome(r);
         const card = chassiCardHtml(r, i);
         let head;
-        if (!r.ok) head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>Chassi ${esc(r.raw || shown)}</b> parece errado: ${esc(r.errors.join('; '))}</span>`;
-        else if (outcome === 'missing') head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>Chassi ${esc(shown)}</b> tem o formato certo, mas não existe na base de consulta</span>`;
-        else head = `<span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text"><b>Chassi ${esc(shown)}</b> ${outcome === 'found' ? 'confere: veículo encontrado' : 'parece correto'}${r.warnings[0] && outcome !== 'found' ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : ''}</span>`;
+        if (!r.ok) head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text">${photo}<b>Chassi ${esc(r.raw || shown)}</b> parece errado: ${esc(r.errors.join('; '))}</span>`;
+        else if (outcome === 'missing') head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text">${photo}<b>Chassi ${esc(shown)}</b> tem o formato certo, mas não existe na base de consulta</span>`;
+        else head = `<span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text">${photo}<b>Chassi ${esc(shown)}</b> ${outcome === 'found' ? 'confere: veículo encontrado' : 'parece correto'}${r.warnings[0] && outcome !== 'found' ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : ''}</span>`;
         const actions = r.ok
           ? `<button type="button" class="btn btn-sm ${outcome === 'fixed' || outcome === 'missing' ? '' : 'btn-primary'}" data-ref-copy="${esc(shown)}" title="Copia para você fazer a pré-consulta">Copiar</button>
              <button type="button" class="btn btn-sm btn-ghost" data-ref-use="${i}" title="Só depois do pagamento, na hora de entregar a consulta">Registrar consulta</button>`
           : (outcome === 'fixed' || outcome === 'missing' ? '' : `<button type="button" class="btn btn-sm" data-ref-ask="${i}" title="Preenche a mensagem pedindo para o cliente conferir">Pedir para conferir</button>`);
-        return `<div class="ref-row">${head}${actions}</div>${card}`;
+        const reread = r.fromImage && i === 0 ? `<button type="button" class="btn btn-sm btn-ghost" data-read-image="${found.message.id}" title="Lê a foto de novo">Ler de novo</button>` : '';
+        return `<div class="ref-row">${head}${actions}${reread}</div>${card}`;
       }
+      const reread = r.fromImage && i === 0 ? `<button type="button" class="btn btn-sm btn-ghost" data-read-image="${found.message.id}" title="Lê a foto de novo">Ler de novo</button>` : '';
       if (r.ok) {
         const warn = r.warnings[0] ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : '';
         const vehicle = r.kind === 'placa' && lookupOn ? vehicleCardHtml(r.value, r.kind) : '';
-        return `<div class="ref-row"><span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text"><b>${esc(r.label)} ${esc(shown)}</b> parece correto${warn}</span>
+        return `<div class="ref-row"><span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text">${photo}<b>${esc(r.label)} ${esc(shown)}</b> parece correto${warn}</span>
           <button type="button" class="btn btn-sm btn-primary" data-ref-copy="${esc(shown)}" title="Copia para você fazer a pré-consulta">Copiar</button>
-          <button type="button" class="btn btn-sm btn-ghost" data-ref-use="${i}" title="Só depois do pagamento, na hora de entregar a consulta">Registrar consulta</button></div>${vehicle}`;
+          <button type="button" class="btn btn-sm btn-ghost" data-ref-use="${i}" title="Só depois do pagamento, na hora de entregar a consulta">Registrar consulta</button>${reread}</div>${vehicle}`;
       }
       const sug = r.suggestions.length
         ? `<span class="ref-sug">Tentar: ${r.suggestions.map((v) => `<button type="button" class="chip" data-ref-copy="${esc(v)}" title="Copiar ${esc(v)} para a pré-consulta">${esc(v)}</button>`).join('')}</span>`
         : '';
-      return `<div class="ref-row"><span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>${esc(r.label)} ${esc(r.raw || shown)}</b> parece errado: ${esc(r.errors.join('; '))}</span>
-        ${sug}<button type="button" class="btn btn-sm" data-ref-ask="${i}" title="Preenche a mensagem pedindo para o cliente conferir">Pedir para conferir</button></div>`;
+      return `<div class="ref-row"><span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text">${photo}<b>${esc(r.label)} ${esc(r.raw || shown)}</b> parece errado: ${esc(r.errors.join('; '))}</span>
+        ${sug}<button type="button" class="btn btn-sm" data-ref-ask="${i}" title="Preenche a mensagem pedindo para o cliente conferir">Pedir para conferir</button>${reread}</div>`;
     }).join('') + '<button type="button" class="icon-btn ref-close" id="ref-close" title="Fechar aviso">✕</button>';
     box.hidden = false;
   }
@@ -2240,6 +2296,8 @@
     if (!found) return;
     const close = e.target.closest('#ref-close');
     if (close) { refDismissed.set(found.message.conversation_id, found.message.id); renderRefHint(); return; }
+    const readBtn = e.target.closest('[data-read-image]');
+    if (readBtn) { readImage(Number(readBtn.dataset.readImage)); return; }
     const copy = e.target.closest('[data-ref-copy]');
     const vehSend = e.target.closest('[data-veh-send]');
     const vehRetry = e.target.closest('[data-veh-retry]');
@@ -2944,6 +3002,12 @@
       if (touched) renderList();
     });
     socket.on('plans:updated', loadPlans);
+    socket.on('reading:updated', (rd) => {
+      if (!state.readings) state.readings = new Map();
+      state.readings.set(rd.message_id, rd);
+      const c = current();
+      if (c && rd.conversation_id === c.id) renderRefHint();
+    });
     socket.on('conversation:transferred', ({ conversation, from, note }) => {
       toast(`${from} transferiu ${contactName(conversation)} para você${note ? ': ' + note : ''}`);
       if ('Notification' in window && Notification.permission === 'granted' && !document.hasFocus()) {

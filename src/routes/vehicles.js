@@ -48,7 +48,8 @@ router.get('/:ref', async (req, res, next) => {
  */
 router.get('/:ref/resolve', async (req, res, next) => {
   try {
-    const result = await vehicles.resolve(req.params.ref, { force: req.query.force === '1', kind: parseKind(req.query.kind) });
+    const extra = typeof req.query.extra === 'string' ? req.query.extra.split(',').slice(0, 3) : [];
+    const result = await vehicles.resolve(req.params.ref, { force: req.query.force === '1', kind: parseKind(req.query.kind), extra });
     const { template, fixTemplate, mode } = await vehicles.settings();
     const convId = parseId(req.query.conversation);
     const decorate = async (lk, original) => forUser({
