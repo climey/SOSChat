@@ -9,6 +9,14 @@ router.use(requireAuth);
 const parseId = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
 const parseKind = (v) => (v === 'chassi' || v === 'placa' ? v : null);
 
+/** Diagnóstico da pré-consulta (admin): consulta na fonte configurada, sem cache. ?ref=ABC1234 ou chassi */
+router.get('/debug/probe', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Só administradores' });
+    res.json(await vehicles.probe(req.query.ref));
+  } catch (err) { next(err); }
+});
+
 /**
  * Dados básicos do veículo pela placa ou pelo chassi (cache de 30 dias). O tipo é deduzido pelo
  * tamanho (7 = placa, 17 = chassi) ou informado em ?kind=. ?conversation=ID diz se a confirmação já foi enviada.

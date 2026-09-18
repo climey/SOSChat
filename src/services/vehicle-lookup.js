@@ -1,19 +1,24 @@
 /**
- * Pré-consulta de placa ou chassi: busca os dados básicos do veículo em um site público (Ke Placa),
- * guarda em cache e monta a mensagem de confirmação para o cliente.
+ * Pré-consulta de placa ou chassi: busca os dados básicos do veículo, guarda em cache e monta a
+ * mensagem de confirmação para o cliente.
  *
- * O site fica atrás da Cloudflare e só aceita navegador de verdade: a busca é feita por um Chromium
- * headless (puppeteer-core + Chromium do sistema), que abre sob demanda e fecha quando fica ocioso.
- * Sem Chromium disponível, tenta o fetch comum (que costuma ser barrado) e informa o motivo.
+ * Fontes, por tipo, na ordem de preferência (a primeira configurada vence):
+ *   chassi → WebXCar (WEBXCAR_API_KEY) → Ke Placa
+ *   placa  → API Placas (APIPLACAS_TOKEN) → Ke Placa
+ * O Ke Placa é um site público atrás da Cloudflare que só aceita navegador de verdade: a busca é feita
+ * por um Chromium headless que abre sob demanda; de IPs de datacenter costuma ser barrado, por isso é
+ * só o último recurso. Todas as fontes são normalizadas para os mesmos campos (marca, modelo, ano...).
  *
- * Cuidados: uma busca por vez, com intervalo mínimo entre elas; cache por 30 dias; tempo limite curto.
+ * Cuidados: uma busca por vez no Ke Placa, com intervalo mínimo; cache por 30 dias; tempo limite curto.
  */
 const db = require('../db');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const SOURCE = 'keplaca';
+const WEBXCAR_URL = 'https://api.webxcar.com.br/chassis/';
+const APIPLACAS_URL = 'https://wdapi2.com.br/consulta/';
+const API_TIMEOUT_MS = 15000;
 const URLS = { placa: 'https://www.keplaca.com/placa/', chassi: 'https://www.keplaca.com/chassi/' };
 const KIND_LABEL = { placa: 'a placa', chassi: 'o chassi' };
 const CACHE_DAYS = 30;
@@ -230,14 +235,108 @@ function queued(task) {
   return run;
 }
 
-async function fetchFromSite(kind, ref) {
+// ---------- Fontes ----------
+/** HTTP JSON simples (trocável nos testes). */
+let httpJson = async (url, headers = {}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json', ...headers }, signal: controller.signal });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* resposta não é JSON */ }
+    return { status: res.status, json, text };
+  } finally { clearTimeout(timer); }
+};
+function _setHttp(fn) { httpJson = fn; }
+
+const str = (v) => (v === null || v === undefined ? '' : String(v).trim());
+const money = (n) => (typeof n === 'number' ? 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : str(n));
+const maskTail = (v) => (v && v.length > 6 ? '…' + v.slice(-6) : v);
+
+/** WebXCar — consulta por chassi (GET /chassis/:chassi, header Authorization). */
+async function fetchWebxcar(kind, ref) {
+  const { status, json, text } = await httpJson(WEBXCAR_URL + ref, { Authorization: process.env.WEBXCAR_API_KEY });
+  if (status === 404) return { status: 'not_found', data: null, detail: '404 ' + str(json && json.message) };
+  if (status === 401) throw new Error('WebXCar: chave de API inválida ou suspensa');
+  if (status === 403) throw new Error('WebXCar: a chave não tem o produto "consulta por chassi" contratado');
+  if (status === 422) return { status: 'not_found', data: null, detail: '422 ' + str(json && json.message) };
+  if (status !== 200 || !json) throw new Error(`WebXCar respondeu ${status}${json && json.message ? ': ' + json.message : ''}${!json ? ' (' + str(text).slice(0, 80) + ')' : ''}`);
+  // a resposta real vem embrulhada em { data: { basico, tecnico, fipes } }; a documentação mostra sem o data
+  const root = json.data && typeof json.data === 'object' && (json.data.basico || json.data.tecnico) ? json.data : json;
+  const b = root.basico || {};
+  const t = root.tecnico || {};
+  const placa = b.placa || {};
+  const fields = {
+    marca: str(b.marca), modelo: str(b.modelo),
+    ano: str(b.ano && b.ano.fabricacao), ano_modelo: str(b.ano && b.ano.modelo),
+    cor: str(b.cor), combustivel: Array.isArray(b.combustivel) ? b.combustivel.map(str).filter(Boolean).join('/') : str(b.combustivel),
+    importado: (b.procedencia || t.procedencia) ? (/nacional/i.test(b.procedencia || t.procedencia) ? 'Não' : 'Sim') : '',
+    municipio: str(b.cidade && b.cidade.nome), uf: str(b.estado && (b.estado.sigla || b.estado.nome)),
+    placa: str(placa.mercosul || placa.antiga), placa_antiga: str(placa.antiga), placa_mercosul: str(placa.mercosul),
+    potencia: t.potencia ? `${t.potencia} cv` : '', cilindrada: t.cilindradas ? `${t.cilindradas} cc` : '',
+    chassi: maskTail(str(t.numero_chassi && t.numero_chassi.numero) || ref), motor: maskTail(str(t.numero_motor)),
+    especie: str(t.tipo_veiculo && t.tipo_veiculo.nome), carroceria: str(t.tipo_carroceria), passageiros: str(t.capacidade_passageiro),
+  };
+  for (const k of Object.keys(fields)) if (!fields[k]) delete fields[k];
+  const fipe = (Array.isArray(root.fipes) ? root.fipes : []).slice(0, 5).map((f) => ({
+    codigo: str(f.codigo_fipe), modelo: [f.marca && f.marca.nome, f.modelo && f.modelo.nome].filter(Boolean).join(' '), ano: str(f.ano), valor: money(f.preco),
+    referencia: str(f.referencia && f.referencia.nome),
+  }));
+  if (!fields.marca && !fields.modelo) return { status: 'not_found', data: null };
+  return { status: 'found', data: { fields, fipe, title: `${fields.marca || ''} ${fields.modelo || ''}`.trim(), source: 'webxcar' } };
+}
+
+/** API Placas — consulta por placa (GET /consulta/:placa/:token). Campos conforme a documentação pública; tolerante a maiúsculas. */
+async function fetchApiPlacas(kind, ref) {
+  const { status, json, text } = await httpJson(APIPLACAS_URL + ref + '/' + process.env.APIPLACAS_TOKEN);
+  if (status === 404) return { status: 'not_found', data: null };
+  if (status === 401 || status === 403) throw new Error('API Placas: token inválido ou sem crédito');
+  if (status !== 200 || !json) throw new Error(`API Placas respondeu ${status}${!json ? ' (' + str(text).slice(0, 80) + ')' : ''}`);
+  const get = (...keys) => { for (const k of keys) { const hit = Object.keys(json).find((j) => j.toLowerCase() === k.toLowerCase()); if (hit && str(json[hit])) return str(json[hit]); } return ''; };
+  const extra = json.extra && typeof json.extra === 'object' ? json.extra : {};
+  const ex = (...keys) => { for (const k of keys) { const hit = Object.keys(extra).find((j) => j.toLowerCase() === k.toLowerCase()); if (hit && str(extra[hit])) return str(extra[hit]); } return ''; };
+  if (json.erro || json.error || /n[ãa]o encontrad/i.test(get('mensagem', 'message'))) return { status: 'not_found', data: null };
+  const fields = {
+    marca: get('marca', 'MARCA'), modelo: get('modelo', 'MODELO') || get('marcaModelo'), ano: get('ano'), ano_modelo: get('anoModelo', 'ano_modelo'),
+    cor: get('cor'), combustivel: ex('combustivel'), potencia: ex('potencia') ? ex('potencia') + ' cv' : '', cilindrada: ex('cilindradas', 'cilindrada'),
+    municipio: get('municipio'), uf: get('uf'), placa: get('placa') || ref, chassi: maskTail(get('chassi')), motor: maskTail(ex('motor')),
+    especie: ex('tipo_veiculo', 'especie'), situacao: get('situacao'),
+  };
+  for (const k of Object.keys(fields)) if (!fields[k]) delete fields[k];
+  const dados = json.fipe && Array.isArray(json.fipe.dados) ? json.fipe.dados : [];
+  const fipe = dados.slice(0, 5).map((f) => ({ codigo: str(f.codigo_fipe), modelo: str(f.texto_modelo), valor: str(f.texto_valor), referencia: str(f.mes_referencia) }));
+  if (!fields.marca && !fields.modelo) return { status: 'not_found', data: null };
+  return { status: 'found', data: { fields, fipe, title: `${fields.marca || ''} ${fields.modelo || ''}`.trim(), source: 'apiplacas' } };
+}
+
+/** Ke Placa — página pública, via Chromium (último recurso). */
+async function fetchKeplaca(kind, ref) {
   const { status, text } = await queued(() => fetcher(URLS[kind] + ref));
   if (status === 404) return { status: 'not_found', data: null };
   if (isBlocked(text)) throw new Error(`o site barrou a consulta (Cloudflare, ${status})${findChrome() ? '' : '; ' + chromeStatus()}`);
   if (status !== 200) throw new Error(`site respondeu ${status}`);
   const parsed = parse(text, ref);
   if (!parsed.found) return { status: 'not_found', data: null };
-  return { status: 'found', data: { fields: parsed.fields, fipe: parsed.fipe, title: parsed.title } };
+  return { status: 'found', data: { fields: parsed.fields, fipe: parsed.fipe, title: parsed.title, source: 'keplaca' } };
+}
+
+const SOURCES = {
+  webxcar: { label: 'WebXCar', kinds: ['chassi'], enabled: () => Boolean(process.env.WEBXCAR_API_KEY), fetch: fetchWebxcar },
+  apiplacas: { label: 'API Placas', kinds: ['placa'], enabled: () => Boolean(process.env.APIPLACAS_TOKEN), fetch: fetchApiPlacas },
+  keplaca: { label: 'Ke Placa (site, via Chromium)', kinds: ['placa', 'chassi'], enabled: () => true, fetch: fetchKeplaca },
+};
+/** Fonte usada para cada tipo: a primeira configurada. */
+function sourceFor(kind) {
+  for (const [name, src] of Object.entries(SOURCES)) if (src.kinds.includes(kind) && src.enabled()) return name;
+  return 'keplaca';
+}
+function sourcesStatus() {
+  return { placa: SOURCES[sourceFor('placa')].label, chassi: SOURCES[sourceFor('chassi')].label };
+}
+
+async function fetchFromSite(kind, ref) {
+  return SOURCES[sourceFor(kind)].fetch(kind, ref);
 }
 
 /**
@@ -250,32 +349,33 @@ async function lookup(raw, { force = false, kind: hint = null } = {}) {
   if (!kind || (kind === 'placa' && !isPlate(ref)) || (kind === 'chassi' && !isChassi(ref))) {
     return { kind, ref, plate: ref, status: 'invalid', data: null, error: kind === 'chassi' ? 'Chassi inválido (17 caracteres, sem I, O e Q)' : (kind === 'placa' ? 'Placa inválida' : 'Informe uma placa (7 caracteres) ou um chassi (17)') };
   }
+  const source = sourceFor(kind);
   if (!force) {
     const { rows } = await db.query(
       `SELECT status, data, fetched_at FROM vehicle_lookups WHERE kind = $1 AND plate = $2 AND source = $3 AND fetched_at > NOW() - make_interval(days => $4)`,
-      [kind, ref, SOURCE, CACHE_DAYS]
+      [kind, ref, source, CACHE_DAYS]
     );
-    if (rows.length && rows[0].status !== 'error') return { kind, ref, plate: ref, status: rows[0].status, data: rows[0].data, fetched_at: rows[0].fetched_at, cached: true };
+    if (rows.length && rows[0].status !== 'error') return { kind, ref, plate: ref, source, status: rows[0].status, data: rows[0].data, fetched_at: rows[0].fetched_at, cached: true };
   }
   let result;
   try {
     result = await fetchFromSite(kind, ref);
   } catch (err) {
     const detail = String(err.message || err).slice(0, 400);
-    console.warn(`[pré-consulta] ${kind} ${ref}: ${detail}`);
+    console.warn(`[pré-consulta] ${kind} ${ref} (${source}): ${detail}`);
     await db.query(
       `INSERT INTO vehicle_lookups (kind, plate, source, status, data, error, fetched_at) VALUES ($1, $2, $3, 'error', NULL, $4, NOW())
        ON CONFLICT (kind, plate, source) DO UPDATE SET status = 'error', error = EXCLUDED.error, fetched_at = NOW()`,
-      [kind, ref, SOURCE, detail]
+      [kind, ref, source, detail]
     );
-    return { kind, ref, plate: ref, status: 'error', data: null, error: `Não foi possível consultar agora: ${detail}`, cached: false };
+    return { kind, ref, plate: ref, source, status: 'error', data: null, error: `Não foi possível consultar agora: ${detail}`, cached: false };
   }
   await db.query(
     `INSERT INTO vehicle_lookups (kind, plate, source, status, data, error, fetched_at) VALUES ($1, $2, $3, $4, $5, NULL, NOW())
      ON CONFLICT (kind, plate, source) DO UPDATE SET status = EXCLUDED.status, data = EXCLUDED.data, error = NULL, fetched_at = NOW()`,
-    [kind, ref, SOURCE, result.status, result.data ? JSON.stringify(result.data) : null]
+    [kind, ref, source, result.status, result.data ? JSON.stringify(result.data) : null]
   );
-  return { kind, ref, plate: ref, status: result.status, data: result.data, fetched_at: new Date().toISOString(), cached: false };
+  return { kind, ref, plate: ref, source, status: result.status, data: result.data, fetched_at: new Date().toISOString(), cached: false };
 }
 
 /**
@@ -408,6 +508,20 @@ async function maybeAutoPreview(message, conversation) {
   }
 }
 
+/** Diagnóstico (admin): consulta uma referência na fonte configurada, sem cache, e devolve o que veio. */
+async function probe(raw) {
+  const ref = normalizeRef(raw || 'ABC1234');
+  const kind = kindOf(ref) || 'placa';
+  const source = sourceFor(kind);
+  const t = Date.now();
+  try {
+    const r = await fetchFromSite(kind, ref);
+    return { ok: true, ref, kind, source, status: r.status, detail: r.detail || null, fields: r.data ? r.data.fields : null, ms: Date.now() - t, sources: sourcesStatus(), chrome: chromeStatus() };
+  } catch (err) {
+    return { ok: false, ref, kind, source, error: String(err.message || err).slice(0, 400), ms: Date.now() - t, sources: sourcesStatus(), chrome: chromeStatus() };
+  }
+}
+
 async function shutdown() {
   clearTimeout(browserIdleTimer);
   const b = browser; browser = null;
@@ -416,5 +530,5 @@ async function shutdown() {
 
 module.exports = {
   lookup, resolve, parse, renderMessage, sendPreview, previewSentAt, maybeAutoPreview, settings, normalizePlate, normalizeRef, isPlate, isChassi, kindOf,
-  DEFAULT_TEMPLATE, DEFAULT_FIX_TEMPLATE, SYSTEM_USER, _setFetcher, browserAvailable, chromeStatus, fetchViaBrowser, shutdown,
+  DEFAULT_TEMPLATE, DEFAULT_FIX_TEMPLATE, SYSTEM_USER, _setFetcher, _setHttp, browserAvailable, chromeStatus, sourceFor, sourcesStatus, fetchViaBrowser, probe, shutdown,
 };

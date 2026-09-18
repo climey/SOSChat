@@ -505,6 +505,7 @@
     $('veh-mode').value = settings.vehicle_lookup_mode || 'suggest';
     $('veh-template').value = settings.vehicle_preview_template || '';
     $('veh-fix-template').value = settings.vehicle_fix_template || '';
+    if (settings.vehicle_sources) $('veh-sources').textContent = `Fontes em uso — placa: ${settings.vehicle_sources.placa}; chassi: ${settings.vehicle_sources.chassi}. (Definidas pelas variáveis APIPLACAS_TOKEN e WEBXCAR_API_KEY no servidor.)`;
     vehDefaultTemplate = settings.vehicle_preview_template_default || vehDefaultTemplate;
     const ro = me.role !== 'admin';
     $('veh-mode').disabled = ro; $('veh-template').disabled = ro; $('veh-fix-template').disabled = ro; $('veh-reset').hidden = ro;
