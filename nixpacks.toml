@@ -1,0 +1,8 @@
+# Railway (Nixpacks): além do Node, instala o Chromium usado pela pré-consulta de placa.
+# O site de consulta barra conexões que não vêm de um navegador real; o Chromium abre sob demanda
+# e fecha sozinho quando fica ocioso.
+[phases.setup]
+nixPkgs = ['nodejs_22', 'chromium']
+
+[variables]
+CHROME_PATH = 'chromium'

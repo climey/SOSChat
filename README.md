@@ -20,6 +20,8 @@ Sem credenciais do WhatsApp o sistema roda em **modo simulado**: envios só apar
 
 ## Deploy no Railway
 
+A pré-consulta de placa usa um Chromium headless no servidor (o site de consulta só aceita navegador real). O arquivo `nixpacks.toml` instala o Chromium no Railway e define `CHROME_PATH`; em outro ambiente, defina `CHROME_PATH` apontando para o Chrome/Chromium. Sem ele, a pré-consulta avisa "site barrou a consulta" e o resto do sistema segue normal.
+
 1. Crie um projeto no Railway e adicione um serviço **PostgreSQL**. Ele injeta `DATABASE_URL` automaticamente.
 2. Adicione um serviço a partir deste repositório. O `railway.json` já define `npm run migrate && npm run seed && npm start` como comando de início e `/health` como healthcheck.
 3. Variáveis de ambiente do serviço:

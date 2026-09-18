@@ -2,16 +2,22 @@
  * Pré-consulta de placa: busca os dados básicos do veículo em um site público (Ke Placa),
  * guarda em cache e monta a mensagem de confirmação para o cliente.
  *
+ * O site fica atrás da Cloudflare e só aceita navegador de verdade: a busca é feita por um Chromium
+ * headless (puppeteer-core + Chromium do sistema), que abre sob demanda e fecha quando fica ocioso.
+ * Sem Chromium disponível, tenta o fetch comum (que costuma ser barrado) e informa o motivo.
+ *
  * Cuidados: uma busca por vez, com intervalo mínimo entre elas; cache por 30 dias; tempo limite curto.
- * Se o site bloquear ou mudar, a busca falha de forma controlada e o atendente vê "não foi possível".
  */
 const db = require('../db');
+const fs = require('fs');
+const { execSync } = require('child_process');
 
 const SOURCE = 'keplaca';
 const BASE_URL = 'https://www.keplaca.com/placa/';
 const CACHE_DAYS = 30;
 const MIN_INTERVAL_MS = 1500;
-const TIMEOUT_MS = 8000;
+const TIMEOUT_MS = 20000;
+const BROWSER_IDLE_MS = 2 * 60 * 1000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36';
 
 const FIELD_MAP = {
@@ -60,18 +66,88 @@ function parse(html, plate) {
   return { found: Boolean(fields.marca || fields.modelo), fields, fipe, title: decode(title), plate };
 }
 
-// ---------- Busca com fila (uma por vez, intervalo mínimo) ----------
-let fetcher = async (url) => {
+const isBlocked = (html) => /Attention Required!\s*\|\s*Cloudflare|Just a moment/i.test(String(html || ''));
+
+// ---------- Chromium headless (abre sob demanda, fecha quando ocioso) ----------
+function findChrome() {
+  const candidates = [
+    process.env.CHROME_PATH, process.env.PUPPETEER_EXECUTABLE_PATH,
+    'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (c.includes('/') || c.includes('\\')) { if (fs.existsSync(c)) return c; continue; }
+    try { const p = execSync(process.platform === 'win32' ? `where ${c}` : `which ${c}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split(/\r?\n/)[0].trim(); if (p) return p; } catch { /* não está no PATH */ }
+  }
+  return null;
+}
+
+let browser = null;
+let browserIdleTimer = null;
+async function getBrowser() {
+  if (browser && browser.connected) return browser;
+  const exe = findChrome();
+  if (!exe) throw new Error('Chromium não encontrado no servidor');
+  const puppeteer = require('puppeteer-core');
+  browser = await puppeteer.launch({
+    executablePath: exe,
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--lang=pt-BR'],
+  });
+  browser.on('disconnected', () => { browser = null; });
+  console.log('[pré-consulta] Chromium aberto:', exe);
+  return browser;
+}
+function scheduleBrowserClose() {
+  clearTimeout(browserIdleTimer);
+  browserIdleTimer = setTimeout(async () => {
+    const b = browser; browser = null;
+    try { if (b) await b.close(); console.log('[pré-consulta] Chromium fechado por ociosidade'); } catch { /* já fechado */ }
+  }, BROWSER_IDLE_MS);
+  if (browserIdleTimer.unref) browserIdleTimer.unref();
+}
+
+async function fetchViaBrowser(url) {
+  const b = await getBrowser();
+  const page = await b.newPage();
+  try {
+    await page.setUserAgent(UA);
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'pt-BR,pt;q=0.9' });
+    await page.setViewport({ width: 1280, height: 900 });
+    const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
+    let status = resp ? resp.status() : 0;
+    let html = await page.content();
+    // desafio "Just a moment": o próprio Chromium resolve em alguns segundos e a página recarrega
+    for (let i = 0; i < 4 && /Just a moment/i.test(html); i++) {
+      await new Promise((r) => setTimeout(r, 2500));
+      html = await page.content();
+      status = 200;
+    }
+    return { status, text: html };
+  } finally {
+    await page.close().catch(() => {});
+    scheduleBrowserClose();
+  }
+}
+
+async function fetchViaHttp(url) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9', Accept: 'text/html' }, redirect: 'follow', signal: controller.signal });
-    const text = await res.text();
-    return { status: res.status, text };
+    return { status: res.status, text: await res.text() };
   } finally { clearTimeout(timer); }
+}
+
+/** Estratégia padrão: Chromium; sem ele, fetch comum. */
+let fetcher = async (url) => {
+  if (findChrome()) return fetchViaBrowser(url);
+  return fetchViaHttp(url);
 };
 /** Troca a função de busca (usado nos testes para não acessar a internet). */
 function _setFetcher(fn) { fetcher = fn; }
+function browserAvailable() { return Boolean(findChrome()); }
 
 let chain = Promise.resolve();
 let lastAt = 0;
@@ -88,6 +164,7 @@ function queued(task) {
 async function fetchFromSite(plate) {
   const { status, text } = await queued(() => fetcher(BASE_URL + plate));
   if (status === 404) return { status: 'not_found', data: null };
+  if (isBlocked(text)) throw new Error(`o site barrou a consulta (Cloudflare, ${status})${findChrome() ? '' : '; o servidor está sem Chromium'}`);
   if (status !== 200) throw new Error(`site respondeu ${status}`);
   const parsed = parse(text, plate);
   if (!parsed.found) return { status: 'not_found', data: null };
@@ -109,12 +186,14 @@ async function lookup(raw, { force = false } = {}) {
   try {
     result = await fetchFromSite(plate);
   } catch (err) {
+    const detail = String(err.message || err).slice(0, 200);
+    console.warn(`[pré-consulta] ${plate}: ${detail}`);
     await db.query(
       `INSERT INTO vehicle_lookups (plate, source, status, data, error, fetched_at) VALUES ($1, $2, 'error', NULL, $3, NOW())
        ON CONFLICT (plate, source) DO UPDATE SET status = 'error', error = EXCLUDED.error, fetched_at = NOW()`,
-      [plate, SOURCE, String(err.message || err).slice(0, 200)]
+      [plate, SOURCE, detail]
     );
-    return { plate, status: 'error', data: null, error: 'Não foi possível consultar o site agora', cached: false };
+    return { plate, status: 'error', data: null, error: `Não foi possível consultar agora: ${detail}`, cached: false };
   }
   await db.query(
     `INSERT INTO vehicle_lookups (plate, source, status, data, error, fetched_at) VALUES ($1, $2, $3, $4, NULL, NOW())
@@ -137,7 +216,6 @@ function renderMessage(template, plate, data) {
     });
     return missing && /\{/.test(line) ? null : out;
   }).filter((l) => l !== null);
-  // remove linhas em branco duplicadas que sobraram
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -196,4 +274,13 @@ async function maybeAutoPreview(message, conversation) {
   }
 }
 
-module.exports = { lookup, parse, renderMessage, sendPreview, previewSentAt, maybeAutoPreview, settings, normalizePlate, isPlate, DEFAULT_TEMPLATE, SYSTEM_USER, _setFetcher };
+async function shutdown() {
+  clearTimeout(browserIdleTimer);
+  const b = browser; browser = null;
+  if (b) await b.close().catch(() => {});
+}
+
+module.exports = {
+  lookup, parse, renderMessage, sendPreview, previewSentAt, maybeAutoPreview, settings, normalizePlate, isPlate,
+  DEFAULT_TEMPLATE, SYSTEM_USER, _setFetcher, browserAvailable, fetchViaBrowser, shutdown,
+};

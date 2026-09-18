@@ -109,6 +109,7 @@ start().catch((err) => {
 process.on('SIGTERM', () => {
   console.log('Encerrando...');
   whatsapp.stop();
+  require('./services/vehicle-lookup').shutdown().catch(() => {});
   server.close(() => db.pool.end().then(() => process.exit(0)));
   setTimeout(() => process.exit(0), 5000).unref();
 });
