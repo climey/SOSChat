@@ -527,7 +527,7 @@
       const v = await api('GET', `/api/vehicles/${encodeURIComponent($('veh-test-plate').value)}`);
       out.textContent = v.status === 'found'
         ? `${v.cached ? '(do cache) ' : ''}${JSON.stringify(v.data.fields, null, 2)}\n\n--- mensagem que o cliente receberia ---\n${v.message}`
-        : (v.status === 'not_found' ? 'Placa não encontrada no site.' : `Erro: ${v.error || 'não foi possível buscar'}`);
+        : (v.status === 'not_found' ? 'Veículo não encontrado no site.' : `Erro: ${v.error || 'não foi possível buscar'}`);
     } catch (err) { out.textContent = 'Erro: ' + err.message; }
   });
   function resetPlanForm() {
