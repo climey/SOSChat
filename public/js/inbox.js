@@ -947,8 +947,10 @@
     $('team-list').innerHTML = list.map((u) => {
       const me = u.id === state.me.id;
       const dot = u.status === 'offline' ? '' : (u.status === 'away' ? 'away' : 'online');
+      // sem registro de acesso, a última resposta é a melhor pista de quando a pessoa esteve no sistema
+      const seenAt = u.last_online_at || u.last_reply_at;
       const when = u.status === 'offline'
-        ? (u.last_online_at ? `visto ${sinceText(u.last_online_at)}` : 'nunca entrou')
+        ? (seenAt ? `visto ${sinceText(seenAt)}` : 'nunca entrou')
         : (u.last_reply_at ? `última resposta ${sinceText(u.last_reply_at)}` : 'sem respostas ainda');
       const load = u.open_conversations
         ? `${u.open_conversations} conversa${u.open_conversations > 1 ? 's' : ''}${u.waiting_conversations ? ` · ${u.waiting_conversations} esperando` : ''}`
