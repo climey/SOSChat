@@ -11,6 +11,7 @@ function touchLastOnline(userId) {
 let io = null;
 const online = new Map(); // userId -> Set(socket ids)
 const typing = new Map(); // conversationId -> Map(userId -> { name, at })
+const viewers = new Map(); // conversationId -> Map(userId -> { name, avatar, sockets:Set })
 
 function init(httpServer) {
   io = new Server(httpServer, { cors: false });
@@ -38,6 +39,33 @@ function init(httpServer) {
     broadcast('presence', { user_id: socket.user.id, online: true, availability: socket.user.availability || 'available' });
     socket.emit('presence:all', presenceList());
 
+    /** Quem está com a conversa aberta agora (para ninguém responder em cima do outro). */
+    function setViewing(conversationId) {
+      const prev = socket.viewingId || null;
+      if (prev === conversationId) return;
+      if (prev) {
+        const m = viewers.get(prev);
+        const entry = m && m.get(socket.user.id);
+        if (entry) {
+          entry.sockets.delete(socket.id);
+          if (!entry.sockets.size) m.delete(socket.user.id);
+          if (!m.size) viewers.delete(prev);
+          broadcast('viewers', { conversation_id: prev, users: viewerList(prev) });
+        }
+      }
+      socket.viewingId = conversationId;
+      if (conversationId) {
+        const m = viewers.get(conversationId) || new Map();
+        const entry = m.get(socket.user.id) || { name: socket.user.name, avatar: socket.user.avatar_media_id || null, sockets: new Set() };
+        entry.sockets.add(socket.id);
+        m.set(socket.user.id, entry);
+        viewers.set(conversationId, m);
+        broadcast('viewers', { conversation_id: conversationId, users: viewerList(conversationId) });
+      }
+    }
+    socket.on('viewing', ({ conversation_id }) => setViewing(Number(conversation_id) || null));
+    socket.emit('viewers:all', allViewers());
+
     // "Fulano está digitando" na conversa X (repassado aos outros, some sozinho após 4s)
     socket.on('typing', ({ conversation_id, active }) => {
       const id = Number(conversation_id);
@@ -46,6 +74,7 @@ function init(httpServer) {
     });
 
     socket.on('disconnect', () => {
+      setViewing(null);
       const s = online.get(socket.user.id);
       if (s) { s.delete(socket.id); if (!s.size) online.delete(socket.user.id); }
       if (!online.has(socket.user.id)) { touchLastOnline(socket.user.id); broadcast('presence', { user_id: socket.user.id, online: false, last_online_at: new Date().toISOString() }); }
@@ -53,6 +82,17 @@ function init(httpServer) {
   });
 
   return io;
+}
+
+/** Atendentes com a conversa aberta, sem repetir quem está em mais de uma aba. */
+function viewerList(conversationId) {
+  const m = viewers.get(conversationId);
+  return m ? [...m.entries()].map(([id, v]) => ({ id, name: v.name, avatar: v.avatar })) : [];
+}
+function allViewers() {
+  const out = {};
+  for (const id of viewers.keys()) out[id] = viewerList(id);
+  return out;
 }
 
 function presenceList() {
@@ -75,4 +115,4 @@ function toUser(userId, event, payload) {
   io.to(`user:${userId}`).emit(event, payload);
 }
 
-module.exports = { init, broadcast, toUser, presenceList, isOnline };
+module.exports = { init, broadcast, toUser, presenceList, isOnline, viewerList, allViewers };

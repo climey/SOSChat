@@ -23,6 +23,7 @@
     sectors: [],
     reply: null, // mensagem sendo citada
     typing: new Map(), // conversa id -> Map(user id -> { name, until })
+    viewers: new Map(), // conversa id -> [{ id, name, avatar }] com a conversa aberta agora
     multiAccount: false,
     composeMode: 'message', // message | note
     search: { open: false, q: '', hits: [], idx: -1 },
@@ -229,7 +230,7 @@
               <span class="time">${esc(fmtTime(c.last_message_at))}</span>
             </div>
             <div class="mid">
-              <span class="preview">${tickHtml(c)}<span>${esc(previewText(c))}</span></span>
+              ${activityHtml(c.id) || `<span class="preview">${tickHtml(c)}<span>${esc(previewText(c))}</span></span>`}
               ${waitHtml(c)}
               ${c.unread_count > 0 ? `<span class="badge">${c.unread_count}</span>` : ''}
               ${agentsHtml(c)}
@@ -399,6 +400,7 @@
   // ---------- Conversa aberta ----------
   async function openConversation(id) {
     state.currentId = id;
+    emitViewing(id);
     const [{ conversation }, { messages }] = await Promise.all([
       api('GET', `/api/conversations/${id}`),
       api('GET', `/api/conversations/${id}/messages`),
@@ -450,6 +452,7 @@
     renderBanner();
     renderPlanHint();
     renderObsStrip();
+    renderActivityBar();
     if (Number($('debit-prompt').dataset.conv) !== c.id) $('debit-prompt').hidden = true;
   }
 
@@ -988,6 +991,30 @@
     lastTypingAt = now;
     typingSocket.emit('typing', { conversation_id: state.currentId, active: true });
   }
+  function emitViewing(conversationId) {
+    if (!typingSocket) return;
+    typingSocket.emit('viewing', { conversation_id: conversationId || null });
+  }
+  /** Outros atendentes (fora eu) digitando nesta conversa. */
+  function typingNames(conversationId) {
+    const map = state.typing.get(conversationId);
+    if (!map) return [];
+    return [...map.values()].filter((t) => t.until > Date.now()).map((t) => t.name);
+  }
+  /** Outros atendentes com esta conversa aberta agora. */
+  function viewerNames(conversationId) {
+    return (state.viewers.get(conversationId) || []).filter((v) => v.id !== state.me.id).map((v) => v.name);
+  }
+  /** Aviso curto para a lista: digitando tem prioridade sobre apenas visualizando. */
+  function activityHtml(conversationId) {
+    const typing = typingNames(conversationId);
+    if (typing.length) return `<span class="act typing">${TYPE_ICON}${esc(typing.join(', '))} está digitando…</span>`;
+    const viewing = viewerNames(conversationId);
+    if (viewing.length) return `<span class="act viewing">${EYE_ICON}${esc(viewing.join(', '))} está vendo</span>`;
+    return '';
+  }
+  const TYPE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6.01" y2="10"/><line x1="10" y1="10" x2="10.01" y2="10"/><line x1="14" y1="10" x2="14.01" y2="10"/><line x1="18" y1="10" x2="18.01" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/></svg>';
+  const EYE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
   function typingHtml(conversationId) {
     const map = state.typing.get(conversationId);
     if (!map) return '';
@@ -998,7 +1025,7 @@
     // limpa "digitando" vencidos e atualiza os cronômetros de espera
     let changed = false;
     for (const [cid, map] of state.typing) { for (const [uid, t] of map) if (t.until <= Date.now()) { map.delete(uid); changed = true; } if (!map.size) state.typing.delete(cid); }
-    if (changed && current()) renderChat();
+    if (changed && current()) { renderChat(); renderActivityBar(); }
     renderList();
   }, 30000);
   function setPresence(userId, data) {
@@ -2014,6 +2041,22 @@
     $('msg-search-input').focus();
     $('msg-search-input').select();
   }
+  /** Faixa acima do compositor: avisa que outro atendente está digitando ou vendo a mesma conversa. */
+  function renderActivityBar() {
+    const c = current();
+    const box = $('activity-bar');
+    if (!c) { box.hidden = true; return; }
+    const typing = typingNames(c.id);
+    const viewing = viewerNames(c.id).filter((n) => !typing.includes(n));
+    if (!typing.length && !viewing.length) { box.hidden = true; return; }
+    const parts = [];
+    if (typing.length) parts.push(`<span class="act typing">${TYPE_ICON}<b>${esc(typing.join(', '))}</b> está digitando…</span>`);
+    if (viewing.length) parts.push(`<span class="act viewing">${EYE_ICON}<b>${esc(viewing.join(', '))}</b> está com esta conversa aberta</span>`);
+    box.className = `activity-bar ${typing.length ? 'is-typing' : ''}`;
+    box.innerHTML = parts.join('') + (typing.length ? '<span class="act-warn">cuidado para não responder junto</span>' : '');
+    box.hidden = false;
+  }
+
   /** Faixa fixa no topo da conversa com as observações da ficha, para ninguém precisar abrir o painel. */
   function renderObsStrip() {
     const c = current();
@@ -2048,6 +2091,7 @@
     clearReply();
     cancelEdit();
     clearAttachment();
+    emitViewing(null);
     state.currentId = null;
     state.currentConv = null;
     state.contact = null;
@@ -2583,6 +2627,7 @@
   function connectSocket() {
     const socket = io({ withCredentials: true });
     typingSocket = socket;
+    socket.on('connect', () => { if (state.currentId) emitViewing(state.currentId); });
     socket.on('presence:all', (ids) => { for (const id of ids) setPresence(id, { online: true }); renderList(); if (current()) renderChat(); });
     socket.on('presence', ({ user_id, online, availability, last_online_at }) => {
       const t = (state.team || []).find((u) => u.id === user_id);
@@ -2606,7 +2651,18 @@
       const map = state.typing.get(conversation_id) || new Map();
       if (active) map.set(user_id, { name, until: Date.now() + 4000 }); else map.delete(user_id);
       state.typing.set(conversation_id, map);
-      if (conversation_id === state.currentId) { renderChat(); setTimeout(() => { if (conversation_id === state.currentId) renderChat(); }, 4200); }
+      renderList();
+      if (conversation_id === state.currentId) { renderChat(); setTimeout(() => { if (conversation_id === state.currentId) { renderChat(); renderList(); } }, 4200); }
+    });
+    socket.on('viewers', ({ conversation_id, users }) => {
+      state.viewers.set(conversation_id, users || []);
+      renderList();
+      if (conversation_id === state.currentId) renderActivityBar();
+    });
+    socket.on('viewers:all', (all) => {
+      state.viewers = new Map(Object.entries(all || {}).map(([k, v]) => [Number(k), v]));
+      renderList();
+      renderActivityBar();
     });
     socket.on('settings:updated', (s) => { Object.assign(state.settings, s); renderList(); });
     socket.on('sectors:updated', () => loadSectors());
