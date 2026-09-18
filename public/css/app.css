@@ -937,3 +937,12 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .ref-status.ok { background: rgba(64,192,87,0.12); color: var(--green); }
 .ref-status.bad { background: rgba(224,49,49,0.12); color: #ff8787; }
 .ref-status.bad .ref-sug { color: var(--text-2); }
+/* Cartão do veículo (pré-consulta de placa) dentro do aviso */
+.veh-card { display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 4px; padding: 8px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+.veh-card.loading, .veh-card.none { color: var(--muted); font-size: 12px; }
+.veh-ic { font-size: 22px; }
+.veh-info { flex: 1; min-width: 0; }
+.veh-title { font-weight: 700; }
+.veh-meta { font-size: 12px; color: var(--text-2); }
+.veh-sent { font-size: 11px; color: var(--green); margin-top: 2px; }
+.veh-preview { white-space: pre-wrap; font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }

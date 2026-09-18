@@ -419,7 +419,7 @@
   });
 
   // ---------- Navegação por seção ----------
-  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'alertas'];
+  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'alertas'];
   // ---------- Planos de consultas ----------
   let plans = [];
   let planEditing = null;
@@ -498,6 +498,38 @@
     try { await api('PUT', '/api/settings', body); toast('Regras salvas'); }
     catch (err) { toast(err.message, true); }
   });
+  // ---------- Pré-consulta de placa ----------
+  let vehDefaultTemplate = '';
+  async function loadVehicle() {
+    const { settings } = await api('GET', '/api/settings');
+    $('veh-mode').value = settings.vehicle_lookup_mode || 'suggest';
+    $('veh-template').value = settings.vehicle_preview_template || '';
+    vehDefaultTemplate = settings.vehicle_preview_template_default || vehDefaultTemplate;
+    const ro = me.role !== 'admin';
+    $('veh-mode').disabled = ro; $('veh-template').disabled = ro; $('veh-reset').hidden = ro;
+  }
+  $('veh-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await api('PUT', '/api/settings', { vehicle_lookup_mode: $('veh-mode').value, vehicle_preview_template: $('veh-template').value }); toast('Pré-consulta salva'); }
+    catch (err) { toast(err.message, true); }
+  });
+  $('veh-reset').addEventListener('click', async () => {
+    try {
+      const { settings } = await api('GET', '/api/settings?defaults=1');
+      $('veh-template').value = settings.vehicle_preview_template_default || $('veh-template').value;
+    } catch (err) { toast(err.message, true); }
+  });
+  $('veh-test-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = $('veh-test-out');
+    out.hidden = false; out.textContent = 'Buscando…';
+    try {
+      const v = await api('GET', `/api/vehicles/${encodeURIComponent($('veh-test-plate').value)}`);
+      out.textContent = v.status === 'found'
+        ? `${v.cached ? '(do cache) ' : ''}${JSON.stringify(v.data.fields, null, 2)}\n\n--- mensagem que o cliente receberia ---\n${v.message}`
+        : (v.status === 'not_found' ? 'Placa não encontrada no site.' : `Erro: ${v.error || 'não foi possível buscar'}`);
+    } catch (err) { out.textContent = 'Erro: ' + err.message; }
+  });
   function resetPlanForm() {
     planEditing = null;
     $('plan-form').reset();
@@ -553,7 +585,7 @@
   async function init() {
     me = await SOS.loadMe();
     await loadTags();
-    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence()]);
+    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence(), loadVehicle()]);
   }
   init().catch((err) => toast(err.message, true));
 })();

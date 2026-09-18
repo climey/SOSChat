@@ -111,6 +111,7 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
     realtime.broadcast('message:new', { message: result.message, conversation: result.conversation });
     realtime.broadcast('conversation:updated', result.conversation);
     require('./schedules').cancelFor(result.conversation.id, 'contact').catch(() => {});
+    require('./vehicle-lookup').maybeAutoPreview(result.message, result.conversation);
   }
   return result;
 }

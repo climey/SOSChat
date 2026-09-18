@@ -26,6 +26,8 @@ const KEYS = {
   sla_warn_minutes: (v) => (Number.isInteger(v) && v >= 1 && v <= 1440 ? v : null),
   sla_alert_minutes: (v) => (Number.isInteger(v) && v >= 1 && v <= 1440 ? v : null),
   consultation_kinds: normalizeKinds,
+  vehicle_lookup_mode: (v) => (['off', 'suggest', 'auto'].includes(v) ? v : null),
+  vehicle_preview_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   recurrence_occasional_credits: (v) => (Number.isInteger(v) && v >= 1 && v <= 1000 ? v : null),
   recurrence_recurrent_credits: (v) => (Number.isInteger(v) && v >= 1 && v <= 100000 ? v : null),
   recurrence_recurrent_purchases: (v) => (Number.isInteger(v) && v >= 1 && v <= 1000 ? v : null),
@@ -45,8 +47,9 @@ function parseValue(key, value) {
 
 async function getAll() {
   const { rows } = await db.query('SELECT key, value FROM app_settings');
-  const out = { consultation_kinds: DEFAULT_KINDS, ...Object.fromEntries(Object.entries(require('../services/recurrence').DEFAULTS).map(([k, v]) => [`recurrence_${k}`, v])) };
+  const out = { consultation_kinds: DEFAULT_KINDS, vehicle_lookup_mode: 'suggest', vehicle_preview_template: require('../services/vehicle-lookup').DEFAULT_TEMPLATE, ...Object.fromEntries(Object.entries(require('../services/recurrence').DEFAULTS).map(([k, v]) => [`recurrence_${k}`, v])) };
   for (const r of rows) out[r.key] = parseValue(r.key, r.value);
+  out.vehicle_preview_template_default = require('../services/vehicle-lookup').DEFAULT_TEMPLATE;
   return out;
 }
 

@@ -78,6 +78,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             <span>Recorrência de clientes</span>
           </a>
+          <a href="#preconsulta" data-section="preconsulta">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+            <span>Pré-consulta de placa</span>
+          </a>
           <a href="#alertas" data-section="alertas">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>Alertas de espera</span>
@@ -218,6 +222,35 @@
                 </div>
                 <div class="row-actions"><button class="btn btn-primary" type="submit" data-admin-only>Salvar regras</button></div>
               </form>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="preconsulta" hidden>
+            <div class="card">
+              <h3>Pré-consulta de placa</h3>
+              <p class="small muted">Quando o cliente manda uma placa, o sistema busca os dados básicos do veículo em um site público (Ke Placa) e monta uma mensagem para o cliente confirmar que é aquele veículo, antes da consulta completa. A busca fica guardada por 30 dias e é feita uma de cada vez, sem sobrecarregar o site.</p>
+              <form id="veh-form">
+                <div class="field"><label class="label">Como agir quando chegar uma placa</label>
+                  <select class="select" id="veh-mode" style="max-width:420px">
+                    <option value="suggest">Mostrar o veículo ao atendente, que envia com um clique (recomendado)</option>
+                    <option value="auto">Enviar a confirmação ao cliente automaticamente</option>
+                    <option value="off">Desligado</option>
+                  </select>
+                </div>
+                <div class="field"><label class="label">Mensagem enviada ao cliente</label>
+                  <textarea class="textarea" id="veh-template" rows="9" maxlength="1500"></textarea>
+                  <p class="small muted" style="margin:6px 0 0">Variáveis: <code>{placa}</code> <code>{marca}</code> <code>{modelo}</code> <code>{ano}</code> <code>{ano_modelo}</code> <code>{cor}</code> <code>{combustivel}</code> <code>{potencia}</code> <code>{cilindrada}</code> <code>{municipio}</code> <code>{uf}</code> <code>{chassi}</code> <code>{motor}</code>. Linha cujo dado não existir para o veículo é removida sozinha.</p>
+                </div>
+                <div class="row-actions"><button class="btn" type="button" id="veh-reset">Voltar ao padrão</button><button class="btn btn-primary" type="submit" data-admin-only>Salvar</button></div>
+              </form>
+            </div>
+            <div class="card" style="margin-top:16px">
+              <h3>Testar uma placa</h3>
+              <form class="inline-form" id="veh-test-form">
+                <input class="input" id="veh-test-plate" placeholder="Ex.: ABC1234" maxlength="8" style="max-width:160px" required>
+                <button class="btn" type="submit">Buscar</button>
+              </form>
+              <pre class="veh-preview" id="veh-test-out" hidden></pre>
             </div>
           </section>
 

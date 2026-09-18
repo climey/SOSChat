@@ -23,6 +23,12 @@ async function touchAfterSend(id, preview, userId) {
   return conversations.getById(id);
 }
 
+/** Mensagem automática do sistema: atualiza a prévia, mas a conversa continua esperando um atendente. */
+async function touchAfterAutoSend(id, preview) {
+  await db.query('UPDATE conversations SET last_message_at = NOW(), last_message_preview = $2 WHERE id = $1', [id, String(preview).slice(0, 120)]);
+  return conversations.getById(id);
+}
+
 /** Resolve o número pelo qual a conversa responde (conversas antigas caem no primeiro conectado). */
 async function resolveAccount(conv) {
   let accountId = conv.account_id;
@@ -54,7 +60,7 @@ async function loadQuoted(conversationId, quotedId) {
   return { id: q.id, wa_message_id: q.wa_message_id, fromMe: q.direction === 'out', body: q.body, type: q.type };
 }
 
-async function sendText(conversationId, user, body, { scheduled = false, quotedId = null } = {}) {
+async function sendText(conversationId, user, body, { scheduled = false, quotedId = null, auto = false } = {}) {
   body = String(body || '').trim();
   if (!body) throw new SendError(400, 'Mensagem vazia');
   if (body.length > MESSAGE_MAX) throw new SendError(400, `Mensagem excede ${MESSAGE_MAX} caracteres`);
@@ -77,7 +83,7 @@ async function sendText(conversationId, user, body, { scheduled = false, quotedI
     message = (await db.query(`UPDATE messages SET status = 'failed', error = $2 WHERE id = $1 RETURNING *`, [message.id, String(err.message).slice(0, 500)])).rows[0];
   }
 
-  const updated = await touchAfterSend(conversationId, body, user.id);
+  const updated = auto ? await touchAfterAutoSend(conversationId, body) : await touchAfterSend(conversationId, body, user.id);
   message = await require('./inbound').withQuoted(message);
   message.sender_name = user.name;
   message.sender_avatar = user.avatar_media_id || null;

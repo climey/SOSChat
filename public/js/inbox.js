@@ -14,6 +14,7 @@
     plans: [], // catálogo de planos de consultas
     contact: null, // ficha completa do contato da conversa aberta
     contactNotes: [], // observações fixadas do contato da conversa aberta
+    vehicles: new Map(), // placa -> resultado da pré-consulta (ou 'loading')
     team: [], // atendentes e a presença de cada um
     accounts: new Map(), // id -> status do número (só provedor baileys)
     prefs: new Map(), // conversa id -> { pinned, muted, hidden } deste atendente
@@ -401,6 +402,7 @@
   async function openConversation(id) {
     state.currentId = id;
     emitViewing(id);
+    state.vehicles.clear();
     const [{ conversation }, { messages }] = await Promise.all([
       api('GET', `/api/conversations/${id}`),
       api('GET', `/api/conversations/${id}/messages`),
@@ -2048,6 +2050,49 @@
   const refDismissed = new Map(); // conversa -> id da última mensagem cujo aviso o atendente fechou (esconde tudo até ali)
   const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
   const WARN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  /** Cartão com os dados básicos do veículo (busca no site quando ainda não tem). */
+  function vehicleCardHtml(plate) {
+    const c = current();
+    const v = state.vehicles.get(plate);
+    if (!v) { loadVehicle(plate); return '<div class="veh-card loading">Buscando dados do veículo…</div>'; }
+    if (v === 'loading') return '<div class="veh-card loading">Buscando dados do veículo…</div>';
+    if (v.status === 'not_found') return `<div class="veh-card none">Placa ${esc(plate)} não encontrada no site de consulta. Confira com o cliente ou siga direto para a consulta completa.</div>`;
+    if (v.status !== 'found') return `<div class="veh-card none">Não foi possível buscar o veículo agora (${esc(v.error || 'site fora do ar')}). <button type="button" class="btn btn-sm btn-ghost" data-veh-retry="${esc(plate)}">Tentar de novo</button></div>`;
+    const f = v.data.fields || {};
+    const bits = [
+      f.ano ? `Ano ${f.ano}${f.ano_modelo && f.ano_modelo !== f.ano ? '/' + f.ano_modelo : ''}` : '',
+      f.cor, f.combustivel, f.potencia, f.municipio ? `${f.municipio}/${f.uf || ''}` : f.uf, f.chassi ? `chassi ${f.chassi}` : '',
+    ].filter(Boolean);
+    const sent = v.sent_at && c && v.conversation_id === c.id;
+    return `<div class="veh-card">
+      <span class="veh-ic">🚗</span>
+      <div class="veh-info"><div class="veh-title">${esc(f.marca || '')} ${esc(f.modelo || '')}</div><div class="veh-meta">${esc(bits.join(' · '))}</div>
+        ${sent ? `<div class="veh-sent">Confirmação enviada ao cliente ${esc(sinceText(v.sent_at))}${v.mode === 'auto' ? ' (automático)' : ''}</div>` : ''}</div>
+      <button type="button" class="btn btn-sm ${sent ? '' : 'btn-primary'}" data-veh-send="${esc(plate)}" title="Manda a mensagem com os dados do veículo pedindo confirmação">${sent ? 'Enviar de novo' : 'Enviar para o cliente confirmar'}</button>
+    </div>`;
+  }
+  async function loadVehicle(plate, force = false) {
+    const c = current();
+    state.vehicles.set(plate, 'loading');
+    try {
+      const v = await api('GET', `/api/vehicles/${encodeURIComponent(plate)}?conversation=${c ? c.id : ''}${force ? '&force=1' : ''}`);
+      state.vehicles.set(plate, { ...v, conversation_id: c ? c.id : null });
+    } catch (err) {
+      state.vehicles.set(plate, { status: 'error', error: err.message });
+    }
+    renderRefHint();
+  }
+  async function sendVehiclePreview(plate) {
+    const c = current();
+    if (!c) return;
+    const v = state.vehicles.get(plate);
+    if (v && v.sent_at && !confirm('A confirmação já foi enviada para este cliente. Enviar de novo?')) return;
+    try {
+      await api('POST', `/api/vehicles/${encodeURIComponent(plate)}/send`, { conversation_id: c.id });
+      toast('Dados do veículo enviados para o cliente confirmar');
+      await loadVehicle(plate);
+    } catch (err) { toast(err.message, true); }
+  }
   /** Copia o dado para a área de transferência (a pré-consulta é feita fora do chat). */
   async function copyText(text) {
     try {
@@ -2083,9 +2128,10 @@
       const shown = r.display || r.value;
       if (r.ok) {
         const warn = r.warnings[0] ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : '';
+        const vehicle = r.kind === 'placa' && state.settings.vehicle_lookup_mode !== 'off' ? vehicleCardHtml(r.value) : '';
         return `<div class="ref-row"><span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text"><b>${esc(r.label)} ${esc(shown)}</b> parece correto${warn}</span>
           <button type="button" class="btn btn-sm btn-primary" data-ref-copy="${esc(shown)}" title="Copia para você fazer a pré-consulta">Copiar</button>
-          <button type="button" class="btn btn-sm btn-ghost" data-ref-use="${i}" title="Só depois do pagamento, na hora de entregar a consulta">Registrar consulta</button></div>`;
+          <button type="button" class="btn btn-sm btn-ghost" data-ref-use="${i}" title="Só depois do pagamento, na hora de entregar a consulta">Registrar consulta</button></div>${vehicle}`;
       }
       const sug = r.suggestions.length
         ? `<span class="ref-sug">Tentar: ${r.suggestions.map((v) => `<button type="button" class="chip" data-ref-copy="${esc(v)}" title="Copiar ${esc(v)} para a pré-consulta">${esc(v)}</button>`).join('')}</span>`
@@ -2101,6 +2147,10 @@
     const close = e.target.closest('#ref-close');
     if (close) { refDismissed.set(found.message.conversation_id, found.message.id); renderRefHint(); return; }
     const copy = e.target.closest('[data-ref-copy]');
+    const vehSend = e.target.closest('[data-veh-send]');
+    const vehRetry = e.target.closest('[data-veh-retry]');
+    if (vehSend) { sendVehiclePreview(vehSend.dataset.vehSend); return; }
+    if (vehRetry) { loadVehicle(vehRetry.dataset.vehRetry, true); return; }
     const use = e.target.closest('[data-ref-use]');
     const ask = e.target.closest('[data-ref-ask]');
     if (copy) { copyText(copy.dataset.refCopy); return; }
