@@ -294,7 +294,7 @@
       ['unread', MI.unread, c.unread_count > 0 ? 'Marcar como lida' : 'Marcar como não lida'],
       'sep',
       c.status === 'resolved' ? ['reopen', MI.check, 'Reabrir conversa'] : ['resolve', MI.check, 'Finalizar conversa'],
-      c.status === 'open' ? (c.last_message_direction === 'out' ? ['waiting', MI.wait, 'Marcar como esperando resposta'] : ['inbox', MI.wait, 'Marcar como respondida']) : null,
+      c.status === 'open' ? (c.last_message_direction === 'out' ? ['waiting', MI.wait, 'Mover para Esperando'] : ['inbox', MI.wait, 'Tirar de Esperando (marcar como respondida)']) : null,
       ['sector', MI.tag, 'Mudar setor'],
       ['pin', MI.pin, c.pinned ? 'Desafixar (só para você)' : 'Fixar (só para você)'],
       ['hide', MI.hide, c.hidden ? 'Mostrar conversa' : 'Ocultar (só para você)'],
@@ -344,8 +344,8 @@
         case 'unread': await patch({ unread: !(c.unread_count > 0) }); break;
         case 'resolve': await patch({ status: 'resolved' }); toast('Conversa finalizada'); break;
         case 'reopen': await patch({ status: 'open' }); toast('Conversa reaberta'); break;
-        case 'waiting': await patch({ waiting: true }); toast('Marcada como esperando resposta'); break;
-        case 'inbox': await patch({ waiting: false }); toast('Marcada como respondida'); break;
+        case 'waiting': await patch({ waiting: true }); toast('Conversa movida para Esperando'); break;
+        case 'inbox': await patch({ waiting: false }); toast('Conversa tirada de Esperando: agora só na Entrada'); break;
         case 'pin': await pref({ pinned: !c.pinned }); break;
         case 'hide': await pref({ hidden: !c.hidden }); toast(c.hidden ? 'Conversa visível de novo' : 'Oculta só na sua lista. Use "Mostrar ocultas" nos filtros para ver.'); break;
         case 'block':
