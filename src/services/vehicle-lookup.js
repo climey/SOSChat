@@ -253,7 +253,8 @@ function _setHttp(fn) { httpJson = fn; }
 
 const str = (v) => (v === null || v === undefined ? '' : String(v).trim());
 const money = (n) => (typeof n === 'number' ? 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : str(n));
-const maskTail = (v) => (v && v.length > 6 ? '…' + v.slice(-6) : v);
+/** Guarda só o final (6 caracteres) de chassi/motor; asteriscos de mascaramento da fonte somem. */
+const maskTail = (v) => { const t = str(v).replace(/^\*+/, ''); return t ? '…' + t.slice(-6) : ''; };
 
 /** WebXCar — consulta por chassi (GET /chassis/:chassi, header Authorization). */
 async function fetchWebxcar(kind, ref) {
@@ -291,22 +292,32 @@ async function fetchWebxcar(kind, ref) {
 /** API Placas — consulta por placa (GET /consulta/:placa/:token). Campos conforme a documentação pública; tolerante a maiúsculas. */
 async function fetchApiPlacas(kind, ref) {
   const { status, json, text } = await httpJson(APIPLACAS_URL + ref + '/' + process.env.APIPLACAS_TOKEN);
-  if (status === 404) return { status: 'not_found', data: null };
-  if (status === 401 || status === 403) throw new Error('API Placas: token inválido ou sem crédito');
-  if (status !== 200 || !json) throw new Error(`API Placas respondeu ${status}${!json ? ' (' + str(text).slice(0, 80) + ')' : ''}`);
+  const msg = json && json.message ? ': ' + str(json.message) : '';
+  // códigos da documentação: 400 URL incorreta, 401 placa inválida, 402 token inválido, 406 sem resultados, 429 limite diário
+  if (status === 406 || status === 404 || status === 401) return { status: 'not_found', data: null, detail: `${status}${msg}` };
+  if (status === 402) throw new Error('API Placas: token inválido' + msg);
+  if (status === 429) throw new Error('API Placas: limite diário de consultas atingido' + msg);
+  if (status !== 200 || !json) throw new Error(`API Placas respondeu ${status}${msg}${!json ? ' (' + str(text).slice(0, 80) + ')' : ''}`);
   const get = (...keys) => { for (const k of keys) { const hit = Object.keys(json).find((j) => j.toLowerCase() === k.toLowerCase()); if (hit && str(json[hit])) return str(json[hit]); } return ''; };
   const extra = json.extra && typeof json.extra === 'object' ? json.extra : {};
   const ex = (...keys) => { for (const k of keys) { const hit = Object.keys(extra).find((j) => j.toLowerCase() === k.toLowerCase()); if (hit && str(extra[hit])) return str(extra[hit]); } return ''; };
-  if (json.erro || json.error || /n[ãa]o encontrad/i.test(get('mensagem', 'message'))) return { status: 'not_found', data: null };
+  if (json.erro || json.error || /n[ãa]o encontrad|sem resultado/i.test(get('mensagem', 'message'))) return { status: 'not_found', data: null, detail: get('mensagem', 'message') };
+  const origem = get('origem') || ex('nacionalidade');
   const fields = {
-    marca: get('marca', 'MARCA'), modelo: get('modelo', 'MODELO') || get('marcaModelo'), ano: get('ano'), ano_modelo: get('anoModelo', 'ano_modelo'),
-    cor: get('cor'), combustivel: ex('combustivel'), potencia: ex('potencia') ? ex('potencia') + ' cv' : '', cilindrada: ex('cilindradas', 'cilindrada'),
-    municipio: get('municipio'), uf: get('uf'), placa: get('placa') || ref, chassi: maskTail(get('chassi')), motor: maskTail(ex('motor')),
-    especie: ex('tipo_veiculo', 'especie'), situacao: get('situacao'),
+    marca: get('marca', 'MARCA'), modelo: get('modelo', 'MODELO') || get('SUBMODELO') || get('marcaModelo'), ano: get('ano') || ex('ano_fabricacao'), ano_modelo: get('anoModelo') || ex('ano_modelo'),
+    cor: get('cor'), combustivel: ex('combustivel').replace(/\s*\/\s*/g, '/'), potencia: ex('potencia') ? ex('potencia') + ' cv' : '', cilindrada: ex('cilindradas', 'cilindrada') ? ex('cilindradas', 'cilindrada') + ' cc' : '',
+    importado: origem ? (/nacional/i.test(origem) ? 'Não' : 'Sim') : '',
+    municipio: get('municipio') || ex('municipio'), uf: get('uf') || ex('uf', 'uf_placa'),
+    placa: get('placa') || ex('placa_modelo_novo', 'placa') || ref, placa_antiga: ex('placa_modelo_antigo') || get('placa_alternativa'), placa_mercosul: ex('placa_modelo_novo'),
+    chassi: maskTail(get('chassi')), motor: maskTail(ex('motor')),
+    especie: ex('tipo_veiculo', 'especie', 's.especie'), segmento: ex('segmento'), passageiros: ex('quantidade_passageiro'), situacao: get('situacao'),
   };
-  for (const k of Object.keys(fields)) if (!fields[k]) delete fields[k];
-  const dados = json.fipe && Array.isArray(json.fipe.dados) ? json.fipe.dados : [];
-  const fipe = dados.slice(0, 5).map((f) => ({ codigo: str(f.codigo_fipe), modelo: str(f.texto_modelo), valor: str(f.texto_valor), referencia: str(f.mes_referencia) }));
+  // zeros e "não identificado" são ausência de dado, não dado
+  for (const k of Object.keys(fields)) if (!fields[k] || /^0( cc| cv)?$/.test(fields[k]) || /^n[aã]o identificad/i.test(fields[k])) delete fields[k];
+  // pode vir mais de uma FIPE; a de maior score é a que melhor bate com o veículo
+  const dados = json.fipe && Array.isArray(json.fipe.dados) ? [...json.fipe.dados] : [];
+  dados.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+  const fipe = dados.slice(0, 5).map((f) => ({ codigo: str(f.codigo_fipe), modelo: [f.texto_marca, f.texto_modelo].map(str).filter(Boolean).join(' '), ano: str(f.ano_modelo), valor: str(f.texto_valor), referencia: str(f.mes_referencia) }));
   if (!fields.marca && !fields.modelo) return { status: 'not_found', data: null };
   return { status: 'found', data: { fields, fipe, title: `${fields.marca || ''} ${fields.modelo || ''}`.trim(), source: 'apiplacas' } };
 }
@@ -533,13 +544,13 @@ async function maybeAutoPreview(message, conversation) {
 }
 
 /** Diagnóstico (admin): consulta uma referência na fonte configurada, sem cache, e devolve o que veio. */
-async function probe(raw) {
+async function probe(raw, only = null) {
   const ref = normalizeRef(raw || 'ABC1234');
   const kind = kindOf(ref) || 'placa';
-  const source = sourceFor(kind);
+  const source = only && SOURCES[only] ? only : sourceFor(kind);
   const t = Date.now();
   try {
-    const r = await fetchFromSite(kind, ref);
+    const r = only && SOURCES[only] ? { ...(await SOURCES[only].fetch(kind, ref)), source: only, failures: [] } : await fetchFromSite(kind, ref);
     return { ok: true, ref, kind, source: r.source, failures: r.failures, status: r.status, detail: r.detail || null, fields: r.data ? r.data.fields : null, ms: Date.now() - t, sources: sourcesStatus(), chrome: chromeStatus() };
   } catch (err) {
     return { ok: false, ref, kind, source, error: String(err.message || err).slice(0, 400), ms: Date.now() - t, sources: sourcesStatus(), chrome: chromeStatus() };

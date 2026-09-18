@@ -19,7 +19,7 @@ function forUser(obj, user) {
 router.get('/debug/probe', async (req, res, next) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Só administradores' });
-    res.json(await vehicles.probe(req.query.ref));
+    res.json(await vehicles.probe(req.query.ref, typeof req.query.source === 'string' ? req.query.source : null));
   } catch (err) { next(err); }
 });
 
