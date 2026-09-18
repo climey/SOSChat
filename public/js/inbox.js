@@ -453,6 +453,7 @@
     renderPlanHint();
     renderObsStrip();
     renderActivityBar();
+    renderRefHint();
     if (Number($('debit-prompt').dataset.conv) !== c.id) $('debit-prompt').hidden = true;
   }
 
@@ -1561,6 +1562,7 @@
     $('consult-price').value = '';
     $('consult-price-wrap').hidden = cb.checked;
     $('consult-modal').hidden = false;
+    renderConsultRefStatus();
     $('consult-ref').focus();
   }
   function closeConsultModal() { $('consult-modal').hidden = true; }
@@ -1570,6 +1572,7 @@
     if (!b) return;
     consult.kind = b.dataset.kind;
     document.querySelectorAll('#consult-kinds .chip').forEach((x) => x.classList.toggle('active', x === b));
+    renderConsultRefStatus();
   });
   ['consult-cancel', 'consult-cancel-2'].forEach((id) => $(id).addEventListener('click', closeConsultModal));
   $('consult-modal').addEventListener('click', (e) => { if (e.target === $('consult-modal')) closeConsultModal(); });
@@ -2041,6 +2044,91 @@
     $('msg-search-input').focus();
     $('msg-search-input').select();
   }
+  // ---------- Conferência de chassi, placa, Renavam, CPF e CNPJ ----------
+  const refDismissed = new Map(); // conversa -> id da última mensagem cujo aviso o atendente fechou (esconde tudo até ali)
+  const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+  const WARN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  /** Última mensagem do cliente que contém algo consultável (chassi, placa...), já validado. */
+  function latestReferences() {
+    if (!window.RefCheck) return null;
+    const inbound = state.messages.filter((m) => m.direction === 'in' && m.type === 'text' && m.body && !m.deleted_at && m.id > (refDismissed.get(m.conversation_id) || 0)).slice(-8).reverse();
+    for (const m of inbound) {
+      const list = RefCheck.detect(m.body);
+      if (list.length) return { message: m, list: list.slice(0, 2) };
+    }
+    return null;
+  }
+  function renderRefHint() {
+    const c = current();
+    const box = $('ref-hint');
+    const found = c ? latestReferences() : null;
+    if (!found) { box.hidden = true; return; }
+    const anyBad = found.list.some((r) => !r.ok);
+    box.className = `ref-hint ${anyBad ? 'bad' : 'good'}`;
+    box.dataset.msg = found.message.id;
+    box.innerHTML = found.list.map((r, i) => {
+      const shown = r.display || r.value;
+      if (r.ok) {
+        const warn = r.warnings[0] ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : '';
+        return `<div class="ref-row"><span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text"><b>${esc(r.label)} ${esc(shown)}</b> parece correto${warn}</span>
+          <button type="button" class="btn btn-sm btn-primary" data-ref-use="${i}">Registrar consulta</button></div>`;
+      }
+      const sug = r.suggestions.length
+        ? `<span class="ref-sug">Tentar: ${r.suggestions.map((v) => `<button type="button" class="chip" data-ref-sug="${i}" data-value="${esc(v)}">${esc(v)}</button>`).join('')}</span>`
+        : '';
+      return `<div class="ref-row"><span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>${esc(r.label)} ${esc(r.raw || shown)}</b> parece errado: ${esc(r.errors.join('; '))}</span>
+        ${sug}<button type="button" class="btn btn-sm" data-ref-ask="${i}" title="Preenche a mensagem pedindo para o cliente conferir">Pedir para conferir</button></div>`;
+    }).join('') + '<button type="button" class="icon-btn ref-close" id="ref-close" title="Fechar aviso">✕</button>';
+    box.hidden = false;
+  }
+  $('ref-hint').addEventListener('click', (e) => {
+    const found = latestReferences();
+    if (!found) return;
+    const close = e.target.closest('#ref-close');
+    if (close) { refDismissed.set(found.message.conversation_id, found.message.id); renderRefHint(); return; }
+    const use = e.target.closest('[data-ref-use]');
+    const sug = e.target.closest('[data-ref-sug]');
+    const ask = e.target.closest('[data-ref-ask]');
+    if (use || sug) {
+      const r = found.list[Number((use || sug).dataset.refUse ?? sug.dataset.refSug)];
+      const value = sug ? sug.dataset.value : (r.display || r.value);
+      openConsultModal({ kind: matchKind(r.label), ref: value });
+      return;
+    }
+    if (ask) {
+      const r = found.list[Number(ask.dataset.refAsk)];
+      setComposeMode('message');
+      els.composeText.value = RefCheck.askMessage(r);
+      autosize();
+      els.composeText.focus();
+    }
+  });
+
+  /** Validação ao vivo do campo de referência no modal de consulta, conforme o tipo escolhido. */
+  function renderConsultRefStatus() {
+    const box = $('consult-ref-status');
+    const value = $('consult-ref').value.trim();
+    const validator = window.RefCheck ? RefCheck.validatorFor(consult.kind) : null;
+    if (!value || !validator) { box.hidden = true; return; }
+    const r = validator(value);
+    if (r.ok) {
+      box.className = 'ref-status ok';
+      box.innerHTML = `${CHECK_ICON}<span>${esc(r.label)} válido${r.warnings[0] ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : ''}</span>`;
+    } else {
+      box.className = 'ref-status bad';
+      box.innerHTML = `${WARN_ICON}<span>${esc(r.errors.join('; '))}</span>${r.suggestions.length ? `<span class="ref-sug">Tentar: ${r.suggestions.map((v) => `<button type="button" class="chip" data-fix="${esc(v)}">${esc(v)}</button>`).join('')}</span>` : ''}`;
+    }
+    box.hidden = false;
+  }
+  $('consult-ref').addEventListener('input', renderConsultRefStatus);
+  $('consult-ref-status').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-fix]');
+    if (!b) return;
+    $('consult-ref').value = b.dataset.fix;
+    renderConsultRefStatus();
+    $('consult-ref').focus();
+  });
+
   /** Faixa acima do compositor: avisa que outro atendente está digitando ou vendo a mesma conversa. */
   function renderActivityBar() {
     const c = current();
@@ -2103,6 +2191,7 @@
     $('debit-prompt').hidden = true;
     $('plan-hint').hidden = true;
     $('obs-strip').hidden = true;
+    $('ref-hint').hidden = true;
     state.contactNotes = [];
     $('tag-popup').hidden = true;
     $('sector-popup').hidden = true;
@@ -2716,6 +2805,7 @@
           const nearBottom = els.messages.scrollHeight - els.messages.scrollTop - els.messages.clientHeight < 120;
           renderMessages(nearBottom || message.direction === 'out');
         }
+        if (message.direction === 'in') renderRefHint();
         if (message.direction === 'in' && document.hasFocus() && !document.hidden) api('POST', `/api/conversations/${state.currentId}/read`).catch(() => {});
         else if (message.direction === 'in') notify(applyPrefs(conversation), message, { sameConversation: true });
       } else if (message.direction === 'in') {
