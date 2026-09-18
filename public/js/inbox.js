@@ -1767,7 +1767,7 @@
   function refreshContactSubs() { for (const k of Object.keys(dOpen)) if (dOpen[k]) loadSub(k); }
 
   // ---------- Visualizador de mídia (lightbox) ----------
-  const lb = { items: [], idx: -1, zoom: 1 };
+  const lb = { items: [], idx: -1, zoom: 1, rot: 0, flip: false }; // rot em graus (0/90/180/270), flip = espelhado
   const VIDEO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>';
   const DOC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
   const lbMedia = () => state.messages.filter((m) => m.media_id && !m.deleted_at && (['image', 'sticker', 'video'].includes(m.type) || (m.type === 'document' && isPdf(m))));
@@ -1790,7 +1790,7 @@
     const m = lb.items[lb.idx];
     if (!m) return closeLightbox();
     const c = current();
-    lb.zoom = 1;
+    lb.zoom = 1; lb.rot = 0; lb.flip = false;
     const src = `/api/media/${esc(m.media_id)}`;
     const isVideo = m.type === 'video';
     const isDoc = m.type === 'document';
@@ -1814,6 +1814,10 @@
     $('lb-next').disabled = lb.idx >= lb.items.length - 1;
     $('lb-zoom-in').hidden = isVideo || isDoc;
     $('lb-zoom-out').hidden = isVideo || isDoc;
+    $('lb-rotate-left').hidden = isVideo || isDoc;
+    $('lb-rotate-right').hidden = isVideo || isDoc;
+    $('lb-flip').hidden = isVideo || isDoc;
+    applyImageTransform(); // zera giro/espelho/zoom da imagem anterior
     $('lb-open').hidden = !isDoc;
     $('lb-open').href = src;
     document.querySelectorAll('.lb-thumb').forEach((t) => t.classList.toggle('current', Number(t.dataset.id) === m.id));
@@ -1831,12 +1835,38 @@
     showLightbox();
   }
   function setZoom(z) {
+    lb.zoom = Math.min(4, Math.max(1, z));
+    applyImageTransform();
+  }
+  /** Gira em passos de 90° (foto de chassi/motor costuma vir de lado). */
+  function rotateImage(dir) {
+    lb.rot = (lb.rot + dir * 90 + 360) % 360;
+    applyImageTransform();
+  }
+  function flipImage() {
+    lb.flip = !lb.flip;
+    applyImageTransform();
+  }
+  /** Zoom, giro e espelho no mesmo transform; deitada (90/270), a imagem passa a caber pela altura do palco. */
+  function applyImageTransform() {
     const img = $('lb-img');
     if (!img) return;
-    lb.zoom = Math.min(4, Math.max(1, z));
+    const stage = $('lb-stage');
+    const sideways = lb.rot === 90 || lb.rot === 270;
     img.classList.toggle('zoomed', lb.zoom > 1);
-    img.style.transform = lb.zoom > 1 ? `scale(${lb.zoom})` : '';
+    img.classList.toggle('sideways', sideways);
+    if (sideways && lb.zoom <= 1) {
+      img.style.maxWidth = `${stage.clientHeight - 16}px`;
+      img.style.maxHeight = `${stage.clientWidth - 160}px`;
+    } else { img.style.maxWidth = ''; img.style.maxHeight = ''; }
+    const parts = [];
+    if (lb.zoom > 1) parts.push(`scale(${lb.zoom})`);
+    if (lb.rot) parts.push(`rotate(${lb.rot}deg)`);
+    if (lb.flip) parts.push('scaleX(-1)');
+    img.style.transform = parts.join(' ');
     img.style.transformOrigin = 'center';
+    img.dataset.rot = lb.rot;
+    img.dataset.flip = lb.flip ? '1' : '0';
   }
   els.messages.addEventListener('click', (e) => {
     const t = e.target.closest('[data-lb]');
@@ -1847,6 +1877,9 @@
   $('lb-next').addEventListener('click', () => stepLightbox(1));
   $('lb-zoom-in').addEventListener('click', () => setZoom(lb.zoom + 0.5));
   $('lb-zoom-out').addEventListener('click', () => setZoom(lb.zoom - 0.5));
+  $('lb-rotate-left').addEventListener('click', () => rotateImage(-1));
+  $('lb-rotate-right').addEventListener('click', () => rotateImage(1));
+  $('lb-flip').addEventListener('click', flipImage);
   $('lb-strip').addEventListener('click', (e) => {
     const t = e.target.closest('.lb-thumb');
     if (!t) return;
@@ -1864,6 +1897,8 @@
     else if (e.key === 'ArrowRight') stepLightbox(1);
     else if (e.key === '+' || e.key === '=') setZoom(lb.zoom + 0.5);
     else if (e.key === '-') setZoom(lb.zoom - 0.5);
+    else if (e.key === 'r' || e.key === 'R') rotateImage(e.shiftKey ? -1 : 1);
+    else if (e.key === 'f' || e.key === 'F') flipImage();
   });
 
   // ---------- Player de áudio ----------
