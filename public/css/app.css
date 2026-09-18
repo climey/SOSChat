@@ -318,6 +318,15 @@ table.table tr:last-child td { border-bottom: none; }
 .attach-preview .info { flex: 1; min-width: 0; }
 .attach-preview .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .attach-preview .size { font-size: 12px; color: var(--muted); }
+.attach-preview { flex-direction: column; align-items: stretch; gap: 8px; }
+.att-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.att-item { position: relative; display: flex; align-items: center; gap: 8px; max-width: 220px; padding: 4px 8px 4px 4px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+.att-item img, .att-item .ic { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+.att-item .ic { display: flex; align-items: center; justify-content: center; background: var(--surface-3); font-size: 20px; }
+.att-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.att-remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: none; background: var(--primary); color: #fff; font-size: 11px; line-height: 20px; cursor: pointer; padding: 0; }
+.att-foot { display: flex; align-items: center; gap: 8px; }
+.att-foot .size { flex: 1; font-size: 12px; color: var(--muted); }
 .composer.dragover { border-color: var(--primary); background: var(--primary-soft); }
 
 /* ---------- Busca dentro da conversa ---------- */

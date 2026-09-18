@@ -1985,7 +1985,9 @@
   });
 
   // ---------- Anexos ----------
-  const attach = { file: null, url: null };
+  // Vários anexos de uma vez: cada um vira uma mensagem; a legenda vai só no primeiro
+  const attach = { files: [] }; // [{ file, url }]
+  const ATTACH_MAX = 10;
   const attachInputs = { doc: $('file-doc'), media: $('file-media'), audio: $('file-audio') };
   const MEDIA_MAX = 25 * 1024 * 1024;
 
@@ -2001,56 +2003,87 @@
     input.value = '';
     input.click();
   });
-  Object.values(attachInputs).forEach((inp) => inp.addEventListener('change', () => { if (inp.files[0]) setAttachment(inp.files[0]); }));
+  Object.values(attachInputs).forEach((inp) => inp.addEventListener('change', () => { if (inp.files.length) addAttachments([...inp.files]); }));
 
-  function setAttachment(file) {
+  const sendLabel = () => (attach.files.length > 1 ? `Enviar ${attach.files.length} arquivos` : 'Enviar arquivo');
+  /** Acrescenta arquivos à lista de anexos (não substitui os que já estão lá). */
+  function addAttachments(files) {
     if (state.composeMode === 'note') { toast('Anexos só em mensagens, não em notas', true); return; }
-    if (file.size > MEDIA_MAX) { toast('Arquivo acima de 25 MB', true); return; }
-    clearAttachment();
-    attach.file = file;
-    const isImg = file.type.startsWith('image/');
-    if (isImg) attach.url = URL.createObjectURL(file);
-    const p = $('attach-preview');
-    p.innerHTML = `${isImg ? `<img src="${attach.url}" alt="">` : '<span class="ic">📎</span>'}
-      <div class="info"><div class="name">${esc(file.name)}</div><div class="size">${esc(SOS.fmtBytes(file.size))} · ${esc(file.type || 'arquivo')}</div></div>
-      <button type="button" class="icon-btn" id="attach-remove" title="Remover anexo">✕</button>`;
-    p.hidden = false;
-    $('attach-remove').addEventListener('click', clearAttachment);
-    els.composeText.placeholder = 'Legenda (opcional)…';
-    els.composeSend.textContent = 'Enviar arquivo';
+    let added = 0;
+    for (const file of files) {
+      if (file.size > MEDIA_MAX) { toast(`${file.name}: acima de 25 MB`, true); continue; }
+      if (attach.files.length >= ATTACH_MAX) { toast(`No máximo ${ATTACH_MAX} anexos por vez`, true); break; }
+      attach.files.push({ file, url: file.type.startsWith('image/') ? URL.createObjectURL(file) : null });
+      added++;
+    }
+    if (!added) return;
+    renderAttachments();
     els.composeText.focus();
   }
-  function clearAttachment() {
-    if (attach.url) URL.revokeObjectURL(attach.url);
-    attach.file = null;
-    attach.url = null;
-    $('attach-preview').hidden = true;
-    $('attach-preview').innerHTML = '';
-    if (state.composeMode !== 'note') {
-      els.composeText.placeholder = 'Digite sua mensagem ou arraste um arquivo…';
-      els.composeSend.textContent = 'Enviar';
-    }
+  function setAttachment(file) { addAttachments([file]); }
+  function removeAttachment(i) {
+    const it = attach.files[i];
+    if (!it) return;
+    if (it.url) URL.revokeObjectURL(it.url);
+    attach.files.splice(i, 1);
+    renderAttachments();
   }
+  function renderAttachments() {
+    const p = $('attach-preview');
+    if (!attach.files.length) {
+      p.hidden = true; p.innerHTML = '';
+      if (state.composeMode !== 'note') { els.composeText.placeholder = 'Digite sua mensagem ou arraste um arquivo…'; els.composeSend.textContent = 'Enviar'; }
+      return;
+    }
+    const total = attach.files.reduce((n, a) => n + a.file.size, 0);
+    p.innerHTML = `<div class="att-list">${attach.files.map((a, i) => `<div class="att-item" title="${esc(a.file.name)} · ${esc(SOS.fmtBytes(a.file.size))}">
+        ${a.url ? `<img src="${a.url}" alt="">` : `<span class="ic">${a.file.type.startsWith('video/') ? '🎬' : a.file.type.startsWith('audio/') ? '🎵' : '📎'}</span>`}
+        <span class="att-name">${esc(a.file.name)}</span>
+        <button type="button" class="att-remove" data-att-remove="${i}" title="Remover">✕</button></div>`).join('')}</div>
+      <div class="att-foot"><span class="size">${attach.files.length === 1 ? '1 anexo' : attach.files.length + ' anexos'} · ${esc(SOS.fmtBytes(total))}${attach.files.length > 1 ? ' · a legenda vai com o primeiro' : ''}</span>
+        <button type="button" class="btn btn-sm btn-ghost" data-att-add>+ Adicionar</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-att-clear>Limpar</button></div>`;
+    p.hidden = false;
+    els.composeText.placeholder = 'Legenda (opcional)…';
+    els.composeSend.textContent = sendLabel();
+  }
+  $('attach-preview').addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-att-remove]');
+    if (rm) { removeAttachment(Number(rm.dataset.attRemove)); return; }
+    if (e.target.closest('[data-att-clear]')) { clearAttachment(); return; }
+    if (e.target.closest('[data-att-add]')) { attachInputs.doc.value = ''; attachInputs.doc.click(); }
+  });
+  function clearAttachment() {
+    for (const a of attach.files) if (a.url) URL.revokeObjectURL(a.url);
+    attach.files = [];
+    renderAttachments();
+  }
+  /** Envia os anexos em ordem, um por mensagem; legenda e citação só no primeiro. Se um falhar, os restantes ficam na lista. */
   async function sendAttachment(id, caption) {
-    const fd = new FormData();
-    const file = attach.file;
-    fd.append('file', attach.file, attach.file.name);
-    fd.append('caption', els.signToggle.checked && caption ? `*${signText()}:*\n${caption}` : caption);
-    if (state.reply) fd.append('quoted_message_id', state.reply.id);
+    const list = [...attach.files];
+    const total = list.length;
     els.composeSend.disabled = true;
-    els.composeSend.textContent = 'Enviando…';
+    let sent = 0;
     try {
-      await SOS.upload(`/api/conversations/${id}/media`, fd);
-      clearAttachment();
-      clearReply();
-      offerDebit(file);
-      els.composeText.value = '';
-      autosize();
+      for (let i = 0; i < list.length; i++) {
+        els.composeSend.textContent = total > 1 ? `Enviando ${i + 1}/${total}…` : 'Enviando…';
+        const fd = new FormData();
+        fd.append('file', list[i].file, list[i].file.name);
+        const cap = i === 0 ? caption : '';
+        fd.append('caption', els.signToggle.checked && cap ? `*${signText()}:*\n${cap}` : cap);
+        if (i === 0 && state.reply) fd.append('quoted_message_id', state.reply.id);
+        await SOS.upload(`/api/conversations/${id}/media`, fd);
+        sent++;
+        removeAttachment(attach.files.indexOf(list[i]));
+        if (i === 0) { clearReply(); els.composeText.value = ''; autosize(); }
+      }
+      offerDebit(list[0].file);
     } catch (err) {
-      toast(err.message, true);
-      els.composeSend.textContent = 'Enviar arquivo';
+      toast(total > 1 ? `${err.message} (${sent} de ${total} enviados; os outros continuam na lista)` : err.message, true);
+      renderAttachments();
     } finally {
       els.composeSend.disabled = false;
+      if (!attach.files.length && state.composeMode !== 'note') els.composeSend.textContent = 'Enviar';
       els.composeText.focus();
     }
   }
@@ -2060,12 +2093,12 @@
   }));
   ['dragleave', 'drop'].forEach((ev) => els.composer.addEventListener(ev, () => els.composer.classList.remove('dragover')));
   els.composer.addEventListener('drop', (e) => {
-    const f = e.dataTransfer?.files?.[0];
-    if (f) { e.preventDefault(); setAttachment(f); }
+    const files = [...(e.dataTransfer?.files || [])];
+    if (files.length) { e.preventDefault(); addAttachments(files); }
   });
   els.composeText.addEventListener('paste', (e) => {
-    const f = [...(e.clipboardData?.files || [])][0];
-    if (f) { e.preventDefault(); setAttachment(f); }
+    const files = [...(e.clipboardData?.files || [])];
+    if (files.length) { e.preventDefault(); addAttachments(files); }
   });
 
   // ---------- Busca na conversa ----------
@@ -2701,7 +2734,7 @@
     if (mode === 'note') clearAttachment();
     $('btn-attach').hidden = mode === 'note';
     els.composeText.placeholder = mode === 'note' ? 'Escreva uma nota interna (o cliente não vê)…' : 'Digite sua mensagem ou arraste um arquivo…';
-    els.composeSend.textContent = mode === 'note' ? 'Salvar nota' : (attach.file ? 'Enviar arquivo' : 'Enviar');
+    els.composeSend.textContent = mode === 'note' ? 'Salvar nota' : (attach.files.length ? sendLabel() : 'Enviar');
     els.composeSend.classList.toggle('btn-primary', mode !== 'note');
     els.composeHint.textContent = mode === 'note' ? 'Visível só para a equipe' : 'Enter envia · Shift+Enter quebra linha';
     els.composeText.focus();
@@ -2722,7 +2755,7 @@
     const id = state.currentId;
     if (!id) return;
     if (state.editing) { await saveEdit(text); return; }
-    if (attach.file && state.composeMode !== 'note') { await sendAttachment(id, text); return; }
+    if (attach.files.length && state.composeMode !== 'note') { await sendAttachment(id, text); return; }
     if (!text) return;
     els.composeSend.disabled = true;
     els.composeText.value = '';
@@ -3330,7 +3363,7 @@
 
   // Seguro recarregar sozinho quando não há texto, anexo ou agendamento sendo escrito
   function canReloadNow() {
-    return !els.composeText.value.trim() && !attach.file
+    return !els.composeText.value.trim() && !attach.files.length
       && ($('schedule-drawer').hidden || !$('sched-body').value.trim());
   }
 
