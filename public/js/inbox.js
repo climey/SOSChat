@@ -2050,49 +2050,91 @@
   const refDismissed = new Map(); // conversa -> id da última mensagem cujo aviso o atendente fechou (esconde tudo até ali)
   const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
   const WARN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
-  /** Cartão com os dados básicos do veículo (busca no site quando ainda não tem). */
-  function vehicleCardHtml(plate, kind = 'placa') {
-    const c = current();
-    const v = state.vehicles.get(kind + ':' + plate);
-    if (!v) { loadVehicle(plate, false, kind); return '<div class="veh-card loading">Buscando dados do veículo…</div>'; }
-    if (v === 'loading') return '<div class="veh-card loading">Buscando dados do veículo…</div>';
-    if (v.status === 'not_found') return `<div class="veh-card none">${kind === 'chassi' ? 'Chassi' : 'Placa'} ${esc(plate)} não encontrad${kind === 'chassi' ? 'o' : 'a'} no site de consulta. Confira com o cliente ou siga direto para a consulta completa.</div>`;
-    if (v.status !== 'found') return `<div class="veh-card none">Não foi possível buscar o veículo agora (${esc(v.error || 'site fora do ar')}). <button type="button" class="btn btn-sm btn-ghost" data-veh-retry="${esc(plate)}" data-veh-kind="${kind}">Tentar de novo</button></div>`;
+  /** Cartão de um veículo encontrado. `ref` é o dado a enviar; `original` é o dado errado que o cliente mandou (correção). */
+  function foundCardHtml(v, ref, kind, { original = null, reload = null, sent = false } = {}) {
     const f = v.data.fields || {};
     const bits = [
       f.ano ? `Ano ${f.ano}${f.ano_modelo && f.ano_modelo !== f.ano ? '/' + f.ano_modelo : ''}` : '',
       f.cor, f.combustivel, f.potencia, f.municipio ? `${f.municipio}/${f.uf || ''}` : f.uf,
       kind === 'chassi' ? (f.placa ? `placa ${f.placa}` : '') : (f.chassi ? `chassi ${f.chassi}` : ''),
     ].filter(Boolean);
-    const sent = v.sent_at && c && v.conversation_id === c.id;
-    return `<div class="veh-card">
+    const fix = original ? `<div class="veh-fix">Chassi <code>${diffHtml(original, ref)}</code> <button type="button" class="btn btn-xs btn-ghost" data-ref-copy="${esc(ref)}" title="Copiar ${esc(ref)}">Copiar</button></div>` : '';
+    return `<div class="veh-card${original ? ' alt' : ''}">
       <span class="veh-ic">🚗</span>
-      <div class="veh-info"><div class="veh-title">${esc(f.marca || '')} ${esc(f.modelo || '')}</div><div class="veh-meta">${esc(bits.join(' · '))}</div>
+      <div class="veh-info"><div class="veh-title">${esc(f.marca || '')} ${esc(f.modelo || '')}</div><div class="veh-meta">${esc(bits.join(' · '))}</div>${fix}
         ${sent ? `<div class="veh-sent">Confirmação enviada ao cliente ${esc(sinceText(v.sent_at))}${v.mode === 'auto' ? ' (automático)' : ''}</div>` : ''}</div>
-      <button type="button" class="btn btn-sm ${sent ? '' : 'btn-primary'}" data-veh-send="${esc(plate)}" data-veh-kind="${kind}" title="Manda a mensagem com os dados do veículo pedindo confirmação">${sent ? 'Enviar de novo' : 'Enviar para o cliente confirmar'}</button>
+      <button type="button" class="btn btn-sm ${sent ? '' : 'btn-primary'}" data-veh-send="${esc(ref)}" data-veh-kind="${kind}" data-veh-original="${esc(original || '')}" data-veh-reload="${esc(reload || ref)}" title="${original ? 'Manda a mensagem dizendo que o dado enviado não existe e mostrando o veículo da correção' : 'Manda a mensagem com os dados do veículo pedindo confirmação'}">${sent ? 'Enviar de novo' : 'Enviar para o cliente confirmar'}</button>
     </div>`;
   }
-  async function loadVehicle(plate, force = false, kind = 'placa') {
+  /** Marca em destaque os caracteres que mudaram entre o dado enviado e a correção. */
+  function diffHtml(from, to) {
+    if (from.length !== to.length) return esc(to);
+    return [...to].map((ch, i) => (ch === from[i] ? esc(ch) : `<b class="diff">${esc(ch)}</b>`)).join('');
+  }
+  /** Cartão com os dados básicos do veículo pela placa (busca no site quando ainda não tem). */
+  function vehicleCardHtml(plate, kind = 'placa') {
+    const c = current();
+    const v = state.vehicles.get(kind + ':' + plate);
+    if (!v) { loadVehicle(plate, false, kind); return '<div class="veh-card loading">Buscando dados do veículo…</div>'; }
+    if (v === 'loading') return '<div class="veh-card loading">Buscando dados do veículo…</div>';
+    if (v.status === 'not_found') return `<div class="veh-card none">Placa ${esc(plate)} não encontrada no site de consulta. Confira com o cliente ou siga direto para a consulta completa.</div>`;
+    if (v.status !== 'found') return `<div class="veh-card none">Não foi possível buscar o veículo agora (${esc(v.error || 'site fora do ar')}). <button type="button" class="btn btn-sm btn-ghost" data-veh-retry="${esc(plate)}" data-veh-kind="${kind}">Tentar de novo</button></div>`;
+    return foundCardHtml(v, plate, kind, { sent: v.sent_at && c && v.conversation_id === c.id });
+  }
+  /**
+   * Chassi: conferência e busca no mesmo cartão. Se o chassi não existir, mostra as correções
+   * prováveis que existem no site, cada uma com o botão de enviar ao cliente.
+   */
+  function chassiCardHtml(r, i) {
+    const c = current();
+    const key = 'chassi:' + r.value;
+    const v = state.vehicles.get(key);
+    if (!v) { loadVehicle(r.value, false, 'chassi', true); return '<div class="veh-card loading">Conferindo o chassi no site…</div>'; }
+    if (v === 'loading') return '<div class="veh-card loading">Conferindo o chassi no site…</div>';
+    const mine = (x) => Boolean(x && x.sent_at && c && v.conversation_id === c.id);
+    if (v.lookup && v.lookup.status === 'found') return foundCardHtml(v.lookup, r.value, 'chassi', { sent: mine(v.lookup) });
+    if (v.alternatives && v.alternatives.length) {
+      return `<div class="veh-alts"><div class="veh-head">Chassi <b>${esc(r.value)}</b> não existe no site. ${v.alternatives.length === 1 ? 'Provavelmente é este veículo:' : 'Pode ser um destes:'}</div>
+        ${v.alternatives.map((a) => foundCardHtml(a, a.ref, 'chassi', { original: r.value, reload: r.value, sent: mine(a) })).join('')}</div>`;
+    }
+    if (v.status === 'error' || (v.lookup && v.lookup.status === 'error')) {
+      return `<div class="veh-card none">Não foi possível buscar o veículo agora (${esc(v.error || (v.lookup && v.lookup.error) || 'site fora do ar')}). <button type="button" class="btn btn-sm btn-ghost" data-veh-retry="${esc(r.value)}" data-veh-kind="chassi">Tentar de novo</button></div>`;
+    }
+    const tested = v.tested && v.tested.length ? ` Também testei ${v.tested.map((t) => `<code>${esc(t)}</code>`).join(', ')}: nada.` : '';
+    return `<div class="veh-card none">Chassi ${esc(r.value)} não encontrado no site de consulta.${tested} O melhor é pedir para o cliente conferir no documento.
+      <button type="button" class="btn btn-sm btn-primary" data-ref-ask="${i}" title="Preenche a mensagem pedindo para o cliente conferir">Pedir para conferir</button></div>`;
+  }
+  /** Resultado da conferência do chassi no site, para decidir a cor do aviso. */
+  function chassiOutcome(r) {
+    const v = state.vehicles.get('chassi:' + r.value);
+    if (!v || v === 'loading') return 'pending';
+    if (v.lookup && v.lookup.status === 'found') return 'found';
+    if (v.alternatives && v.alternatives.length) return 'fixed';
+    if (v.status === 'error' || (v.lookup && v.lookup.status === 'error')) return 'error';
+    return 'missing';
+  }
+  async function loadVehicle(plate, force = false, kind = 'placa', resolve = false) {
     const c = current();
     const key = kind + ':' + plate;
     state.vehicles.set(key, 'loading');
     try {
-      const v = await api('GET', `/api/vehicles/${encodeURIComponent(plate)}?kind=${kind}&conversation=${c ? c.id : ''}${force ? '&force=1' : ''}`);
+      const v = await api('GET', `/api/vehicles/${encodeURIComponent(plate)}${resolve ? '/resolve' : ''}?kind=${kind}&conversation=${c ? c.id : ''}${force ? '&force=1' : ''}`);
       state.vehicles.set(key, { ...v, conversation_id: c ? c.id : null });
     } catch (err) {
       state.vehicles.set(key, { status: 'error', error: err.message });
     }
     renderRefHint();
   }
-  async function sendVehiclePreview(plate, kind = 'placa') {
+  async function sendVehiclePreview(ref, kind = 'placa', original = '', reload = '') {
     const c = current();
     if (!c) return;
-    const v = state.vehicles.get(kind + ':' + plate);
-    if (v && v.sent_at && !confirm('A confirmação já foi enviada para este cliente. Enviar de novo?')) return;
+    const v = state.vehicles.get(kind + ':' + (reload || ref));
+    const already = v && (v.sent_at || (v.lookup && v.lookup.sent_at) || (v.alternatives || []).some((a) => a.ref === ref && a.sent_at));
+    if (already && !confirm('A confirmação já foi enviada para este cliente. Enviar de novo?')) return;
     try {
-      await api('POST', `/api/vehicles/${encodeURIComponent(plate)}/send`, { conversation_id: c.id, kind });
-      toast('Dados do veículo enviados para o cliente confirmar');
-      await loadVehicle(plate, false, kind);
+      await api('POST', `/api/vehicles/${encodeURIComponent(ref)}/send`, { conversation_id: c.id, kind, original: original || null });
+      toast(original ? 'Correção do chassi enviada para o cliente confirmar' : 'Dados do veículo enviados para o cliente confirmar');
+      await loadVehicle(reload || ref, false, kind, kind === 'chassi');
     } catch (err) { toast(err.message, true); }
   }
   /** Copia o dado para a área de transferência (a pré-consulta é feita fora do chat). */
@@ -2123,14 +2165,29 @@
     const box = $('ref-hint');
     const found = c ? latestReferences() : null;
     if (!found) { box.hidden = true; return; }
-    const anyBad = found.list.some((r) => !r.ok);
+    const lookupOn = state.settings.vehicle_lookup_mode !== 'off';
+    const anyBad = found.list.some((r) => !r.ok || (lookupOn && r.kind === 'chassi' && ['missing', 'fixed'].includes(chassiOutcome(r))));
     box.className = `ref-hint ${anyBad ? 'bad' : 'good'}`;
     box.dataset.msg = found.message.id;
     box.innerHTML = found.list.map((r, i) => {
       const shown = r.display || r.value;
+      // chassi com pré-consulta ligada: conferência e busca no mesmo bloco
+      if (lookupOn && r.kind === 'chassi') {
+        const outcome = chassiOutcome(r);
+        const card = chassiCardHtml(r, i);
+        let head;
+        if (!r.ok) head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>Chassi ${esc(r.raw || shown)}</b> parece errado: ${esc(r.errors.join('; '))}</span>`;
+        else if (outcome === 'missing') head = `<span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>Chassi ${esc(shown)}</b> tem o formato certo, mas não existe no site de consulta</span>`;
+        else head = `<span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text"><b>Chassi ${esc(shown)}</b> ${outcome === 'found' ? 'confere: veículo encontrado' : 'parece correto'}${r.warnings[0] && outcome !== 'found' ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : ''}</span>`;
+        const actions = r.ok
+          ? `<button type="button" class="btn btn-sm ${outcome === 'fixed' || outcome === 'missing' ? '' : 'btn-primary'}" data-ref-copy="${esc(shown)}" title="Copia para você fazer a pré-consulta">Copiar</button>
+             <button type="button" class="btn btn-sm btn-ghost" data-ref-use="${i}" title="Só depois do pagamento, na hora de entregar a consulta">Registrar consulta</button>`
+          : (outcome === 'fixed' || outcome === 'missing' ? '' : `<button type="button" class="btn btn-sm" data-ref-ask="${i}" title="Preenche a mensagem pedindo para o cliente conferir">Pedir para conferir</button>`);
+        return `<div class="ref-row">${head}${actions}</div>${card}`;
+      }
       if (r.ok) {
         const warn = r.warnings[0] ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : '';
-        const vehicle = (r.kind === 'placa' || r.kind === 'chassi') && state.settings.vehicle_lookup_mode !== 'off' ? vehicleCardHtml(r.value, r.kind) : '';
+        const vehicle = r.kind === 'placa' && lookupOn ? vehicleCardHtml(r.value, r.kind) : '';
         return `<div class="ref-row"><span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text"><b>${esc(r.label)} ${esc(shown)}</b> parece correto${warn}</span>
           <button type="button" class="btn btn-sm btn-primary" data-ref-copy="${esc(shown)}" title="Copia para você fazer a pré-consulta">Copiar</button>
           <button type="button" class="btn btn-sm btn-ghost" data-ref-use="${i}" title="Só depois do pagamento, na hora de entregar a consulta">Registrar consulta</button></div>${vehicle}`;
@@ -2151,8 +2208,8 @@
     const copy = e.target.closest('[data-ref-copy]');
     const vehSend = e.target.closest('[data-veh-send]');
     const vehRetry = e.target.closest('[data-veh-retry]');
-    if (vehSend) { sendVehiclePreview(vehSend.dataset.vehSend, vehSend.dataset.vehKind || 'placa'); return; }
-    if (vehRetry) { loadVehicle(vehRetry.dataset.vehRetry, true, vehRetry.dataset.vehKind || 'placa'); return; }
+    if (vehSend) { sendVehiclePreview(vehSend.dataset.vehSend, vehSend.dataset.vehKind || 'placa', vehSend.dataset.vehOriginal || '', vehSend.dataset.vehReload || ''); return; }
+    if (vehRetry) { loadVehicle(vehRetry.dataset.vehRetry, true, vehRetry.dataset.vehKind || 'placa', vehRetry.dataset.vehKind === 'chassi'); return; }
     const use = e.target.closest('[data-ref-use]');
     const ask = e.target.closest('[data-ref-ask]');
     if (copy) { copyText(copy.dataset.refCopy); return; }

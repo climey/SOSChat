@@ -6,3 +6,6 @@ node_modules/
 # Restos de uma inicialização anterior (pode apagar a pasta SOSChat/ e o arquivo chat e remover estas linhas)
 /SOSChat/
 /chat
+
+# Chrome for Testing baixado pelo scripts/ensure-chrome.sh
+.chrome/

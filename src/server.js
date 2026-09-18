@@ -97,6 +97,7 @@ async function start() {
   require('./services/schedules').start();
   server.listen(config.port, () => {
     console.log(`SOS Chat rodando em ${config.appUrl} (${config.isProd ? 'produção' : 'desenvolvimento'})`);
+    console.log(`[pré-consulta] ${require('./services/vehicle-lookup').chromeStatus()}`);
     console.log(`WhatsApp: provedor ${whatsapp.provider}${whatsapp.provider === 'cloud' ? (whatsapp.isConfigured() ? ' (Cloud API configurada)' : ' (modo simulado, sem credenciais)') : ' (QR code em Configurações)'}`);
   });
 }

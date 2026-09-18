@@ -106,8 +106,9 @@ public/                login, inbox, relatórios e configurações
 | POST | `/api/conversations/:id/read` | zera não lidas e marca como lida na Meta |
 | GET | `/api/reports/summary\|volume\|agents\|tags?from&to&group` | relatórios |
 | GET/POST/PATCH/DELETE | `/api/tags`, `/api/users`, `/api/plans` | administração (planos: catálogo de consultas) |
-| GET | `/api/vehicles/:placa?conversation=ID` | dados básicos do veículo (cache de 30 dias) e a mensagem de confirmação pronta |
-| POST | `/api/vehicles/:placa/send` | `{conversation_id}` envia ao cliente a confirmação do veículo |
+| GET | `/api/vehicles/:ref/resolve?conversation=ID` | conferência + busca: valida o chassi, busca no site e testa as correções prováveis (as que existem voltam com mensagem pronta) |
+| GET | `/api/vehicles/:ref?conversation=ID` | dados básicos do veículo pela placa ou chassi (cache de 30 dias) e a mensagem de confirmação pronta |
+| POST | `/api/vehicles/:ref/send` | `{conversation_id, kind?, original?}` envia ao cliente a confirmação do veículo (com `original`, a mensagem de correção) |
 | GET | `/api/users/team` | equipe agora: quem está online, ausente ou offline, carga e última vez visto |
 | GET/POST/PATCH/DELETE | `/api/quick-replies`, `/api/quick-replies/:id/media` | respostas rápidas da equipe ou pessoais, com mídia anexada |
 | GET/PATCH/DELETE | `/api/contacts/:id` | ficha do contato (campos extras, exclusão só admin) |
@@ -132,7 +133,7 @@ Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` 
 - [x] **Etapa 1.8:** menu de ações na conversa, preferências pessoais (fixar/silenciar/ocultar), respostas rápidas, transferência com nota, alerta de conversa parada, presença e "está digitando", ficha do contato, citação, reações, emojis, mensagem de voz (ffmpeg → OGG/Opus), atualização automática após deploy
 - [x] **Etapa 1.9:** painel do contato no estilo Umbler (foto, abas Contato/Detalhes da conversa, observações, log de atividade, campos editáveis, bloquear/excluir) e **planos de consultas**: catálogo em Configurações, cartão de saldo no contato com chip `2/3` na lista e no cabeçalho, botão "Registrar consulta" (tipos configuráveis: Placa, Chassi, Motor, CRLV, CPF, CNPJ, Telefone, Nome completo, com detecção automática na conversa) que debita e gera nota interna, oferta de débito ao enviar PDF, aviso e etiqueta *Renovação* ao zerar, filtro por plano e relatório "Consultas e planos"
 - [x] **Etapa 1.10:** Conferência de chassi, placa, Renavam, CPF e CNPJ na conversa: aviso quando o dado do cliente parece errado, sugestão de correção com um clique, mensagem pronta pedindo para conferir e validação ao vivo no modal de consulta
-- [x] **Etapa 1.11:** Pré-consulta de placa ou chassi: ao chegar uma placa ou um chassi válido, busca os dados básicos do veículo no Ke Placa (cache de 30 dias, uma busca por vez), mostra o cartão ao atendente e envia a mensagem de confirmação ao cliente com um clique ou automaticamente; modelo da mensagem editável
+- [x] **Etapa 1.11:** Pré-consulta de placa ou chassi: ao chegar uma placa ou um chassi válido, busca os dados básicos do veículo no Ke Placa (cache de 30 dias, uma busca por vez), mostra o cartão ao atendente e envia a mensagem de confirmação ao cliente com um clique ou automaticamente; modelo da mensagem editável Conferência e pré-consulta unificadas: chassi errado ou inexistente tem as correções prováveis testadas no site e a que existe vai para o cliente confirmar (também no modo automático, quando só uma existe).
 - [ ] **Etapa 2:** templates da Cloud API (janela de 24h), distribuição automática, saudação e horário de atendimento
 - [ ] **Etapa 3:** integração com a plataforma de consultas (detectar placa/chassi na mensagem e mostrar dados do veículo no painel lateral)
 - [ ] **Etapa 4:** filas/departamentos, horário de atendimento com mensagem automática, distribuição automática

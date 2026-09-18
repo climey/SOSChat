@@ -257,5 +257,5 @@
     }
   }
 
-  return { validateChassi, validatePlaca, validateRenavam, validateCpf, validateCnpj, validatorFor, detect, askMessage, vinCheckDigit, renavamCheckDigit };
+  return { validateChassi, validatePlaca, validateRenavam, validateCpf, validateCnpj, validatorFor, detect, askMessage, vinCheckDigit, renavamCheckDigit, chassiSuggestions };
 });

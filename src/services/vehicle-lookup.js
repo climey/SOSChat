@@ -10,6 +10,7 @@
  */
 const db = require('../db');
 const fs = require('fs');
+const path = require('path');
 const { execSync } = require('child_process');
 
 const SOURCE = 'keplaca';
@@ -38,6 +39,18 @@ const DEFAULT_TEMPLATE = [
   '🔢 Chassi final {chassi}',
   '',
   'É esse mesmo o veículo que você quer consultar?',
+].join('\n');
+
+/** Mensagem quando o dado enviado não existe, mas uma correção próxima existe. */
+const DEFAULT_FIX_TEMPLATE = [
+  'Não encontrei nenhum veículo para {tipo} {original}. Mas encontrei este, com {tipo} {referencia} (bem parecido com o que você mandou):',
+  '',
+  '🚗 {marca} {modelo}',
+  '📅 Ano {ano} · Cor {cor}',
+  '⛽ {combustivel} · {potencia}',
+  '📍 {municipio}/{uf}',
+  '',
+  'É esse o veículo? Se for, confirme que sigo a consulta com {tipo} {referencia}.',
 ].join('\n');
 
 const decode = (s) => String(s || '')
@@ -79,18 +92,64 @@ function parse(html, ref) {
 const isBlocked = (html) => /Attention Required!\s*\|\s*Cloudflare|Just a moment/i.test(String(html || ''));
 
 // ---------- Chromium headless (abre sob demanda, fecha quando ocioso) ----------
+/**
+ * Um executável serve se existir e não for o "atalho" do Ubuntu que só manda instalar o snap
+ * (/usr/bin/chromium-browser em imagens Ubuntu é um script de poucos KB com essa mensagem).
+ */
+function usableChrome(p) {
+  try {
+    const st = fs.statSync(p);
+    if (!st.isFile()) return false;
+    if (st.size < 64 * 1024 && /snap/i.test(fs.readFileSync(p, 'latin1'))) return false;
+    return true;
+  } catch { return false; }
+}
+/** Chrome for Testing baixado no build (scripts/ensure-chrome.sh) ou binários do nix. */
+function globChrome() {
+  const out = [];
+  const roots = [process.env.CHROME_CACHE_DIR, path.join(process.cwd(), '.chrome'), '/app/.chrome'].filter(Boolean);
+  for (const root of roots) {
+    try {
+      for (const v of fs.readdirSync(path.join(root, 'chrome'))) {
+        out.push(path.join(root, 'chrome', v, 'chrome-linux64', 'chrome'));
+        out.push(path.join(root, 'chrome', v, 'chrome-win64', 'chrome.exe'));
+      }
+    } catch { /* sem cache */ }
+  }
+  try {
+    for (const d of fs.readdirSync('/nix/store')) if (/-chromium-\d/.test(d)) out.push(path.join('/nix/store', d, 'bin', 'chromium'));
+  } catch { /* sem nix */ }
+  return out;
+}
+let chromeFound = null;
+let chromeTried = [];
 function findChrome() {
+  if (chromeFound && usableChrome(chromeFound)) return chromeFound;
   const candidates = [
     process.env.CHROME_PATH, process.env.PUPPETEER_EXECUTABLE_PATH,
+    'chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable',
+    '/root/.nix-profile/bin/chromium', '/nix/var/nix/profiles/default/bin/chromium',
+    ...globChrome(),
     'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
     '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable',
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   ].filter(Boolean);
+  chromeTried = [];
   for (const c of candidates) {
-    if (c.includes('/') || c.includes('\\')) { if (fs.existsSync(c)) return c; continue; }
-    try { const p = execSync(process.platform === 'win32' ? `where ${c}` : `which ${c}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split(/\r?\n/)[0].trim(); if (p) return p; } catch { /* não está no PATH */ }
+    let p = c;
+    if (!c.includes('/') && !c.includes('\\')) {
+      try { p = execSync(process.platform === 'win32' ? `where ${c}` : `which ${c}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split(/\r?\n/)[0].trim(); } catch { p = ''; }
+      if (!p) continue;
+    }
+    if (!chromeTried.includes(p)) chromeTried.push(p);
+    if (usableChrome(p)) { chromeFound = p; return p; }
   }
   return null;
+}
+/** Descrição do que foi tentado, para o log de boot e a mensagem de erro. */
+function chromeStatus() {
+  const p = findChrome();
+  return p ? `Chromium: ${p}` : `Chromium não encontrado (tentados: ${chromeTried.join(', ') || 'nenhum'})`;
 }
 
 let browser = null;
@@ -98,7 +157,7 @@ let browserIdleTimer = null;
 async function getBrowser() {
   if (browser && browser.connected) return browser;
   const exe = findChrome();
-  if (!exe) throw new Error('Chromium não encontrado no servidor');
+  if (!exe) throw new Error(chromeStatus());
   const puppeteer = require('puppeteer-core');
   browser = await puppeteer.launch({
     executablePath: exe,
@@ -174,7 +233,7 @@ function queued(task) {
 async function fetchFromSite(kind, ref) {
   const { status, text } = await queued(() => fetcher(URLS[kind] + ref));
   if (status === 404) return { status: 'not_found', data: null };
-  if (isBlocked(text)) throw new Error(`o site barrou a consulta (Cloudflare, ${status})${findChrome() ? '' : '; o servidor está sem Chromium'}`);
+  if (isBlocked(text)) throw new Error(`o site barrou a consulta (Cloudflare, ${status})${findChrome() ? '' : '; ' + chromeStatus()}`);
   if (status !== 200) throw new Error(`site respondeu ${status}`);
   const parsed = parse(text, ref);
   if (!parsed.found) return { status: 'not_found', data: null };
@@ -223,20 +282,21 @@ async function lookup(raw, { force = false, kind: hint = null } = {}) {
  * Preenche o modelo de mensagem com os dados do veículo; linhas cujo dado está vazio somem.
  * Se o modelo personalizado ficar vazio (ex.: escrito só com {placa} e a busca foi por chassi), usa o padrão.
  */
-function renderMessage(template, ref, data, kind = 'placa') {
-  const out = fillTemplate(template, ref, data, kind);
-  return out || fillTemplate(DEFAULT_TEMPLATE, ref, data, kind);
+function renderMessage(template, ref, data, kind = 'placa', { original = null } = {}) {
+  const out = fillTemplate(template, ref, data, kind, original);
+  return out || fillTemplate(original ? DEFAULT_FIX_TEMPLATE : DEFAULT_TEMPLATE, ref, data, kind, original);
 }
-function fillTemplate(template, ref, data, kind) {
+function fillTemplate(template, ref, data, kind, original) {
   const f = (data && data.fields) || {};
   const vars = {
     ...f,
     tipo: KIND_LABEL[kind] || 'a referência',
     referencia: ref,
+    original: original || '',
     placa: f.placa || (kind === 'placa' ? ref : ''),
     chassi: f.chassi || (kind === 'chassi' ? ref : ''),
   };
-  const lines = String(template || DEFAULT_TEMPLATE).split('\n').map((line) => {
+  const lines = String(template || (original ? DEFAULT_FIX_TEMPLATE : DEFAULT_TEMPLATE)).split('\n').map((line) => {
     let missing = false;
     const out = line.replace(/\{(\w+)\}/g, (_, k) => {
       const v = vars[k];
@@ -249,29 +309,32 @@ function fillTemplate(template, ref, data, kind) {
 }
 
 async function settings() {
-  const { rows } = await db.query(`SELECT key, value FROM app_settings WHERE key IN ('vehicle_lookup_mode', 'vehicle_preview_template')`);
-  const out = { mode: 'suggest', template: DEFAULT_TEMPLATE };
+  const { rows } = await db.query(`SELECT key, value FROM app_settings WHERE key IN ('vehicle_lookup_mode', 'vehicle_preview_template', 'vehicle_fix_template')`);
+  const out = { mode: 'suggest', template: DEFAULT_TEMPLATE, fixTemplate: DEFAULT_FIX_TEMPLATE };
   for (const r of rows) {
     if (r.key === 'vehicle_lookup_mode' && ['off', 'suggest', 'auto'].includes(r.value)) out.mode = r.value;
     if (r.key === 'vehicle_preview_template' && r.value.trim()) out.template = r.value;
+    if (r.key === 'vehicle_fix_template' && r.value.trim()) out.fixTemplate = r.value;
   }
   return out;
 }
 
 /** Envia a mensagem de confirmação do veículo para a conversa. `user` pode ser o sistema (auto). */
-async function sendPreview(conversationId, raw, user, { auto = false, kind = null } = {}) {
+async function sendPreview(conversationId, raw, user, { auto = false, kind = null, original = null } = {}) {
   const outbound = require('./outbound');
   const res = await lookup(raw, { kind });
   if (res.status !== 'found') throw new outbound.SendError(404, res.status === 'not_found' ? 'Veículo não encontrado no site' : (res.error || 'Referência inválida'));
-  const { template } = await settings();
-  const body = renderMessage(template, res.ref, res.data, res.kind);
+  const { template, fixTemplate } = await settings();
+  const orig = original ? normalizeRef(original) : null;
+  const corrected = orig && orig !== res.ref ? orig : null;
+  const body = renderMessage(corrected ? fixTemplate : template, res.ref, res.data, res.kind, { original: corrected });
   const sent = await outbound.sendText(conversationId, user, body, { auto });
   await db.query(
     `INSERT INTO vehicle_previews (conversation_id, kind, plate, message_id, user_id, sent_at) VALUES ($1, $2, $3, $4, $5, NOW())
      ON CONFLICT (conversation_id, kind, plate) DO UPDATE SET message_id = EXCLUDED.message_id, user_id = EXCLUDED.user_id, sent_at = NOW()`,
     [conversationId, res.kind, res.ref, sent.message.id, user.id || null]
   );
-  return { ...sent, kind: res.kind, ref: res.ref, plate: res.ref, body };
+  return { ...sent, kind: res.kind, ref: res.ref, plate: res.ref, original: corrected, body };
 }
 
 async function previewSentAt(conversationId, raw, kind = null) {
@@ -280,6 +343,36 @@ async function previewSentAt(conversationId, raw, kind = null) {
   if (!k) return null;
   const { rows } = await db.query('SELECT sent_at FROM vehicle_previews WHERE conversation_id = $1 AND kind = $2 AND plate = $3', [conversationId, k, ref]);
   return rows.length ? rows[0].sent_at : null;
+}
+
+const MAX_ALTERNATIVES = 3;
+
+/**
+ * Conferência + pré-consulta em um passo. Para chassi: valida o formato; se estiver certo, busca no site;
+ * se estiver errado (ou certo mas inexistente), testa no site as correções prováveis (letras proibidas,
+ * caractere sobrando...) e devolve as que existem. Para placa, é só a busca.
+ * Devolve { kind, ref, valid, errors, warnings, lookup, alternatives: [{ ref, status, data }], tested: [...] }.
+ */
+async function resolve(raw, { kind: hint = null, force = false } = {}) {
+  const RefCheck = require('../../public/js/refcheck.js');
+  const ref = normalizeRef(raw);
+  const kind = kindOf(ref, hint) || (ref.length >= 15 ? 'chassi' : 'placa');
+  if (kind !== 'chassi') {
+    const lk = await lookup(ref, { kind, force });
+    return { kind, ref, valid: lk.status !== 'invalid', errors: lk.status === 'invalid' ? [lk.error] : [], warnings: [], lookup: lk.status === 'invalid' ? null : lk, alternatives: [], tested: [] };
+  }
+  const check = RefCheck.validateChassi(ref);
+  const out = { kind, ref, valid: check.ok, errors: check.errors, warnings: check.warnings, lookup: null, alternatives: [], tested: [] };
+  if (check.ok) out.lookup = await lookup(ref, { kind, force });
+  const needAlternatives = !check.ok || (out.lookup && out.lookup.status === 'not_found');
+  if (!needAlternatives) return out;
+  const candidates = (check.ok ? RefCheck.chassiSuggestions(ref) : check.suggestions).filter((c) => c !== ref).slice(0, MAX_ALTERNATIVES);
+  for (const cand of candidates) {
+    const lk = await lookup(cand, { kind, force });
+    out.tested.push(cand);
+    if (lk.status === 'found') out.alternatives.push({ ref: cand, status: lk.status, data: lk.data, cached: lk.cached });
+  }
+  return out;
 }
 
 const SYSTEM_USER = { id: null, name: 'Pré-consulta automática', avatar_media_id: null, role: 'system' };
@@ -294,15 +387,21 @@ async function maybeAutoPreview(message, conversation) {
     const { mode } = await settings();
     if (mode !== 'auto') return;
     const RefCheck = require('../../public/js/refcheck.js');
-    const refs = RefCheck.detect(message.body).filter((r) => (r.kind === 'placa' || r.kind === 'chassi') && r.ok).map((r) => ({ kind: r.kind, value: r.value }));
+    const refs = RefCheck.detect(message.body).filter((r) => (r.kind === 'placa' && r.ok) || r.kind === 'chassi').map((r) => ({ kind: r.kind, value: r.value }));
     const seen = new Set();
     for (const { kind, value } of refs) {
       if (seen.has(kind + value) || seen.size >= 2) continue;
       seen.add(kind + value);
       if (await previewSentAt(conversation.id, value, kind)) continue;
-      const res = await lookup(value, { kind });
-      if (res.status !== 'found') continue;
-      await sendPreview(conversation.id, value, SYSTEM_USER, { auto: true, kind });
+      const res = await resolve(value, { kind });
+      if (res.lookup && res.lookup.status === 'found') {
+        await sendPreview(conversation.id, value, SYSTEM_USER, { auto: true, kind });
+        continue;
+      }
+      // dado errado com uma única correção que existe no site: manda a correção para o cliente confirmar
+      if (res.alternatives.length === 1 && !(await previewSentAt(conversation.id, res.alternatives[0].ref, kind))) {
+        await sendPreview(conversation.id, res.alternatives[0].ref, SYSTEM_USER, { auto: true, kind, original: value });
+      }
     }
   } catch (err) {
     console.warn('[pré-consulta] falha no modo automático:', err.message);
@@ -316,6 +415,6 @@ async function shutdown() {
 }
 
 module.exports = {
-  lookup, parse, renderMessage, sendPreview, previewSentAt, maybeAutoPreview, settings, normalizePlate, normalizeRef, isPlate, isChassi, kindOf,
-  DEFAULT_TEMPLATE, SYSTEM_USER, _setFetcher, browserAvailable, fetchViaBrowser, shutdown,
+  lookup, resolve, parse, renderMessage, sendPreview, previewSentAt, maybeAutoPreview, settings, normalizePlate, normalizeRef, isPlate, isChassi, kindOf,
+  DEFAULT_TEMPLATE, DEFAULT_FIX_TEMPLATE, SYSTEM_USER, _setFetcher, browserAvailable, chromeStatus, fetchViaBrowser, shutdown,
 };

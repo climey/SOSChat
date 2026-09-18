@@ -945,4 +945,12 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .veh-title { font-weight: 700; }
 .veh-meta { font-size: 12px; color: var(--text-2); }
 .veh-sent { font-size: 11px; color: var(--green); margin-top: 2px; }
+.veh-alts { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: 4px; }
+.veh-head { font-size: 12px; color: var(--text-2); }
+.veh-card.alt { border-color: rgba(250,176,5,0.55); }
+.veh-fix { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 12px; color: var(--text-2); }
+.veh-fix code { font-family: ui-monospace, Consolas, monospace; font-size: 13px; letter-spacing: 0.5px; color: var(--text); }
+.veh-fix .diff { color: var(--yellow, #fab005); text-decoration: underline; text-underline-offset: 2px; }
+.veh-card.none .btn { margin-left: 8px; }
+.btn-xs { padding: 1px 8px; font-size: 11px; }
 .veh-preview { white-space: pre-wrap; font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }

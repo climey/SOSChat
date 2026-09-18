@@ -227,19 +227,23 @@
 
           <section class="settings-section" data-section="preconsulta" hidden>
             <div class="card">
-              <h3>Pré-consulta de placa</h3>
-              <p class="small muted">Quando o cliente manda uma placa ou um chassi, o sistema busca os dados básicos do veículo em um site público (Ke Placa) e monta uma mensagem para o cliente confirmar que é aquele veículo, antes da consulta completa. A busca fica guardada por 30 dias e é feita uma de cada vez, sem sobrecarregar o site.</p>
+              <h3>Pré-consulta de placa e chassi</h3>
+              <p class="small muted">Quando o cliente manda uma placa ou um chassi, o sistema busca os dados básicos do veículo em um site público (Ke Placa) e monta uma mensagem para o cliente confirmar que é aquele veículo, antes da consulta completa. Chassi que não existe no site é testado com as correções prováveis (letra O no lugar de zero, caractere sobrando…) e, se uma delas existir, é ela que vai para o cliente confirmar. A busca fica guardada por 30 dias e é feita uma de cada vez, sem sobrecarregar o site.</p>
               <form id="veh-form">
-                <div class="field"><label class="label">Como agir quando chegar uma placa</label>
+                <div class="field"><label class="label">Como agir quando chegar uma placa ou um chassi</label>
                   <select class="select" id="veh-mode" style="max-width:420px">
                     <option value="suggest">Mostrar o veículo ao atendente, que envia com um clique (recomendado)</option>
-                    <option value="auto">Enviar a confirmação ao cliente automaticamente</option>
+                    <option value="auto">Enviar a confirmação ao cliente automaticamente (inclusive a correção, quando só uma existe)</option>
                     <option value="off">Desligado</option>
                   </select>
                 </div>
                 <div class="field"><label class="label">Mensagem enviada ao cliente</label>
                   <textarea class="textarea" id="veh-template" rows="9" maxlength="1500"></textarea>
                   <p class="small muted" style="margin:6px 0 0">Variáveis: <code>{tipo}</code> (a placa / o chassi) <code>{referencia}</code> (o que o cliente mandou) <code>{placa}</code> <code>{marca}</code> <code>{modelo}</code> <code>{ano}</code> <code>{ano_modelo}</code> <code>{cor}</code> <code>{combustivel}</code> <code>{potencia}</code> <code>{cilindrada}</code> <code>{municipio}</code> <code>{uf}</code> <code>{chassi}</code> <code>{motor}</code>. Linha cujo dado não existir para o veículo é removida sozinha.</p>
+                </div>
+                <div class="field"><label class="label">Mensagem quando o chassi enviado não existe, mas uma correção existe</label>
+                  <textarea class="textarea" id="veh-fix-template" rows="8" maxlength="1500"></textarea>
+                  <p class="small muted" style="margin:6px 0 0">Mesmas variáveis, mais <code>{original}</code> (o dado errado que o cliente mandou) e <code>{referencia}</code> (a correção encontrada).</p>
                 </div>
                 <div class="row-actions"><button class="btn" type="button" id="veh-reset">Voltar ao padrão</button><button class="btn btn-primary" type="submit" data-admin-only>Salvar</button></div>
               </form>
