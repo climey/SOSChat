@@ -28,7 +28,8 @@ function selectSql(userParam) {
                    ORDER BY MAX(m.created_at) DESC LIMIT 5) p) AS participants,
          c.account_id, wa.name AS account_name, wa.phone AS account_phone,
          c.sector_id, se.name AS sector_name, se.color AS sector_color,
-         COALESCE(sc.n, 0) AS scheduled_count
+         COALESCE(sc.n, 0) AS scheduled_count,
+         lo.id AS last_out_id, lo.status AS last_out_status
     FROM conversations c
     JOIN contacts ct ON ct.id = c.contact_id
     LEFT JOIN users u ON u.id = c.assigned_user_id
@@ -36,6 +37,8 @@ function selectSql(userParam) {
     LEFT JOIN sectors se ON se.id = c.sector_id
     LEFT JOIN (SELECT conversation_id, COUNT(*)::int AS n FROM scheduled_messages WHERE status = 'pending' GROUP BY conversation_id) sc
            ON sc.conversation_id = c.id
+    LEFT JOIN LATERAL (SELECT m.id, m.status FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'out' AND m.type <> 'note' AND m.deleted_at IS NULL
+                        ORDER BY m.created_at DESC, m.id DESC LIMIT 1) lo ON TRUE
     ${prefsJoin}
 `;
 }
