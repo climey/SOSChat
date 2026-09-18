@@ -261,7 +261,7 @@ async function lookup(raw, { force = false, kind: hint = null } = {}) {
   try {
     result = await fetchFromSite(kind, ref);
   } catch (err) {
-    const detail = String(err.message || err).slice(0, 200);
+    const detail = String(err.message || err).slice(0, 400);
     console.warn(`[pré-consulta] ${kind} ${ref}: ${detail}`);
     await db.query(
       `INSERT INTO vehicle_lookups (kind, plate, source, status, data, error, fetched_at) VALUES ($1, $2, $3, 'error', NULL, $4, NOW())

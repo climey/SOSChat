@@ -1,0 +1,7 @@
+node_modules
+.chrome
+.env
+*.log
+.git
+SOSChat
+chat
