@@ -2048,6 +2048,19 @@
   const refDismissed = new Map(); // conversa -> id da última mensagem cujo aviso o atendente fechou (esconde tudo até ali)
   const CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
   const WARN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  /** Copia o dado para a área de transferência (a pré-consulta é feita fora do chat). */
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch { /* sem suporte */ }
+      ta.remove();
+    }
+    toast(`Copiado: ${text}`);
+  }
   /** Última mensagem do cliente que contém algo consultável (chassi, placa...), já validado. */
   function latestReferences() {
     if (!window.RefCheck) return null;
@@ -2071,10 +2084,11 @@
       if (r.ok) {
         const warn = r.warnings[0] ? ` <span class="muted">(${esc(r.warnings[0])})</span>` : '';
         return `<div class="ref-row"><span class="ref-ic ok">${CHECK_ICON}</span><span class="ref-text"><b>${esc(r.label)} ${esc(shown)}</b> parece correto${warn}</span>
-          <button type="button" class="btn btn-sm btn-primary" data-ref-use="${i}">Registrar consulta</button></div>`;
+          <button type="button" class="btn btn-sm btn-primary" data-ref-copy="${esc(shown)}" title="Copia para você fazer a pré-consulta">Copiar</button>
+          <button type="button" class="btn btn-sm btn-ghost" data-ref-use="${i}" title="Só depois do pagamento, na hora de entregar a consulta">Registrar consulta</button></div>`;
       }
       const sug = r.suggestions.length
-        ? `<span class="ref-sug">Tentar: ${r.suggestions.map((v) => `<button type="button" class="chip" data-ref-sug="${i}" data-value="${esc(v)}">${esc(v)}</button>`).join('')}</span>`
+        ? `<span class="ref-sug">Tentar: ${r.suggestions.map((v) => `<button type="button" class="chip" data-ref-copy="${esc(v)}" title="Copiar ${esc(v)} para a pré-consulta">${esc(v)}</button>`).join('')}</span>`
         : '';
       return `<div class="ref-row"><span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text"><b>${esc(r.label)} ${esc(r.raw || shown)}</b> parece errado: ${esc(r.errors.join('; '))}</span>
         ${sug}<button type="button" class="btn btn-sm" data-ref-ask="${i}" title="Preenche a mensagem pedindo para o cliente conferir">Pedir para conferir</button></div>`;
@@ -2086,13 +2100,13 @@
     if (!found) return;
     const close = e.target.closest('#ref-close');
     if (close) { refDismissed.set(found.message.conversation_id, found.message.id); renderRefHint(); return; }
+    const copy = e.target.closest('[data-ref-copy]');
     const use = e.target.closest('[data-ref-use]');
-    const sug = e.target.closest('[data-ref-sug]');
     const ask = e.target.closest('[data-ref-ask]');
-    if (use || sug) {
-      const r = found.list[Number((use || sug).dataset.refUse ?? sug.dataset.refSug)];
-      const value = sug ? sug.dataset.value : (r.display || r.value);
-      openConsultModal({ kind: matchKind(r.label), ref: value });
+    if (copy) { copyText(copy.dataset.refCopy); return; }
+    if (use) {
+      const r = found.list[Number(use.dataset.refUse)];
+      openConsultModal({ kind: matchKind(r.label), ref: r.display || r.value });
       return;
     }
     if (ask) {
