@@ -125,6 +125,19 @@ router.post('/:id/messages', async (req, res, next) => {
   }
 });
 
+// Envia a chave Pix cadastrada (cartão nativo do WhatsApp). body: { quoted_message_id? }
+router.post('/:id/pix', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const result = await outbound.sendPix(id, req.user, { quotedId: parseId(req.body?.quoted_message_id) });
+    res.status(result.message.status === 'failed' ? 502 : 201).json(result);
+  } catch (err) {
+    if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 // Envia arquivo (imagem, vídeo, áudio ou documento) com legenda opcional. multipart: file + caption
 router.post('/:id/media', (req, res, next) => {
   upload.single('file')(req, res, (err) => {

@@ -108,6 +108,7 @@ public/                login, inbox, relatórios e configurações
 | POST | `/api/conversations/:id/read` | zera não lidas e marca como lida na Meta |
 | GET | `/api/reports/summary\|volume\|agents\|tags?from&to&group` | relatórios |
 | GET/POST/PATCH/DELETE | `/api/tags`, `/api/users`, `/api/plans` | administração (planos: catálogo de consultas) |
+| POST | `/api/conversations/:id/pix` | envia a chave Pix cadastrada como cartão nativo do WhatsApp ("Copiar chave Pix"); pela API oficial vai como texto |
 | GET | `/api/readings?conversation=ID` | leituras de numeração feitas nas fotos da conversa |
 | POST | `/api/readings/:messageId` | lê (ou relê) placa/chassi/motor na foto da mensagem |
 | GET | `/api/vehicles/:ref/resolve?conversation=ID` | conferência + busca: valida o chassi, busca no site e testa as correções prováveis (as que existem voltam com mensagem pronta) |
@@ -139,6 +140,7 @@ Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` 
 - [x] **Etapa 1.10:** Conferência de chassi, placa, Renavam, CPF e CNPJ na conversa: aviso quando o dado do cliente parece errado, sugestão de correção com um clique, mensagem pronta pedindo para conferir e validação ao vivo no modal de consulta
 - [x] **Etapa 1.11:** Pré-consulta de placa ou chassi: ao chegar uma placa ou um chassi válido, busca os dados básicos do veículo no Ke Placa (cache de 30 dias, uma busca por vez), mostra o cartão ao atendente e envia a mensagem de confirmação ao cliente com um clique ou automaticamente; modelo da mensagem editável Conferência e pré-consulta unificadas: chassi errado ou inexistente tem as correções prováveis testadas no site e a que existe vai para o cliente confirmar (também no modo automático, quando só uma existe).
 - [x] **Etapa 1.12:** Leitura de numeração em fotos: foto do cliente com placa, chassi ou motor é lida pelo Claude (visão) e entra no mesmo fluxo de conferência, cartão do veículo e confirmação; modos automático/manual/desligado; precisa de `ANTHROPIC_API_KEY`.
+- [x] **Etapa 1.13:** Chave Pix em Configurações e opção "Chave Pix" no anexo: o cliente recebe o cartão do WhatsApp com o botão "Copiar chave Pix" (Baileys); vários anexos por vez; girar/espelhar imagem no visualizador; ✓✓ de leitura na lista.
 - [ ] **Etapa 2:** templates da Cloud API (janela de 24h), distribuição automática, saudação e horário de atendimento
 - [ ] **Etapa 3:** integração com a plataforma de consultas (detectar placa/chassi na mensagem e mostrar dados do veículo no painel lateral)
 - [ ] **Etapa 4:** filas/departamentos, horário de atendimento com mensagem automática, distribuição automática

@@ -314,6 +314,13 @@ table.table tr:last-child td { border-bottom: none; }
 .attach-menu .ic.doc { background: #7048e8; }
 .attach-menu .ic.media { background: #1c7ed6; }
 .attach-menu .ic.audio { background: #f76707; }
+.attach-menu .ic.pix { background: #32bcad; }
+.pix-card { display: flex; align-items: center; gap: 10px; min-width: 240px; padding: 8px 10px; border-radius: 10px; background: rgba(50,188,173,0.12); border: 1px solid rgba(50,188,173,0.5); }
+.pix-ic { width: 34px; height: 34px; border-radius: 50%; background: #32bcad; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.pix-info { flex: 1; min-width: 0; }
+.pix-title { font-size: 11px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px; }
+.pix-name { font-weight: 600; }
+.pix-key { font-family: ui-monospace, Consolas, monospace; font-size: 13px; word-break: break-all; }
 .attach-preview { display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-bottom: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
 .attach-preview img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; }
 .attach-preview .ic { width: 44px; height: 44px; border-radius: 10px; background: var(--surface-3); display: flex; align-items: center; justify-content: center; color: var(--text-2); }
