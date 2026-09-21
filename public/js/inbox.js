@@ -214,7 +214,7 @@
   /** Prévia da lista com ícone por tipo, como no WhatsApp. */
   function previewText(c) {
     const p = stripWa(c.last_message_preview || '');
-    const map = [[/^\[Imagem\]\s*/, '📷 '], [/^\[Vídeo\]\s*/, '🎥 '], [/^\[Áudio\]/, '🎤 Áudio'], [/^\[Figurinha\]/, '🩷 Figurinha'], [/^\[Arquivo\]\s*/, '📄 '], [/^\[Documento\]/, '📄 Documento'], [/^\[Localização\]/, '📍 Localização'], [/^\[Contato\]/, '👤 Contato'], [/^\[Chave Pix\]/, '◈ Chave Pix']];
+    const map = [[/^\[Imagem\]\s*/, '📷 '], [/^\[Vídeo\]\s*/, '🎥 '], [/^\[Áudio\]/, '🎤 Áudio'], [/^\[Figurinha\]/, '🩷 Figurinha'], [/^\[Arquivo\]\s*/, '📄 '], [/^\[Documento\]/, '📄 Documento'], [/^\[Localização\]/, '📍 Localização'], [/^\[Contato\]/, '👤 Contato']];
     for (const [re, rep] of map) if (re.test(p)) return p.replace(re, rep);
     return p;
   }
@@ -474,13 +474,6 @@
 
   const isPlaceholder = (body) => /^\[[^\]]*\]$/.test(body || '');
 
-  /** Cartão da chave Pix na inbox (o cliente vê o cartão nativo do WhatsApp). */
-  function pixCardHtml(m) {
-    const lines = String(m.body || '').split('\n');
-    const [title, name, key] = [lines[0] || 'Chave Pix', lines[1] || '', lines.slice(2).join(' ')];
-    return `<div class="pix-card"><div class="pix-ic">◈</div><div class="pix-info"><div class="pix-title">${esc(title)}</div><div class="pix-name">${esc(name)}</div><div class="pix-key">${esc(key)}</div></div>
-      <button type="button" class="btn btn-sm btn-ghost" data-ref-copy-pix="${esc(key)}" title="Copiar a chave">Copiar</button></div>`;
-  }
   function mediaHtml(m) {
     if (!m.media_id || m.deleted_at) return '';
     const src = `/api/media/${esc(m.media_id)}`;
@@ -561,7 +554,7 @@
         </div>` : (isNote && !m.deleted_at && m.body ? `<div class="msg-actions"><button type="button" data-msg-act="pin" title="Fixar na ficha do contato (vira observação permanente)">📌</button>${mine ? `<button type="button" data-msg-act="edit" title="Editar nota">${EDIT_ICON}</button><button type="button" data-msg-act="delete" title="Apagar nota">${TRASH_ICON}</button>` : ''}</div>` : '');
       const stickerCls = m.type === 'sticker' && m.media_id && !m.deleted_at ? 'sticker' : '';
       return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed} ${stickerCls}" data-id="${m.id}">
-        <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${m.type === 'pix' && !m.deleted_at ? pixCardHtml(m) : (showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : '')}
+        <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : ''}
           <span class="foot">${m.edited_at && !m.deleted_at ? '<span class="edited">editada</span>' : ''}<span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</span>
           ${reactionsHtml(m)}
         </div>${agent}${actions}
@@ -1909,8 +1902,6 @@
     img.dataset.flip = lb.flip ? '1' : '0';
   }
   els.messages.addEventListener('click', (e) => {
-    const pixCopy = e.target.closest('[data-ref-copy-pix]');
-    if (pixCopy) { copyText(pixCopy.dataset.refCopyPix); return; }
     const t = e.target.closest('[data-lb]');
     if (t) { e.preventDefault(); openLightbox(Number(t.dataset.lb)); }
   });
@@ -2039,27 +2030,12 @@
     const b = e.target.closest('button[data-pick]');
     if (!b) return;
     $('attach-menu').hidden = true;
-    if (b.dataset.pick === 'pix') { sendPix(); return; }
     const input = attachInputs[b.dataset.pick];
     input.value = '';
     input.click();
   });
   Object.values(attachInputs).forEach((inp) => inp.addEventListener('change', () => { if (inp.files.length) addAttachments([...inp.files]); }));
 
-  /** Manda a chave Pix cadastrada como cartão do WhatsApp (o cliente toca em "Copiar chave Pix"). */
-  async function sendPix() {
-    const c = current();
-    if (!c) return;
-    if (state.composeMode === 'note') { toast('Chave Pix só em mensagens, não em notas', true); return; }
-    const key = state.settings.pix_key;
-    if (!key) { toast(state.me.role === 'admin' ? 'Cadastre a chave Pix em Configurações → Pix' : 'A chave Pix ainda não foi cadastrada (peça a um administrador)', true); return; }
-    if (!confirm(`Enviar a chave Pix ${key} (${state.settings.pix_name || ''}) para ${c.contact_name || c.profile_name || 'o cliente'}?`)) return;
-    try {
-      await api('POST', `/api/conversations/${c.id}/pix`, { quoted_message_id: state.reply?.id || null });
-      clearReply();
-      toast('Chave Pix enviada');
-    } catch (err) { toast(err.message, true); }
-  }
   const sendLabel = () => (attach.files.length > 1 ? `Enviar ${attach.files.length} arquivos` : 'Enviar arquivo');
   /** Acrescenta arquivos à lista de anexos (não substitui os que já estão lá). */
   function addAttachments(files) {

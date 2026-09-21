@@ -57,11 +57,6 @@ async function sendReaction(to, waMessageId, _fromMe, emoji) {
   });
 }
 
-/** A API oficial não tem o cartão de chave Pix: vai como texto. */
-async function sendPix(to, pix) {
-  return sendText(to, pix.text);
-}
-
 /** Envia mídia: faz upload para a Meta e depois envia a mensagem referenciando o ID. */
 async function sendMedia(to, file) {
   if (!isConfigured()) {
@@ -146,4 +141,4 @@ async function deleteMessage(to, waMessageId) {
   throw new Error('A API oficial da Meta não permite apagar mensagens');
 }
 
-module.exports = { isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendPix, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature, getStatus };
+module.exports = { isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature, getStatus };

@@ -28,7 +28,6 @@ module.exports = {
   sendReaction: (accountId, to, waMessageId, fromMe, emoji) => (isBaileys ? provider.sendReaction(accountId, to, waMessageId, fromMe, emoji) : provider.sendReaction(to, waMessageId, fromMe, emoji)),
   markAsRead: (accountId, waMessageId, waId) => (isBaileys ? provider.markAsRead(accountId, waMessageId, waId) : provider.markAsRead(waMessageId)),
   sendMedia: (accountId, to, file) => (isBaileys ? provider.sendMedia(accountId, to, file) : provider.sendMedia(to, file)),
-  sendPix: (accountId, to, pix) => (isBaileys ? provider.sendPix(accountId, to, pix) : provider.sendPix(to, pix)),
   fetchMedia: (mediaId) => provider.fetchMedia(mediaId),
   verifySignature: (rawBody, header) => provider.verifySignature(rawBody, header),
   start: () => (provider.start ? provider.start() : Promise.resolve()),

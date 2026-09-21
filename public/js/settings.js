@@ -402,22 +402,6 @@
     } catch (err) { toast(err.message, true); }
   });
 
-  // ---------- Chave Pix ----------
-  async function loadPix() {
-    const { settings } = await api('GET', '/api/settings');
-    $('pix-name').value = settings.pix_name || '';
-    $('pix-type').value = settings.pix_key_type || 'cpf';
-    $('pix-key').value = settings.pix_key || '';
-    $('pix-format').value = settings.pix_format || 'text';
-    const ro = me.role !== 'admin';
-    $('pix-name').disabled = ro; $('pix-type').disabled = ro; $('pix-key').disabled = ro; $('pix-format').disabled = ro;
-  }
-  $('pix-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try { await api('PUT', '/api/settings', { pix_name: $('pix-name').value, pix_key_type: $('pix-type').value, pix_key: $('pix-key').value, pix_format: $('pix-format').value }); toast('Chave Pix salva'); }
-    catch (err) { toast(err.message, true); }
-  });
-
   // ---------- Alerta de conversa parada ----------
   async function loadSla() {
     const { settings } = await api('GET', '/api/settings');
@@ -435,7 +419,7 @@
   });
 
   // ---------- Navegação por seção ----------
-  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'pix', 'alertas'];
+  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'alertas'];
   // ---------- Planos de consultas ----------
   let plans = [];
   let planEditing = null;
@@ -607,7 +591,7 @@
   async function init() {
     me = await SOS.loadMe();
     await loadTags();
-    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence(), loadVehicle(), loadPix()]);
+    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence(), loadVehicle()]);
   }
   init().catch((err) => toast(err.message, true));
 })();

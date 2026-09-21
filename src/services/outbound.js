@@ -93,62 +93,6 @@ async function sendText(conversationId, user, body, { scheduled = false, quotedI
   return { message, conversation: updated };
 }
 
-const PIX_LABEL = { cpf: 'CPF', cnpj: 'CNPJ', phone: 'Telefone', email: 'E-mail', evp: 'Chave aleatória' };
-/** Texto da chave Pix (vai no chat da inbox e, onde não há cartão nativo, para o cliente). */
-function pixText(pix) {
-  return `Chave Pix (${PIX_LABEL[pix.keyType] || 'Chave'})\n${pix.name}\n${pix.key}`;
-}
-async function pixSettings() {
-  const { rows } = await db.query(`SELECT key, value FROM app_settings WHERE key IN ('pix_name', 'pix_key', 'pix_key_type', 'pix_format')`);
-  const s = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-  return { name: (s.pix_name || '').trim(), key: (s.pix_key || '').trim(), keyType: s.pix_key_type || 'cpf', format: s.pix_format === 'card' ? 'card' : 'text' };
-}
-
-/**
- * Envia a chave Pix cadastrada em Configurações como cartão nativo do WhatsApp (botão "Copiar chave Pix").
- * Se o cartão não puder ir (API oficial, erro no envio), a chave vai como texto.
- */
-async function sendPix(conversationId, user, { quotedId = null } = {}) {
-  const pix = await pixSettings();
-  if (!pix.key || !pix.name) throw new SendError(400, 'Cadastre a chave Pix em Configurações (nome e chave)');
-  const conv = await conversations.getById(conversationId);
-  if (!conv) throw new SendError(404, 'Conversa não encontrada');
-  const accountId = await resolveAccount(conv);
-  if (whatsapp.multiAccount && !accountId) throw new SendError(502, 'Nenhum número de WhatsApp conectado. Escaneie o QR code em Configurações.');
-  const quoted = await loadQuoted(conversationId, quotedId);
-  const body = pixText(pix);
-  const { rows } = await db.query(
-    `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id, quoted_message_id)
-     VALUES ($1, 'out', 'pix', $2, 'pending', $3, $4) RETURNING *`,
-    [conversationId, body, user.id, quoted?.id || null]
-  );
-  let message = rows[0];
-  try {
-    let waId;
-    if (pix.format === 'card') {
-      // cartão nativo (experimental): o WhatsApp pode descartar sem avisar; por isso só quando ligado em Configurações
-      try {
-        waId = await whatsapp.sendPix(accountId, conv.wa_id, { ...pix, text: body });
-      } catch (err) {
-        console.warn('[pix] cartão nativo falhou, enviando como texto:', err.message);
-        waId = await whatsapp.sendText(accountId, conv.wa_id, body, { quoted });
-      }
-    } else {
-      waId = await whatsapp.sendText(accountId, conv.wa_id, body, { quoted });
-    }
-    message = (await db.query(`UPDATE messages SET wa_message_id = $2, status = 'sent' WHERE id = $1 RETURNING *`, [message.id, waId])).rows[0];
-  } catch (err) {
-    message = (await db.query(`UPDATE messages SET status = 'failed', error = $2 WHERE id = $1 RETURNING *`, [message.id, String(err.message).slice(0, 500)])).rows[0];
-  }
-  const updated = await touchAfterSend(conversationId, '[Chave Pix]', user.id);
-  message = await require('./inbound').withQuoted(message);
-  message.sender_name = user.name;
-  message.sender_avatar = user.avatar_media_id || null;
-  realtime.broadcast('message:new', { message, conversation: updated });
-  realtime.broadcast('conversation:updated', updated);
-  return { message, conversation: updated };
-}
-
 /** Reação do atendente a uma mensagem (emoji vazio remove). Gravada como reação "me". */
 async function react(conversationId, user, messageId, emoji) {
   emoji = String(emoji || '').trim().slice(0, 8);
@@ -259,7 +203,7 @@ async function ownMessage(conversationId, user, messageId) {
   return { conv, m };
 }
 
-/** Tenta de novo o envio de uma mensagem que falhou (texto ou chave Pix); qualquer atendente pode. */
+/** Tenta de novo o envio de uma mensagem de texto que falhou; qualquer atendente pode. */
 async function retryMessage(conversationId, user, messageId) {
   const conv = await conversations.getById(conversationId);
   if (!conv) throw new SendError(404, 'Conversa não encontrada');
@@ -267,7 +211,7 @@ async function retryMessage(conversationId, user, messageId) {
   const m = rows[0];
   if (!m) throw new SendError(404, 'Mensagem não encontrada');
   if (m.direction !== 'out' || m.status !== 'failed' || m.deleted_at) throw new SendError(400, 'Só mensagens que falharam podem ser reenviadas');
-  if (!['text', 'pix'].includes(m.type)) throw new SendError(400, 'Reenvie o arquivo pelo anexo');
+  if (m.type !== 'text') throw new SendError(400, 'Reenvie o arquivo pelo anexo');
   const accountId = await resolveAccount(conv);
   if (whatsapp.multiAccount && !accountId) throw new SendError(502, 'Nenhum número de WhatsApp conectado. Escaneie o QR code em Configurações.');
   const quoted = await loadQuoted(conversationId, m.quoted_message_id);
@@ -326,4 +270,4 @@ async function deleteMessage(conversationId, user, messageId) {
   return updated || m;
 }
 
-module.exports = { sendText, sendPix, pixText, addNote, react, transfer, editMessage, retryMessage, deleteMessage, loadQuoted, touchAfterSend, resolveAccount, SendError, MESSAGE_MAX };
+module.exports = { sendText, addNote, react, transfer, editMessage, retryMessage, deleteMessage, loadQuoted, touchAfterSend, resolveAccount, SendError, MESSAGE_MAX };

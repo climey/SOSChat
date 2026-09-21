@@ -4,9 +4,6 @@
  */
 const pino = require('pino');
 const baileys = require('@whiskeysockets/baileys');
-
-// tipos de chave Pix aceitos pelo cartão nativo do WhatsApp
-const PIX_KEY_TYPES = { cpf: 'CPF', cnpj: 'CNPJ', phone: 'PHONE', email: 'EMAIL', evp: 'EVP' };
 const db = require('../db');
 const realtime = require('../realtime');
 
@@ -425,41 +422,6 @@ class Session {
     return sent?.key?.id || null;
   }
 
-  /**
-   * Cartão nativo "Chave Pix" do WhatsApp (o cliente vê o botão "Copiar chave Pix"). É uma mensagem
-   * interativa com fluxo de pagamento (payment_info / pix_static_code), montada e enviada direto.
-   */
-  async sendPix(to, { name, key, keyType, text }) {
-    if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado. Escaneie o QR code em Configurações.`);
-    const jid = toJid(to);
-    const { proto, generateWAMessageFromContent } = baileys;
-    const params = {
-      currency: 'BRL',
-      total_amount: { value: 0, offset: 100 },
-      reference_id: `PIX${Date.now().toString(36).toUpperCase()}`,
-      type: 'physical-goods',
-      order: { status: 'pending', subtotal: { value: 0, offset: 100 }, order_type: 'ORDER', items: [{ name: 'Chave Pix', amount: { value: 0, offset: 100 }, quantity: 0, sale_amount: { value: 0, offset: 100 } }] },
-      payment_settings: [{ type: 'pix_static_code', pix_static_code: { merchant_name: name, key, key_type: PIX_KEY_TYPES[keyType] || 'EVP' } }],
-      share_payment_status: false,
-    };
-    const content = {
-      viewOnceMessage: { message: {
-        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
-        interactiveMessage: proto.Message.InteractiveMessage.create({
-          header: proto.Message.InteractiveMessage.Header.create({ title: name, hasMediaAttachment: false }),
-          body: proto.Message.InteractiveMessage.Body.create({ text: text || `Chave Pix: ${key}` }),
-          footer: proto.Message.InteractiveMessage.Footer.create({ text: '' }),
-          nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: [{ name: 'payment_info', buttonParamsJson: JSON.stringify(params) }], messageParamsJson: '' }),
-        }),
-      } },
-    };
-    const msg = generateWAMessageFromContent(jid, content, { userJid: this.sock.user?.id });
-    // sem este nó o WhatsApp mostra "não foi possível carregar a mensagem" e o celular descarta
-    const additionalNodes = [{ tag: 'biz', attrs: {}, content: [{ tag: 'interactive', attrs: { type: 'native_flow', v: '1' }, content: [{ tag: 'native_flow', attrs: { v: '9', name: 'payment_info' } }] }] }];
-    await this.sock.relayMessage(jid, msg.message, { messageId: msg.key.id, additionalNodes });
-    return msg.key.id;
-  }
-
   /** Reage a uma mensagem (emoji vazio remove a reação). */
   async sendReaction(to, waMessageId, fromMe, emoji) {
     if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado.`);
@@ -644,9 +606,6 @@ function sendReaction(accountId, to, waMessageId, fromMe, emoji) {
 function sendMedia(accountId, to, file) {
   return getSession(accountId).sendMedia(to, file);
 }
-function sendPix(accountId, to, pix) {
-  return getSession(accountId).sendPix(to, pix);
-}
 
 function setBlocked(accountId, waId, blocked) {
   if (!accountId) throw new Error('Nenhum número conectado');
@@ -674,5 +633,5 @@ module.exports = {
   refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
-  isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendPix, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature,
+  isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature,
 };
