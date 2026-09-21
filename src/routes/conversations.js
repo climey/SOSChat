@@ -279,6 +279,18 @@ router.patch('/:id/messages/:mid', async (req, res, next) => {
     next(err);
   }
 });
+// Reenvia uma mensagem que falhou
+router.post('/:id/messages/:mid/retry', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id), mid = parseId(req.params.mid);
+    if (!id || !mid) return res.status(404).json({ error: 'Mensagem não encontrada' });
+    const message = await outbound.retryMessage(id, req.user, mid);
+    res.status(message.status === 'failed' ? 502 : 200).json({ message });
+  } catch (err) {
+    if (err instanceof outbound.SendError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
 router.delete('/:id/messages/:mid', async (req, res, next) => {
   try {
     const id = parseId(req.params.id), mid = parseId(req.params.mid);

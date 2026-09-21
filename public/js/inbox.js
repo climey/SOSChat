@@ -468,6 +468,7 @@
     if (m.direction !== 'out' || m.type === 'note') return '';
     const map = { pending: ['◌', ''], sent: ['✓', ''], delivered: ['✓✓', ''], read: ['✓✓', 'read'], failed: ['⚠ falhou', 'failed'] };
     const [txt, cls] = map[m.status] || ['', ''];
+    if (m.status === 'failed') return `<button type="button" class="st failed st-failed" data-msg-act="failed" title="${esc(m.error || 'Não foi entregue ao WhatsApp')} — clique para ver e reenviar">${txt}</button>`;
     return `<span class="st ${cls}" title="${esc(m.error || m.status)}">${txt}</span>`;
   }
 
@@ -547,14 +548,14 @@
       const sender = m.direction === 'out' && m.sender_name
         ? `<div class="sender">${isNote ? 'Nota interna · ' : ''}${esc(m.sender_name)}</div>` : '';
       const dimmed = state.search.q && !state.search.hits.includes(m.id) ? 'dimmed' : '';
-      const canAct = !isNote && !m.deleted_at && m.wa_message_id;
+      const canAct = !isNote && !m.deleted_at && (m.wa_message_id || m.status === 'failed');
       const mine = m.direction === 'out' && !m.deleted_at && (!m.sender_user_id || m.sender_user_id === state.me.id || state.me.role === 'admin');
       const age = Date.now() - new Date(m.created_at).getTime();
       const canEdit = mine && !isNote && m.type === 'text' && m.wa_message_id && m.status !== 'failed' && m.status !== 'pending' && age <= EDIT_WINDOW_MS;
       const canDelete = mine && (isNote || !m.wa_message_id || age <= DELETE_WINDOW_MS);
       const actions = canAct ? `<div class="msg-actions">
-          <button type="button" data-msg-act="reply" title="Responder">${REPLY_ICON}</button>
-          <button type="button" data-msg-act="react" title="Reagir">😊</button>
+          ${m.status === 'failed' ? `<button type="button" data-msg-act="retry" title="Reenviar">↻</button>` : `<button type="button" data-msg-act="reply" title="Responder">${REPLY_ICON}</button>
+          <button type="button" data-msg-act="react" title="Reagir">😊</button>`}
           ${canEdit ? `<button type="button" data-msg-act="edit" title="Editar (até 15 min depois do envio)">${EDIT_ICON}</button>` : ''}
           ${canDelete ? `<button type="button" data-msg-act="delete" title="Apagar para todos">${TRASH_ICON}</button>` : ''}
         </div>` : (isNote && !m.deleted_at && m.body ? `<div class="msg-actions"><button type="button" data-msg-act="pin" title="Fixar na ficha do contato (vira observação permanente)">📌</button>${mine ? `<button type="button" data-msg-act="edit" title="Editar nota">${EDIT_ICON}</button><button type="button" data-msg-act="delete" title="Apagar nota">${TRASH_ICON}</button>` : ''}</div>` : '');
@@ -676,7 +677,34 @@
     if (act.dataset.msgAct === 'pin') pinNoteToContact(m);
     if (act.dataset.msgAct === 'edit') startEdit(m);
     if (act.dataset.msgAct === 'delete') deleteMessage(m);
+    if (act.dataset.msgAct === 'failed') explainFailure(m);
+    if (act.dataset.msgAct === 'retry') retryMessage(m);
   });
+  /** Motivo da falha em linguagem simples + reenvio. */
+  function failureText(err) {
+    const e = String(err || '');
+    if (/desconectad|QR code|Nenhum número/i.test(e)) return 'O número de WhatsApp está desconectado. Reconecte pelo QR code em Configurações → Números e reenvie.';
+    if (/timed out|Timed Out|timeout/i.test(e)) return 'O WhatsApp demorou demais para confirmar (queda de conexão ou instabilidade). Costuma resolver reenviando.';
+    if (/rate|429|too many/i.test(e)) return 'O WhatsApp limitou o envio por excesso de mensagens. Aguarde um pouco e reenvie.';
+    if (/not on whatsapp|não está no WhatsApp|jid/i.test(e)) return 'Este número não parece ter WhatsApp.';
+    return e ? `O WhatsApp não aceitou o envio: ${e}` : 'O WhatsApp não aceitou o envio.';
+  }
+  function explainFailure(m) {
+    const why = failureText(m.error);
+    if (confirm(`${why}\n\nReenviar esta mensagem agora?`)) retryMessage(m);
+  }
+  async function retryMessage(m) {
+    try {
+      const { message } = await api('POST', `/api/conversations/${m.conversation_id}/messages/${m.id}/retry`);
+      Object.assign(m, message);
+      renderMessages(false);
+      toast('Mensagem reenviada');
+    } catch (err) {
+      toast(failureText(err.message), true);
+      const cur = state.messages.find((x) => x.id === m.id);
+      if (cur) { cur.error = err.message; renderMessages(false); }
+    }
+  }
   const EDIT_WINDOW_MS = 15 * 60 * 1000;
   const DELETE_WINDOW_MS = 48 * 60 * 60 * 1000;
   const EDIT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';

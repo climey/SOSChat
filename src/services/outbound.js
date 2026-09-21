@@ -259,6 +259,29 @@ async function ownMessage(conversationId, user, messageId) {
   return { conv, m };
 }
 
+/** Tenta de novo o envio de uma mensagem que falhou (texto ou chave Pix); qualquer atendente pode. */
+async function retryMessage(conversationId, user, messageId) {
+  const conv = await conversations.getById(conversationId);
+  if (!conv) throw new SendError(404, 'Conversa não encontrada');
+  const { rows } = await db.query('SELECT * FROM messages WHERE id = $1 AND conversation_id = $2', [messageId, conversationId]);
+  const m = rows[0];
+  if (!m) throw new SendError(404, 'Mensagem não encontrada');
+  if (m.direction !== 'out' || m.status !== 'failed' || m.deleted_at) throw new SendError(400, 'Só mensagens que falharam podem ser reenviadas');
+  if (!['text', 'pix'].includes(m.type)) throw new SendError(400, 'Reenvie o arquivo pelo anexo');
+  const accountId = await resolveAccount(conv);
+  if (whatsapp.multiAccount && !accountId) throw new SendError(502, 'Nenhum número de WhatsApp conectado. Escaneie o QR code em Configurações.');
+  const quoted = await loadQuoted(conversationId, m.quoted_message_id);
+  let updated;
+  try {
+    const waId = await whatsapp.sendText(accountId, conv.wa_id, m.body, { quoted });
+    updated = (await db.query(`UPDATE messages SET wa_message_id = $2, status = 'sent', error = NULL WHERE id = $1 RETURNING *`, [m.id, waId])).rows[0];
+  } catch (err) {
+    updated = (await db.query(`UPDATE messages SET status = 'failed', error = $2 WHERE id = $1 RETURNING *`, [m.id, String(err.message).slice(0, 500)])).rows[0];
+  }
+  realtime.broadcast('message:status', { id: updated.id, conversation_id: conversationId, status: updated.status, error: updated.error });
+  return updated;
+}
+
 /** Edita o texto de uma mensagem enviada; o WhatsApp aceita até 15 minutos depois do envio. */
 async function editMessage(conversationId, user, messageId, body) {
   body = String(body || '').trim();
@@ -303,4 +326,4 @@ async function deleteMessage(conversationId, user, messageId) {
   return updated || m;
 }
 
-module.exports = { sendText, sendPix, pixText, addNote, react, transfer, editMessage, deleteMessage, loadQuoted, touchAfterSend, resolveAccount, SendError, MESSAGE_MAX };
+module.exports = { sendText, sendPix, pixText, addNote, react, transfer, editMessage, retryMessage, deleteMessage, loadQuoted, touchAfterSend, resolveAccount, SendError, MESSAGE_MAX };

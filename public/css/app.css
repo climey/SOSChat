@@ -197,6 +197,7 @@ table.table tr:last-child td { border-bottom: none; }
 .msg .foot { float: right; display: inline-flex; gap: 4px; align-items: center; font-size: 10px; color: var(--muted); margin: 6px 0 0 10px; line-height: 1; }
 .msg .foot .st { letter-spacing: -2px; }
 .msg .foot .st.read { color: var(--blue); }
+.msg .foot .st-failed { background: none; border: none; color: var(--primary); font: inherit; letter-spacing: 0; cursor: pointer; padding: 0; text-decoration: underline dotted; }
 .msg .foot .st.failed { color: #ff6b6b; letter-spacing: 0; }
 .msg .edited { font-style: italic; }
 .msg-row.deleted .body { color: var(--muted); font-style: italic; }
