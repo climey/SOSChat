@@ -434,7 +434,7 @@
   });
 
   // ---------- Navegação por seção ----------
-  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'alertas'];
+  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'pix', 'alertas'];
   // ---------- Planos de consultas ----------
   let plans = [];
   let planEditing = null;
