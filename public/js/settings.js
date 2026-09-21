@@ -408,12 +408,13 @@
     $('pix-name').value = settings.pix_name || '';
     $('pix-type').value = settings.pix_key_type || 'cpf';
     $('pix-key').value = settings.pix_key || '';
+    $('pix-format').value = settings.pix_format || 'text';
     const ro = me.role !== 'admin';
-    $('pix-name').disabled = ro; $('pix-type').disabled = ro; $('pix-key').disabled = ro;
+    $('pix-name').disabled = ro; $('pix-type').disabled = ro; $('pix-key').disabled = ro; $('pix-format').disabled = ro;
   }
   $('pix-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try { await api('PUT', '/api/settings', { pix_name: $('pix-name').value, pix_key_type: $('pix-type').value, pix_key: $('pix-key').value }); toast('Chave Pix salva'); }
+    try { await api('PUT', '/api/settings', { pix_name: $('pix-name').value, pix_key_type: $('pix-type').value, pix_key: $('pix-key').value, pix_format: $('pix-format').value }); toast('Chave Pix salva'); }
     catch (err) { toast(err.message, true); }
   });
 

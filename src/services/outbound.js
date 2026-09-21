@@ -99,9 +99,9 @@ function pixText(pix) {
   return `Chave Pix (${PIX_LABEL[pix.keyType] || 'Chave'})\n${pix.name}\n${pix.key}`;
 }
 async function pixSettings() {
-  const { rows } = await db.query(`SELECT key, value FROM app_settings WHERE key IN ('pix_name', 'pix_key', 'pix_key_type')`);
+  const { rows } = await db.query(`SELECT key, value FROM app_settings WHERE key IN ('pix_name', 'pix_key', 'pix_key_type', 'pix_format')`);
   const s = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-  return { name: (s.pix_name || '').trim(), key: (s.pix_key || '').trim(), keyType: s.pix_key_type || 'cpf' };
+  return { name: (s.pix_name || '').trim(), key: (s.pix_key || '').trim(), keyType: s.pix_key_type || 'cpf', format: s.pix_format === 'card' ? 'card' : 'text' };
 }
 
 /**
@@ -125,10 +125,15 @@ async function sendPix(conversationId, user, { quotedId = null } = {}) {
   let message = rows[0];
   try {
     let waId;
-    try {
-      waId = await whatsapp.sendPix(accountId, conv.wa_id, { ...pix, text: body });
-    } catch (err) {
-      console.warn('[pix] cartão nativo falhou, enviando como texto:', err.message);
+    if (pix.format === 'card') {
+      // cartão nativo (experimental): o WhatsApp pode descartar sem avisar; por isso só quando ligado em Configurações
+      try {
+        waId = await whatsapp.sendPix(accountId, conv.wa_id, { ...pix, text: body });
+      } catch (err) {
+        console.warn('[pix] cartão nativo falhou, enviando como texto:', err.message);
+        waId = await whatsapp.sendText(accountId, conv.wa_id, body, { quoted });
+      }
+    } else {
       waId = await whatsapp.sendText(accountId, conv.wa_id, body, { quoted });
     }
     message = (await db.query(`UPDATE messages SET wa_message_id = $2, status = 'sent' WHERE id = $1 RETURNING *`, [message.id, waId])).rows[0];

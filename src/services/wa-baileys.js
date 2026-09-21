@@ -429,7 +429,7 @@ class Session {
    * Cartão nativo "Chave Pix" do WhatsApp (o cliente vê o botão "Copiar chave Pix"). É uma mensagem
    * interativa com fluxo de pagamento (payment_info / pix_static_code), montada e enviada direto.
    */
-  async sendPix(to, { name, key, keyType }) {
+  async sendPix(to, { name, key, keyType, text }) {
     if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado. Escaneie o QR code em Configurações.`);
     const jid = toJid(to);
     const { proto, generateWAMessageFromContent } = baileys;
@@ -443,12 +443,20 @@ class Session {
       share_payment_status: false,
     };
     const content = {
-      viewOnceMessage: { message: { interactiveMessage: proto.Message.InteractiveMessage.create({
-        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: [{ name: 'payment_info', buttonParamsJson: JSON.stringify(params) }] }),
-      }) } },
+      viewOnceMessage: { message: {
+        messageContextInfo: { deviceListMetadata: {}, deviceListMetadataVersion: 2 },
+        interactiveMessage: proto.Message.InteractiveMessage.create({
+          header: proto.Message.InteractiveMessage.Header.create({ title: name, hasMediaAttachment: false }),
+          body: proto.Message.InteractiveMessage.Body.create({ text: text || `Chave Pix: ${key}` }),
+          footer: proto.Message.InteractiveMessage.Footer.create({ text: '' }),
+          nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({ buttons: [{ name: 'payment_info', buttonParamsJson: JSON.stringify(params) }], messageParamsJson: '' }),
+        }),
+      } },
     };
     const msg = generateWAMessageFromContent(jid, content, { userJid: this.sock.user?.id });
-    await this.sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
+    // sem este nó o WhatsApp mostra "não foi possível carregar a mensagem" e o celular descarta
+    const additionalNodes = [{ tag: 'biz', attrs: {}, content: [{ tag: 'interactive', attrs: { type: 'native_flow', v: '1' }, content: [{ tag: 'native_flow', attrs: { v: '9', name: 'payment_info' } }] }] }];
+    await this.sock.relayMessage(jid, msg.message, { messageId: msg.key.id, additionalNodes });
     return msg.key.id;
   }
 

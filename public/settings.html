@@ -273,7 +273,7 @@
           <section class="settings-section" data-section="pix" hidden>
             <div class="card">
               <h3>Chave Pix</h3>
-              <p class="small muted">No chat, o botão de anexo ganha a opção <b>Chave Pix</b>: o cliente recebe o cartão do WhatsApp com o botão "Copiar chave Pix". Pela API oficial da Meta (sem cartão) a chave vai como texto.</p>
+              <p class="small muted">No chat, o botão de anexo ganha a opção <b>Chave Pix</b>, que manda a chave para o cliente com um clique. Pela API oficial da Meta a chave vai sempre como texto.</p>
               <form id="pix-form">
                 <div class="field"><label class="label">Nome do recebedor (como aparece no cartão)</label><input class="input" id="pix-name" maxlength="60" placeholder="Ex.: SOS Buscas Online" style="max-width:420px"></div>
                 <div class="field"><label class="label">Tipo da chave</label>
@@ -282,6 +282,13 @@
                   </select>
                 </div>
                 <div class="field"><label class="label">Chave</label><input class="input" id="pix-key" maxlength="120" placeholder="Ex.: 00.000.000/0001-00" style="max-width:420px"></div>
+                <div class="field"><label class="label">Como enviar</label>
+                  <select class="select" id="pix-format" style="max-width:520px">
+                    <option value="text">Texto simples (nome e chave em linhas separadas) — sempre funciona</option>
+                    <option value="card">Cartão do WhatsApp com botão "Copiar chave Pix" (experimental)</option>
+                  </select>
+                  <p class="small muted" style="margin:6px 0 0">O cartão depende de o WhatsApp aceitar o formato pelo número conectado por QR code. Antes de ligar para os clientes, teste enviando para o seu próprio celular: se a mensagem não chegar ou aparecer "não foi possível carregar", volte para texto.</p>
+                </div>
                 <div class="row-actions"><button class="btn btn-primary" type="submit" data-admin-only>Salvar</button></div>
               </form>
             </div>

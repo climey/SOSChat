@@ -31,6 +31,7 @@ const KEYS = {
   pix_name: (v) => (typeof v === 'string' && v.length <= 60 ? v.trim() : null),
   pix_key: (v) => (typeof v === 'string' && v.length <= 120 ? v.trim() : null),
   pix_key_type: (v) => (['cpf', 'cnpj', 'phone', 'email', 'evp'].includes(v) ? v : null),
+  pix_format: (v) => (['text', 'card'].includes(v) ? v : null),
   vehicle_preview_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   vehicle_fix_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   recurrence_occasional_credits: (v) => (Number.isInteger(v) && v >= 1 && v <= 1000 ? v : null),
@@ -52,7 +53,7 @@ function parseValue(key, value) {
 
 async function getAll() {
   const { rows } = await db.query('SELECT key, value FROM app_settings');
-  const out = { consultation_kinds: DEFAULT_KINDS, vehicle_lookup_mode: 'suggest', image_read_mode: 'auto', pix_name: '', pix_key: '', pix_key_type: 'cpf', vehicle_preview_template: require('../services/vehicle-lookup').DEFAULT_TEMPLATE, vehicle_fix_template: require('../services/vehicle-lookup').DEFAULT_FIX_TEMPLATE, ...Object.fromEntries(Object.entries(require('../services/recurrence').DEFAULTS).map(([k, v]) => [`recurrence_${k}`, v])) };
+  const out = { consultation_kinds: DEFAULT_KINDS, vehicle_lookup_mode: 'suggest', image_read_mode: 'auto', pix_name: '', pix_key: '', pix_key_type: 'cpf', pix_format: 'text', vehicle_preview_template: require('../services/vehicle-lookup').DEFAULT_TEMPLATE, vehicle_fix_template: require('../services/vehicle-lookup').DEFAULT_FIX_TEMPLATE, ...Object.fromEntries(Object.entries(require('../services/recurrence').DEFAULTS).map(([k, v]) => [`recurrence_${k}`, v])) };
   for (const r of rows) out[r.key] = parseValue(r.key, r.value);
   out.vehicle_preview_template_default = require('../services/vehicle-lookup').DEFAULT_TEMPLATE;
   out.vehicle_fix_template_default = require('../services/vehicle-lookup').DEFAULT_FIX_TEMPLATE;
