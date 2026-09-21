@@ -103,6 +103,7 @@ async function list(filters = {}) {
   else if (filters.status && filters.status !== 'all') add('c.status = ?', filters.status);
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
+  if (filters.assignedUserId) add('c.assigned_user_id = ?', filters.assignedUserId);
   if (filters.accountId) add('c.account_id = ?', filters.accountId);
   if (filters.sectorId) add('c.sector_id = ?', filters.sectorId);
   if (filters.plan === 'with') where.push('ct.plan_credits IS NOT NULL');
@@ -147,6 +148,7 @@ async function counts(filters = {}) {
   let joins = '';
   if (filters.assigned === 'me') add('c.assigned_user_id = ?', filters.userId);
   if (filters.assigned === 'unassigned') where.push('c.assigned_user_id IS NULL');
+  if (filters.assignedUserId) add('c.assigned_user_id = ?', filters.assignedUserId);
   if (filters.accountId) add('c.account_id = ?', filters.accountId);
   if (filters.sectorId) add('c.sector_id = ?', filters.sectorId);
   if (filters.plan === 'with') where.push('ct.plan_credits IS NOT NULL');

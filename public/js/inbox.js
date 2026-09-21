@@ -10,7 +10,7 @@
     currentId: null,
     currentConv: null,
     messages: [],
-    filters: { status: 'inbox', assigned: 'all', tag: '', account: '', sector: '', plan: '', recurrence: '', q: '', hidden: 'none' },
+    filters: { status: 'inbox', assigned: 'all', user: '', tag: '', account: '', sector: '', plan: '', recurrence: '', q: '', hidden: 'none' },
     plans: [], // catálogo de planos de consultas
     contact: null, // ficha completa do contato da conversa aberta
     contactNotes: [], // observações fixadas do contato da conversa aberta
@@ -93,6 +93,7 @@
     if (f.tag) qs.set('tag', f.tag);
     if (f.account) qs.set('account', f.account);
     if (f.sector) qs.set('sector', f.sector);
+    if (f.user) qs.set('assigned_user', f.user);
     if (f.plan) qs.set('plan', f.plan);
     if (f.recurrence) qs.set('recurrence', f.recurrence);
     if (f.q) qs.set('q', f.q);
@@ -114,6 +115,7 @@
       if (f.tag) qs.set('tag', f.tag);
       if (f.account) qs.set('account', f.account);
       if (f.sector) qs.set('sector', f.sector);
+      if (f.user) qs.set('assigned_user', f.user);
       if (f.plan) qs.set('plan', f.plan);
       if (f.recurrence) qs.set('recurrence', f.recurrence);
     if (f.recurrence) qs.set('recurrence', f.recurrence);
@@ -384,11 +386,21 @@
     document.querySelectorAll('#assigned-filters .chip').forEach((x) => x.classList.remove('active'));
     b.classList.add('active');
     state.filters.assigned = b.dataset.assigned;
+    if (b.dataset.assigned !== 'all' && state.filters.user) { state.filters.user = ''; $('user-filter').value = ''; }
     loadConversations();
   }));
   els.tagFilter.addEventListener('change', () => { state.filters.tag = els.tagFilter.value; loadConversations(); });
   els.accountFilter.addEventListener('change', () => { state.filters.account = els.accountFilter.value; loadConversations(); });
   $('sector-filter').addEventListener('change', () => { state.filters.sector = $('sector-filter').value; loadConversations(); });
+  // "Minhas" (chip) e o seletor de atendente são o mesmo filtro por caminhos diferentes: escolher um limpa o outro
+  $('user-filter').addEventListener('change', () => {
+    state.filters.user = $('user-filter').value;
+    if (state.filters.user && state.filters.assigned !== 'all') {
+      state.filters.assigned = 'all';
+      document.querySelectorAll('#assigned-filters .chip').forEach((x) => x.classList.toggle('active', x.dataset.assigned === 'all'));
+    }
+    loadConversations();
+  });
   $('plan-filter').addEventListener('change', () => { state.filters.plan = $('plan-filter').value; loadConversations(); });
   $('rec-filter').addEventListener('change', () => { state.filters.recurrence = $('rec-filter').value; loadConversations(); });
   els.btnFilters.addEventListener('click', () => {
@@ -620,6 +632,13 @@
     if (!e.target.closest('#tag-popup') && !e.target.closest('#btn-tag-quick')) $('tag-popup').hidden = true;
     if (!e.target.closest('#sector-popup') && !e.target.closest('#sector-chip')) $('sector-popup').hidden = true;
   });
+  /** Seletor de atendente nos filtros: eu primeiro, depois os demais ativos em ordem alfabética. */
+  function renderUserFilter() {
+    const sel = $('user-filter');
+    const list = [...state.users].filter((u) => u.active !== false).sort((a, b) => (a.id === state.me.id ? -1 : b.id === state.me.id ? 1 : a.name.localeCompare(b.name)));
+    sel.innerHTML = '<option value="">Atendente: todos</option>' + list.map((u) => `<option value="${u.id}">${esc(u.name)}${u.id === state.me.id ? ' (eu)' : ''}</option>`).join('');
+    sel.value = state.filters.user;
+  }
   async function loadSectors() {
     try {
       const { sectors } = await api('GET', '/api/sectors');
@@ -3413,6 +3432,7 @@
     ]);
     state.tags = tags;
     state.users = users;
+    renderUserFilter();
     state.quickReplies = qr.quick_replies || [];
     Object.assign(state.settings, st.settings || {});
     for (const u of users) setPresence(u.id, { online: Boolean(u.online), availability: u.availability || 'available' });
