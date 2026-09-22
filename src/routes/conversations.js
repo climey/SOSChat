@@ -143,13 +143,30 @@ router.post('/:id/media', (req, res, next) => {
 
     const conv = await conversations.getById(id);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
-    const accountId = await resolveAccount(conv);
-    if (whatsapp.multiAccount && !accountId) return res.status(502).json({ error: 'Nenhum número de WhatsApp conectado. Escaneie o QR code em Configurações.' });
+    const isNote = ['1', 'true'].includes(String(req.body?.note || ''));
+    const accountId = isNote ? null : await resolveAccount(conv);
+    if (!isNote && whatsapp.multiAccount && !accountId) return res.status(502).json({ error: 'Nenhum número de WhatsApp conectado. Escaneie o QR code em Configurações.' });
 
     const kind = mediaKind(file.mimetype);
     const filename = String(file.originalname || 'arquivo').slice(0, 200);
     const label = { image: '[Imagem]', video: '[Vídeo]', audio: '[Áudio]' }[kind];
     const body = kind === 'document' ? filename : (caption || label);
+
+    if (isNote) {
+      // nota interna com arquivo: fica só na equipe, não vai ao WhatsApp nem mexe na prévia da conversa
+      const ins = await db.query(
+        `INSERT INTO messages (conversation_id, direction, type, body, media_mime, status, sender_user_id)
+         VALUES ($1, 'out', 'note', $2, $3, 'sent', $4) RETURNING *`,
+        [id, body, file.mimetype, req.user.id]
+      );
+      const noteMediaId = `out-${ins.rows[0].id}`;
+      await db.query(`INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`, [noteMediaId, file.mimetype, file.size, file.buffer]);
+      const note = (await db.query('UPDATE messages SET media_id = $2 WHERE id = $1 RETURNING *', [ins.rows[0].id, noteMediaId])).rows[0];
+      note.sender_name = req.user.name;
+      note.sender_avatar = req.user.avatar_media_id || null;
+      realtime.broadcast('message:new', { message: note, conversation: conv });
+      return res.status(201).json({ message: note, conversation: conv });
+    }
 
     const { rows } = await db.query(
       `INSERT INTO messages (conversation_id, direction, type, body, media_mime, status, sender_user_id)

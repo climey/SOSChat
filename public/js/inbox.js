@@ -486,14 +486,21 @@
 
   const isPlaceholder = (body) => /^\[[^\]]*\]$/.test(body || '');
 
+  /** Tipo de mídia para desenhar: mensagens normais têm o tipo; nota interna com arquivo usa o mime. */
+  function mediaType(m) {
+    if (m.type !== 'note') return m.type;
+    const mime = String(m.media_mime || '').toLowerCase();
+    return mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'document';
+  }
   function mediaHtml(m) {
     if (!m.media_id || m.deleted_at) return '';
     const src = `/api/media/${esc(m.media_id)}`;
-    if (m.type === 'image' || m.type === 'sticker') {
+    const t = mediaType(m);
+    if (t === 'image' || t === 'sticker') {
       return `<img class="media-img" src="${src}" alt="" loading="lazy" data-lb="${m.id}">`;
     }
-    if (m.type === 'audio') return audioPlayerHtml(m, src);
-    if (m.type === 'video') {
+    if (t === 'audio') return audioPlayerHtml(m, src);
+    if (t === 'video') {
       return `<span class="media-wrap"><video class="media-video" controls preload="metadata" src="${src}"></video>
         <button type="button" class="media-expand" data-lb="${m.id}" title="Abrir em tela cheia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button></span>`;
     }
@@ -547,7 +554,7 @@
       lastDay = day;
       const isNote = m.type === 'note';
       const rowCls = isNote ? 'note' : m.direction;
-      const showBody = m.deleted_at || !m.media_id || !(isPlaceholder(m.body) || m.type === 'document');
+      const showBody = m.deleted_at || !m.media_id || !(isPlaceholder(m.body) || mediaType(m) === 'document');
       const agent = m.direction === 'out'
         ? `<span class="agent-avatar" title="${esc(m.sender_name || 'Sistema')}">${esc(initials(m.sender_name || 'S'))}${userImg(m.sender_avatar)}</span>` : '';
       const sender = m.direction === 'out' && m.sender_name
@@ -1822,7 +1829,7 @@
   const lb = { items: [], idx: -1, zoom: 1, rot: 0, flip: false }; // rot em graus (0/90/180/270), flip = espelhado
   const VIDEO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>';
   const DOC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
-  const lbMedia = () => state.messages.filter((m) => m.media_id && !m.deleted_at && (['image', 'sticker', 'video'].includes(m.type) || (m.type === 'document' && isPdf(m))));
+  const lbMedia = () => state.messages.filter((m) => m.media_id && !m.deleted_at && (['image', 'sticker', 'video'].includes(mediaType(m)) || (mediaType(m) === 'document' && isPdf(m))));
 
   function openLightbox(messageId) {
     lb.items = lbMedia();
@@ -1844,8 +1851,8 @@
     const c = current();
     lb.zoom = 1; lb.rot = 0; lb.flip = false;
     const src = `/api/media/${esc(m.media_id)}`;
-    const isVideo = m.type === 'video';
-    const isDoc = m.type === 'document';
+    const isVideo = mediaType(m) === 'video';
+    const isDoc = mediaType(m) === 'document';
     $('lb-stage').innerHTML = isVideo
       ? `<video controls autoplay src="${src}"></video>`
       : isDoc
@@ -1877,7 +1884,7 @@
   }
   function renderStrip() {
     $('lb-strip').innerHTML = lb.items.map((m) => `<div class="lb-thumb" data-id="${m.id}" title="${esc(m.type === 'document' ? m.body : fmtClock(m.created_at))}">${
-      m.type === 'video' ? VIDEO_ICON : m.type === 'document' ? `<span class="lb-doc">${DOC_ICON}<small>PDF</small></span>` : `<img src="/api/media/${esc(m.media_id)}" alt="" loading="lazy">`
+      mediaType(m) === 'video' ? VIDEO_ICON : mediaType(m) === 'document' ? `<span class="lb-doc">${DOC_ICON}<small>PDF</small></span>` : `<img src="/api/media/${esc(m.media_id)}" alt="" loading="lazy">`
     }</div>`).join('');
   }
   function stepLightbox(dir) {
@@ -2055,10 +2062,11 @@
   });
   Object.values(attachInputs).forEach((inp) => inp.addEventListener('change', () => { if (inp.files.length) addAttachments([...inp.files]); }));
 
-  const sendLabel = () => (attach.files.length > 1 ? `Enviar ${attach.files.length} arquivos` : 'Enviar arquivo');
+  const sendLabel = () => (state.composeMode === 'note'
+    ? (attach.files.length > 1 ? `Salvar nota com ${attach.files.length} arquivos` : 'Salvar nota com arquivo')
+    : (attach.files.length > 1 ? `Enviar ${attach.files.length} arquivos` : 'Enviar arquivo'));
   /** Acrescenta arquivos à lista de anexos (não substitui os que já estão lá). */
   function addAttachments(files) {
-    if (state.composeMode === 'note') { toast('Anexos só em mensagens, não em notas', true); return; }
     let added = 0;
     for (const file of files) {
       if (file.size > MEDIA_MAX) { toast(`${file.name}: acima de 25 MB`, true); continue; }
@@ -2083,6 +2091,7 @@
     if (!attach.files.length) {
       p.hidden = true; p.innerHTML = '';
       if (state.composeMode !== 'note') { els.composeText.placeholder = 'Digite sua mensagem ou arraste um arquivo…'; els.composeSend.textContent = 'Enviar'; }
+      else { els.composeText.placeholder = 'Escreva uma nota interna (o cliente não vê)…'; els.composeSend.textContent = 'Salvar nota'; }
       return;
     }
     const total = attach.files.reduce((n, a) => n + a.file.size, 0);
@@ -2094,7 +2103,7 @@
         <button type="button" class="btn btn-sm btn-ghost" data-att-add>+ Adicionar</button>
         <button type="button" class="btn btn-sm btn-ghost" data-att-clear>Limpar</button></div>`;
     p.hidden = false;
-    els.composeText.placeholder = 'Legenda (opcional)…';
+    els.composeText.placeholder = state.composeMode === 'note' ? 'Texto da nota (opcional)…' : 'Legenda (opcional)…';
     els.composeSend.textContent = sendLabel();
   }
   $('attach-preview').addEventListener('click', (e) => {
@@ -2109,7 +2118,7 @@
     renderAttachments();
   }
   /** Envia os anexos em ordem, um por mensagem; legenda e citação só no primeiro. Se um falhar, os restantes ficam na lista. */
-  async function sendAttachment(id, caption) {
+  async function sendAttachment(id, caption, asNote = false) {
     const list = [...attach.files];
     const total = list.length;
     els.composeSend.disabled = true;
@@ -2120,20 +2129,21 @@
         const fd = new FormData();
         fd.append('file', list[i].file, list[i].file.name);
         const cap = i === 0 ? caption : '';
-        fd.append('caption', els.signToggle.checked && cap ? `*${signText()}:*\n${cap}` : cap);
-        if (i === 0 && state.reply) fd.append('quoted_message_id', state.reply.id);
+        fd.append('caption', !asNote && els.signToggle.checked && cap ? `*${signText()}:*\n${cap}` : cap);
+        if (asNote) fd.append('note', '1');
+        else if (i === 0 && state.reply) fd.append('quoted_message_id', state.reply.id);
         await SOS.upload(`/api/conversations/${id}/media`, fd);
         sent++;
         removeAttachment(attach.files.indexOf(list[i]));
         if (i === 0) { clearReply(); els.composeText.value = ''; autosize(); }
       }
-      offerDebit(list[0].file);
+      if (!asNote) offerDebit(list[0].file);
     } catch (err) {
       toast(total > 1 ? `${err.message} (${sent} de ${total} enviados; os outros continuam na lista)` : err.message, true);
       renderAttachments();
     } finally {
       els.composeSend.disabled = false;
-      if (!attach.files.length && state.composeMode !== 'note') els.composeSend.textContent = 'Enviar';
+      if (!attach.files.length) els.composeSend.textContent = state.composeMode === 'note' ? 'Salvar nota' : 'Enviar';
       els.composeText.focus();
     }
   }
@@ -2255,6 +2265,9 @@
     try {
       await api('POST', `/api/vehicles/${encodeURIComponent(ref)}/send`, { conversation_id: c.id, kind, original: original || null });
       toast(original ? 'Correção do chassi enviada para o cliente confirmar' : 'Dados do veículo enviados para o cliente confirmar');
+      // enviado: o aviso já cumpriu o papel, fecha sozinho (como o ✕)
+      const found = latestReferences();
+      if (found) refDismissed.set(c.id, found.message.id);
       await loadVehicle(reload || ref, false, kind, kind === 'chassi');
     } catch (err) { toast(err.message, true); }
   }
@@ -2781,8 +2794,7 @@
       b.classList.toggle('note', b.dataset.mode === 'note' && mode === 'note');
     });
     els.composer.classList.toggle('note-mode', mode === 'note');
-    if (mode === 'note') clearAttachment();
-    $('btn-attach').hidden = mode === 'note';
+    if (attach.files.length) renderAttachments();
     els.composeText.placeholder = mode === 'note' ? 'Escreva uma nota interna (o cliente não vê)…' : 'Digite sua mensagem ou arraste um arquivo…';
     els.composeSend.textContent = mode === 'note' ? 'Salvar nota' : (attach.files.length ? sendLabel() : 'Enviar');
     els.composeSend.classList.toggle('btn-primary', mode !== 'note');
@@ -2805,7 +2817,7 @@
     const id = state.currentId;
     if (!id) return;
     if (state.editing) { await saveEdit(text); return; }
-    if (attach.files.length && state.composeMode !== 'note') { await sendAttachment(id, text); return; }
+    if (attach.files.length) { await sendAttachment(id, text, state.composeMode === 'note'); return; }
     if (!text) return;
     els.composeSend.disabled = true;
     els.composeText.value = '';
