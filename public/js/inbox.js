@@ -3069,6 +3069,7 @@
     socket.on('quick-replies:updated', async () => {
       try { const { quick_replies: qr } = await api('GET', '/api/quick-replies'); state.quickReplies = qr || []; if (!$('qr-popup').hidden) renderQuickPopup($('qr-popup').dataset.term || ''); } catch { /* ignora */ }
     });
+    socket.on('user:renamed', ({ user_id, name }) => applyRename(user_id, name));
     socket.on('user:avatar', ({ user_id, avatar_media_id, version }) => {
       if (avatar_media_id && version) avatarVersion.set(avatar_media_id, version);
       for (const u of state.users) if (u.id === user_id) u.avatar_media_id = avatar_media_id;
@@ -3293,11 +3294,30 @@
   navigator.mediaDevices?.addEventListener?.('devicechange', () => { if (!$('prefs-modal').hidden) renderDevices(); });
 
   // Preferências (modal)
+  /** Atualiza o nome de um atendente em tudo que está na tela (eu ou outro). */
+  function applyRename(userId, name) {
+    if (userId === state.me.id) {
+      state.me.name = name;
+      $('me-avatar').title = `${state.me.name} · ${state.me.role === 'admin' ? 'Administrador' : 'Atendente'}`;
+      $('pref-signature-name').textContent = name;
+      refreshSignatureLabels();
+    }
+    for (const u of state.users) if (u.id === userId) u.name = name;
+    for (const c of state.conversations) {
+      if (c.assigned_user_id === userId) c.assigned_user_name = name;
+      for (const p of c.participants || []) if (p.id === userId) p.name = name;
+    }
+    for (const m of state.messages) if (m.sender_user_id === userId) m.sender_name = name;
+    renderUserFilter();
+    renderList();
+    if (current()) { renderChat(); renderMessages(false); }
+  }
   function openPrefs(tab = 'profile') {
     const prefs = SOS.sound.load();
     renderPrefsAvatar();
     renderDevices();
     showPrefsTab(tab);
+    $('pref-name').value = state.me.name || '';
     $('pref-signature').value = state.me.signature || '';
     $('pref-signature-name').textContent = state.me.name;
     $('pref-signature-preview').textContent = `${signText()}:`;
@@ -3381,6 +3401,15 @@
   });
   $('prefs-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    // Nome do próprio atendente
+    const newName = $('pref-name').value.replace(/\s+/g, ' ').trim();
+    if (newName && newName !== state.me.name) {
+      try {
+        const { user } = await api('PATCH', '/api/users/me/profile', { name: newName });
+        applyRename(user.id, user.name);
+        toast(`Nome alterado para ${user.name}`);
+      } catch (err) { toast(err.message, true); return; }
+    }
     // Assinatura (mesma do lápis no compositor) fica na conta
     const sig = $('pref-signature').value.trim();
     if (sig !== (state.me.signature || '')) {

@@ -101,8 +101,15 @@ router.patch('/me/profile', async (req, res, next) => {
       const sig = String(req.body.signature || '').replace(/[\r\n*]/g, ' ').trim().slice(0, 60);
       params.push(sig || null); sets.push(`signature = $${params.length}`);
     }
+    // o próprio atendente pode trocar o nome que aparece para a equipe e nas assinaturas
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name || '').replace(/\s+/g, ' ').trim();
+      if (name.length < 2 || name.length > 60) return res.status(400).json({ error: 'O nome precisa ter de 2 a 60 caracteres' });
+      params.push(name); sets.push(`name = $${params.length}`);
+    }
     if (!sets.length) return res.status(400).json({ error: 'Nada para atualizar' });
     const { rows } = await db.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING id, name, signature`, params);
+    if (req.body?.name !== undefined) realtime.broadcast('user:renamed', { user_id: rows[0].id, name: rows[0].name });
     res.json({ user: rows[0] });
   } catch (err) {
     next(err);
