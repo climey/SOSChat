@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contatos · SOS Chat</title>
+  <link rel="icon" href="/img/logo.svg">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="app">
+  <!--RAIL-->
+  <nav class="rail">
+    <div class="rail-top">
+      <a class="rail-logo" href="/" title="SOS Chat"><img src="/img/logo.svg" alt="SOS Chat"><span class="rail-label brand">SOS Chat</span></a>
+      <button class="rail-toggle" id="rail-toggle" title="Expandir menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+    <a href="/" class="rail-btn" data-page="/" title="Caixa de entrada">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span class="rail-label">Caixa de entrada</span>
+      <span class="rail-badge" id="rail-unread" hidden>0</span>
+    </a>
+    <a href="/contacts.html" class="rail-btn active" data-page="/contacts.html" title="Contatos">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="rail-label">Contatos</span>
+    </a>
+    <a href="/reports.html" class="rail-btn" data-page="/reports.html" title="Relatórios">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      <span class="rail-label">Relatórios</span>
+    </a>
+    <a href="/settings.html" class="rail-btn" data-page="/settings.html" title="Configurações">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span class="rail-label">Configurações</span>
+    </a>
+    <div class="rail-spacer"></div>
+    <div class="rail-me">
+      <div class="rail-user" id="me-avatar" title=""></div>
+      <span class="rail-label" id="rail-user-name"></span>
+    </div>
+    <button class="rail-btn" id="logout" title="Sair">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      <span class="rail-label">Sair</span>
+    </button>
+  </nav>
+  <!--/RAIL-->
+
+  <main class="main">
+    <div class="page contacts-page">
+      <div class="page-header">
+        <div><h1>Contatos <span class="muted" id="ct-total"></span></h1><p>Todo mundo que já falou com a empresa entra aqui sozinho. Pesquise, veja o histórico e puxe uma conversa.</p></div>
+        <button class="btn btn-primary" id="btn-add-contact">+ Adicionar contato</button>
+      </div>
+
+      <div class="card contacts-toolbar">
+        <div class="search-wrap" style="flex:1;max-width:420px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="input" id="ct-search" type="search" placeholder="Pesquisar por nome ou telefone" autocomplete="off">
+        </div>
+        <span class="small muted" id="ct-count"></span>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div style="overflow-x:auto"><table class="table contacts-table" id="ct-table"></table></div>
+        <div class="contacts-pager" id="ct-pager"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="modal-bg" id="add-modal" hidden>
+  <form class="modal" id="add-form">
+    <h3 style="margin:0 0 14px">Adicionar contato</h3>
+    <div class="field"><label class="label">Nome</label><input class="input" id="add-name" maxlength="120" placeholder="Ex.: João da Silva" required></div>
+    <div class="field"><label class="label">Telefone (com DDD)</label><input class="input" id="add-phone" maxlength="20" placeholder="Ex.: 42 99107-5148" required></div>
+    <div class="actions">
+      <button type="button" class="btn" id="add-cancel">Cancelar</button>
+      <button type="submit" class="btn btn-primary">Salvar</button>
+      <button type="button" class="btn btn-primary" id="add-and-chat" title="Salva e já abre a conversa na caixa de entrada">Salvar e conversar</button>
+    </div>
+  </form>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/contacts.js"></script>
+</body>
+</html>

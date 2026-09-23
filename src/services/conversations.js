@@ -141,6 +141,43 @@ async function list(filters = {}) {
 }
 
 /** Contagem por aba (Esperando / Entrada / Finalizados) com os mesmos filtros da lista, exceto status. */
+/**
+ * Abre (ou reaproveita) uma conversa com um número, a pedido do atendente. Se o contato já tem conversa
+ * aberta, devolve essa; senão cria uma nova, já atribuída a quem pediu e marcada como atendida.
+ */
+async function start(user, { waId, name = null, accountId = null } = {}) {
+  const whatsapp = require('./whatsapp');
+  const contactsSvc = require('./contacts');
+  const id = contactsSvc.normalizeWaId(waId);
+  if (!id) { const e = new Error('Informe um telefone válido com DDD'); e.status = 400; throw e; }
+  const account = accountId || whatsapp.pickAccount() || null;
+  const contact = await contactsSvc.create(user, { wa_id: id, name });
+  const open = await db.query(
+    `SELECT id FROM conversations WHERE contact_id = $1 AND status = 'open' ${account ? 'AND account_id IS NOT DISTINCT FROM $2' : ''} ORDER BY last_message_at DESC LIMIT 1`,
+    account ? [contact.id, account] : [contact.id]
+  );
+  let convId = open.rows[0]?.id;
+  let created = false;
+  if (!convId) {
+    const any = await db.query(`SELECT id FROM conversations WHERE contact_id = $1 AND status = 'open' ORDER BY last_message_at DESC LIMIT 1`, [contact.id]);
+    convId = any.rows[0]?.id;
+  }
+  if (!convId) {
+    const ins = await db.query(
+      `INSERT INTO conversations (contact_id, status, last_message_at, last_message_preview, last_message_direction, account_id, sector_id, assigned_user_id, attended)
+       VALUES ($1, 'open', NOW(), '', 'out', $2, $3, $4, TRUE) RETURNING id`,
+      [contact.id, account, await defaultSectorId(db), user.id]
+    );
+    convId = ins.rows[0].id;
+    created = true;
+    if (account) await db.query('INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, auto_tag_id FROM wa_accounts WHERE id = $2 AND auto_tag_id IS NOT NULL ON CONFLICT DO NOTHING', [convId, account]);
+  }
+  const conversation = await getById(convId, db, user.id);
+  const realtime = require('../realtime');
+  if (created) realtime.broadcast('conversation:updated', conversation);
+  return { conversation, created, contact };
+}
+
 async function counts(filters = {}) {
   const params = [filters.userId || null];
   const where = [];
@@ -213,4 +250,4 @@ async function deleteByAccount(accountId) {
   return rowCount;
 }
 
-module.exports = { getById, list, counts, setPrefs, defaultSectorId, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };
+module.exports = { start, getById, list, counts, setPrefs, defaultSectorId, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };

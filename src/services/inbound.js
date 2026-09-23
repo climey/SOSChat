@@ -26,8 +26,14 @@ function extractContent(msg) {
       const l = msg.location || {};
       return { type, body: `[Localização] ${l.name || ''} ${l.latitude},${l.longitude}`.trim() };
     }
-    case 'contacts':
-      return { type, body: `[Contato] ${(msg.contacts || []).map((c) => c.name?.formatted_name).filter(Boolean).join(', ')}` };
+    case 'contacts': {
+      // guarda nomes e telefones para o atendente poder ver e puxar conversa
+      const list = (msg.contacts || []).map((c) => ({
+        name: c.name?.formatted_name || [c.name?.first_name, c.name?.last_name].filter(Boolean).join(' ') || 'Contato',
+        phones: (c.phones || []).map((p) => ({ phone: String(p.phone || '').trim(), wa_id: String(p.wa_id || p.phone || '').replace(/\D/g, '') || null })).filter((p) => p.phone || p.wa_id),
+      }));
+      return { type, body: `[Contato] ${list.map((c) => c.name).filter(Boolean).join(', ')}`, meta: { contacts: list } };
+    }
     case 'interactive': {
       const i = msg.interactive || {};
       const body = i.button_reply?.title || i.list_reply?.title || '[Interativo]';
@@ -83,11 +89,11 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
     }
 
     const { rows: msgRows } = await client.query(
-      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at, quoted_message_id)
-       VALUES ($1, 'in', $2, $3, $4, $5, $6, 'received', $7, $8)
+      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at, quoted_message_id, meta)
+       VALUES ($1, 'in', $2, $3, $4, $5, $6, 'received', $7, $8, $9)
        ON CONFLICT (wa_message_id) DO NOTHING
        RETURNING *`,
-      [conversationId, msg.id || null, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt, quotedMessageId]
+      [conversationId, msg.id || null, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt, quotedMessageId, content.meta ? JSON.stringify(content.meta) : null]
     );
     if (!msgRows.length) return null; // duplicado (Meta reenvia webhooks)
 
@@ -150,10 +156,10 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
       if (accountId) await client.query('INSERT INTO conversation_tags (conversation_id, tag_id) SELECT $1, auto_tag_id FROM wa_accounts WHERE id = $2 AND auto_tag_id IS NOT NULL ON CONFLICT DO NOTHING', [conversationId, accountId]);
     }
     const { rows: msgRows } = await client.query(
-      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at, quoted_message_id)
-       VALUES ($1, 'out', $2, $3, $4, $5, $6, 'sent', $7, $8)
+      `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at, quoted_message_id, meta)
+       VALUES ($1, 'out', $2, $3, $4, $5, $6, 'sent', $7, $8, $9)
        ON CONFLICT (wa_message_id) DO NOTHING RETURNING *`,
-      [conversationId, msg.id, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt, quotedMessageId]
+      [conversationId, msg.id, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt, quotedMessageId, content.meta ? JSON.stringify(content.meta) : null]
     );
     if (!msgRows.length) return null;
     await client.query(

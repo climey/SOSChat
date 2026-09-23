@@ -76,7 +76,7 @@ if (config.enableDevSimulator) {
 
 // Páginas protegidas
 const publicDir = path.join(__dirname, '..', 'public');
-app.get(['/', '/index.html', '/reports.html', '/settings.html'], requirePageAuth, (req, res) => {
+app.get(['/', '/index.html', '/reports.html', '/settings.html', '/contacts.html'], requirePageAuth, (req, res) => {
   const file = req.path === '/' ? 'index.html' : req.path.slice(1);
   res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(publicDir, file));

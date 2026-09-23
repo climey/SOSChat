@@ -16,9 +16,11 @@
   };
   function params() {
     const p = new URLSearchParams({ from: $('from').value, to: $('to').value, group: $('group').value });
-    for (const [k, id] of [['account', 'f-account'], ['sector', 'f-sector'], ['agent', 'f-agent']]) if ($(id).value) p.set(k, $(id).value);
+    for (const [k, id] of [['account', 'f-account'], ['sector', 'f-sector'], ['agent', 'f-agent'], ['hour_from', 'f-hour-from'], ['hour_to', 'f-hour-to']]) if ($(id).value !== '') p.set(k, $(id).value);
     return p.toString();
   }
+  // Horário: hora em que a conversa começou (0h–23h); "de" maior que "até" cobre a madrugada
+  for (const id of ['f-hour-from', 'f-hour-to']) $(id).innerHTML = '<option value="">Qualquer</option>' + Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, '0')}:${id === 'f-hour-to' ? '59' : '00'}</option>`).join('');
   function delta(cur, prev, { invert = false } = {}) {
     if (prev == null || cur == null || Number(prev) === 0) return '';
     const pct = ((Number(cur) - Number(prev)) / Number(prev)) * 100;
@@ -201,7 +203,7 @@
   // ---------- Agora ----------
   async function loadNow() {
     const p = new URLSearchParams();
-    for (const [k, id] of [['account', 'f-account'], ['sector', 'f-sector']]) if ($(id).value) p.set(k, $(id).value);
+    for (const [k, id] of [['account', 'f-account'], ['sector', 'f-sector'], ['hour_from', 'f-hour-from'], ['hour_to', 'f-hour-to']]) if ($(id).value !== '') p.set(k, $(id).value);
     let n;
     try { n = await api('GET', `/api/reports/now?${p}`); } catch (err) { toast(err.message, true); return; }
     state.data.now = n;

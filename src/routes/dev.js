@@ -16,9 +16,13 @@ router.post('/simulate-inbound', async (req, res, next) => {
     const text = String(req.body?.text || '').trim();
     const name = String(req.body?.name || '').trim() || undefined;
     const image = typeof req.body?.image_base64 === 'string' ? req.body.image_base64 : null;
-    if (!from || (!text && !image)) return res.status(400).json({ error: 'Informe from e text (ou image_base64)' });
+    const hasContacts = Array.isArray(req.body?.contacts) && req.body.contacts.length > 0;
+    if (!from || (!text && !image && !hasContacts)) return res.status(400).json({ error: 'Informe from e text (ou image_base64, ou contacts)' });
     const id = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     let msg = { id, from, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text } };
+    if (Array.isArray(req.body?.contacts) && req.body.contacts.length) {
+      msg = { id, from, timestamp: msg.timestamp, type: 'contacts', contacts: req.body.contacts.map((c) => ({ name: { formatted_name: String(c.name || 'Contato') }, phones: (c.phones || []).map((p) => (typeof p === 'string' ? { phone: p, wa_id: p.replace(/\D/g, '') } : p)) })) };
+    }
     if (image) {
       // foto simulada: guarda o arquivo como as mídias recebidas pelo Baileys
       const mime = String(req.body?.mime || 'image/jpeg');

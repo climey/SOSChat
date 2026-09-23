@@ -27,6 +27,10 @@
       <span class="rail-badge" id="team-online" hidden>0</span>
       <span class="rail-label">Equipe</span>
     </button>
+    <a href="/contacts.html" class="rail-btn" data-page="/contacts.html" title="Contatos">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="rail-label">Contatos</span>
+    </a>
     <a href="/reports.html" class="rail-btn" data-page="/reports.html" title="Relatórios">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       <span class="rail-label">Relatórios</span>
@@ -55,7 +59,10 @@
           <button class="icon-btn" id="btn-filters" title="Filtros">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
           </button>
-          <button class="icon-btn primary" id="btn-simulate" hidden title="Simular mensagem recebida (dev)">
+          <button class="icon-btn primary" id="btn-new-conv" title="Iniciar uma nova conversa">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <button class="icon-btn" id="btn-simulate" hidden title="Simular mensagem recebida (dev)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         </div>
@@ -535,6 +542,26 @@
       <div id="schedule-done" data-tab="done" hidden></div>
     </div>
   </aside>
+</div>
+
+<div class="modal-bg" id="newconv-modal" hidden>
+  <form class="modal wide" id="newconv-form">
+    <div class="drawer-head" style="padding:0 0 10px">
+      <button type="button" class="icon-btn" id="newconv-cancel" title="Fechar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <h3 style="margin:0">Nova conversa</h3>
+    </div>
+    <div class="search-wrap" style="padding:10px 0 6px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input class="input" id="newconv-search" type="search" placeholder="Pesquisar contato por nome ou telefone, ou digitar um número novo" autocomplete="off" style="padding-left:36px">
+    </div>
+    <div class="transfer-list" id="newconv-list"></div>
+    <div class="field" id="newconv-account-wrap" hidden style="margin-top:10px"><label class="label">Enviar pelo número</label><select class="select" id="newconv-account"></select></div>
+    <div class="small muted" id="newconv-hint" style="margin-top:8px">Quem já falou com a empresa aparece na lista. Para um número novo, digite com DDD (ex.: 42 99107-5148).</div>
+    <div class="actions">
+      <a class="btn btn-ghost" href="/contacts.html">Ver todos os contatos</a>
+      <button type="submit" class="btn btn-primary" id="newconv-submit" disabled>Conversar</button>
+    </div>
+  </form>
 </div>
 
 <div class="modal-bg" id="sim-modal" hidden>

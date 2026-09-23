@@ -498,6 +498,17 @@
     const label = rd && rd.status === 'done' ? (items.length ? 'Ler de novo' : 'Nada lido · tentar de novo') : rd && rd.status === 'error' ? 'Tentar ler de novo' : 'Ler imagem';
     return `<div class="read-bar">${chips}<button type="button" class="btn btn-xs ${rd && rd.status === 'done' ? 'btn-ghost' : ''}" data-read-image="${m.id}" title="Lê placa, chassi ou motor na foto e mostra na conferência">📷 ${label}</button></div>`;
   }
+  /** Contato(s) compartilhado(s) pelo cliente: nome, telefones e ações (conversar, salvar). */
+  function contactCardsHtml(m) {
+    return (m.meta.contacts || []).map((c, i) => {
+      const phones = (c.phones || []).filter((p) => p.wa_id || p.phone);
+      return `<div class="vcard"><div class="vcard-head"><div class="avatar sm">${esc(initials(c.name || 'C'))}</div><div class="vcard-name">${esc(c.name || 'Contato')}</div></div>
+        ${phones.length ? phones.map((p) => `<div class="vcard-phone"><span class="mono">${esc(p.wa_id ? formatPhone(p.wa_id) : p.phone)}</span>
+          <button type="button" class="btn btn-xs btn-primary" data-vc-chat="${esc(p.wa_id || p.phone)}" data-vc-name="${esc(c.name || '')}" title="Abrir conversa com este número">Conversar</button>
+          <button type="button" class="btn btn-xs btn-ghost" data-vc-save="${esc(p.wa_id || p.phone)}" data-vc-name="${esc(c.name || '')}" title="Salvar nos contatos">Salvar</button></div>`).join('') : '<div class="small muted">Sem telefone no cartão</div>'}
+      </div>`;
+    }).join('');
+  }
   /** Tipo de mídia para desenhar: mensagens normais têm o tipo; nota interna com arquivo usa o mime. */
   function mediaType(m) {
     if (m.type !== 'note') return m.type;
@@ -585,7 +596,7 @@
         </div>` : (isNote && !m.deleted_at && m.body ? `<div class="msg-actions"><button type="button" data-msg-act="pin" title="Fixar na ficha do contato (vira observação permanente)">📌</button>${mine ? `<button type="button" data-msg-act="edit" title="Editar nota">${EDIT_ICON}</button><button type="button" data-msg-act="delete" title="Apagar nota">${TRASH_ICON}</button>` : ''}</div>` : '');
       const stickerCls = m.type === 'sticker' && m.media_id && !m.deleted_at ? 'sticker' : '';
       return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed} ${stickerCls}" data-id="${m.id}">
-        <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : ''}
+        <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${m.type === 'contacts' && m.meta && m.meta.contacts && !m.deleted_at ? contactCardsHtml(m) : (showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : '')}
           <span class="foot">${m.edited_at && !m.deleted_at ? '<span class="edited">editada</span>' : ''}<span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</span>
           ${reactionsHtml(m)}
         </div>${agent}${actions}
@@ -2005,6 +2016,13 @@
   }, { passive: false });
   window.addEventListener('resize', () => { if (!$('lightbox').hidden) applyImageTransform(); });
   els.messages.addEventListener('click', (e) => {
+    const vc = e.target.closest('[data-vc-chat]');
+    if (vc) { startChatWith(vc.dataset.vcChat, vc.dataset.vcName); return; }
+    const vs = e.target.closest('[data-vc-save]');
+    if (vs) {
+      api('POST', '/api/contacts', { phone: vs.dataset.vcSave, name: vs.dataset.vcName }).then(({ contact }) => toast(contact.created ? `Contato ${contact.name || formatPhone(contact.wa_id)} salvo` : 'Este número já está nos contatos')).catch((err) => toast(err.message, true));
+      return;
+    }
     const rb = e.target.closest('[data-read-image]');
     if (rb) { readImage(Number(rb.dataset.readImage)); return; }
     const cp = e.target.closest('.read-chip[data-ref-copy]');
@@ -3541,6 +3559,71 @@
     $('prefs-modal').hidden = true;
     toast('Preferências salvas');
   });
+
+  // ---------- Nova conversa (puxar contato) ----------
+  const nc = { pick: null, timer: null, rows: [] };
+  const NC_NAME = (c) => c.name || c.profile_name || formatPhone(c.wa_id);
+  function openNewConv() {
+    nc.pick = null; nc.rows = [];
+    $('newconv-search').value = '';
+    $('newconv-list').innerHTML = '';
+    $('newconv-submit').disabled = true;
+    const wrap = $('newconv-account-wrap');
+    if (state.multiAccount && state.accounts.size > 1) {
+      $('newconv-account').innerHTML = [...state.accounts.values()].map((a) => `<option value="${a.id}" ${a.status === 'connected' ? '' : 'disabled'}>${esc(a.name)}${a.status === 'connected' ? '' : ' (desconectado)'}</option>`).join('');
+      wrap.hidden = false;
+    } else wrap.hidden = true;
+    $('newconv-modal').hidden = false;
+    $('newconv-search').focus();
+    searchNewConv('');
+  }
+  async function searchNewConv(q) {
+    const digits = q.replace(/\D/g, '');
+    let rows = [];
+    try { rows = (await api('GET', `/api/contacts?limit=12${q ? '&q=' + encodeURIComponent(q) : ''}`)).contacts; } catch { rows = []; }
+    nc.rows = rows;
+    const list = $('newconv-list');
+    const items = rows.map((c) => `<button type="button" class="t-item ${nc.pick && nc.pick.wa_id === c.wa_id ? 'sel' : ''}" data-nc-id="${c.id}">
+      ${avatarHtml(c, 'sm', false)}<div class="t-main"><div class="t-name">${esc(NC_NAME(c))}</div><div class="t-sub">${esc(formatPhone(c.wa_id))}${c.last_conversation_status === 'open' ? ' · conversa aberta' : ''}</div></div></button>`);
+    // número novo: só dígitos, 10 ou 11 (com DDD) ou 12–13 com 55
+    if (digits.length >= 10 && !rows.some((c) => c.wa_id.endsWith(digits.slice(-10)))) {
+      items.unshift(`<button type="button" class="t-item ${nc.pick && nc.pick.new ? 'sel' : ''}" data-nc-new="${digits}"><div class="avatar sm">+</div><div class="t-main"><div class="t-name">Novo número: ${esc(formatPhone(digits.startsWith('55') ? digits : '55' + digits))}</div><div class="t-sub">Cria o contato e abre a conversa</div></div></button>`);
+    }
+    list.innerHTML = items.join('') || `<div class="small muted" style="padding:14px">${q ? 'Nenhum contato com esse nome. Para um número novo, digite os dígitos com DDD.' : 'Digite para pesquisar.'}</div>`;
+  }
+  $('btn-new-conv').addEventListener('click', openNewConv);
+  $('newconv-cancel').addEventListener('click', () => { $('newconv-modal').hidden = true; });
+  $('newconv-search').addEventListener('input', () => { clearTimeout(nc.timer); nc.pick = null; $('newconv-submit').disabled = true; nc.timer = setTimeout(() => searchNewConv($('newconv-search').value.trim()), 200); });
+  $('newconv-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-nc-id], [data-nc-new]');
+    if (!b) return;
+    nc.pick = b.dataset.ncNew ? { new: true, wa_id: b.dataset.ncNew } : nc.rows.find((c) => c.id === Number(b.dataset.ncId));
+    document.querySelectorAll('#newconv-list .t-item').forEach((x) => x.classList.toggle('sel', x === b));
+    $('newconv-submit').disabled = !nc.pick;
+  });
+  $('newconv-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!nc.pick) return;
+    $('newconv-submit').disabled = true;
+    try {
+      const body = { wa_id: nc.pick.wa_id, name: nc.pick.new ? null : (nc.pick.name || null) };
+      if (!$('newconv-account-wrap').hidden) body.account_id = Number($('newconv-account').value) || null;
+      const { conversation, created } = await api('POST', '/api/conversations/start', body);
+      $('newconv-modal').hidden = true;
+      await loadConversations();
+      await openConversation(conversation.id);
+      toast(created ? 'Conversa criada — escreva a primeira mensagem' : 'Esta conversa já estava aberta');
+    } catch (err) { toast(err.message, true); $('newconv-submit').disabled = false; }
+  });
+  /** Puxa conversa com um número vindo de um contato compartilhado no chat. */
+  async function startChatWith(waId, name) {
+    try {
+      const { conversation, created } = await api('POST', '/api/conversations/start', { wa_id: waId, name: name || null });
+      await loadConversations();
+      await openConversation(conversation.id);
+      toast(created ? 'Conversa criada' : 'Conversa já aberta');
+    } catch (err) { toast(err.message, true); }
+  }
 
   // ---------- Simulador (dev) ----------
   async function setupSimulator() {

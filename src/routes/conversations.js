@@ -33,6 +33,19 @@ function parseId(value) {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+// Iniciar conversa com um número (atendente puxa o contato). body: { phone|wa_id, name?, account_id? }
+router.post('/start', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const out = await conversations.start(req.user, { waId: b.phone || b.wa_id, name: b.name, accountId: parseId(b.account_id) });
+    res.status(out.created ? 201 : 200).json(out);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    if (err instanceof require('../services/contacts').ContactError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 // GET /api/conversations?status=open|resolved|all&assigned=me|unassigned|all&tag=ID&q=texto
 router.get('/', async (req, res, next) => {
   try {

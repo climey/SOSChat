@@ -4,6 +4,21 @@
  */
 const pino = require('pino');
 const baileys = require('@whiskeysockets/baileys');
+
+/** vCard do WhatsApp → { name, phones: [{ phone, wa_id }] } (mesmo formato da API oficial). */
+function vcardToContact(c) {
+  const vcard = String(c?.vcard || '');
+  const phones = [];
+  for (const line of vcard.split(/\r?\n/)) {
+    const m = line.match(/^TEL[^:]*:(.+)$/i);
+    if (!m) continue;
+    const waid = (line.match(/waid=(\d+)/i) || [])[1] || null;
+    const phone = m[1].trim();
+    if (phone || waid) phones.push({ phone, wa_id: waid || phone.replace(/\D/g, '') || null });
+  }
+  const fn = (vcard.match(/^FN:(.+)$/im) || [])[1];
+  return { name: { formatted_name: c?.displayName || (fn ? fn.trim() : '') || 'Contato' }, phones };
+}
 const db = require('../db');
 const realtime = require('../realtime');
 
@@ -140,8 +155,8 @@ function toCloudMessage(m) {
     case 'documentMessage': return { ...base, type: 'document', document: { id: m.key.id, mime_type: c.mimetype, caption: c.caption, filename: c.fileName } };
     case 'locationMessage':
     case 'liveLocationMessage': return { ...base, type: 'location', location: { latitude: c.degreesLatitude, longitude: c.degreesLongitude, name: c.name || c.caption } };
-    case 'contactMessage': return { ...base, type: 'contacts', contacts: [{ name: { formatted_name: c.displayName } }] };
-    case 'contactsArrayMessage': return { ...base, type: 'contacts', contacts: (c.contacts || []).map((x) => ({ name: { formatted_name: x.displayName } })) };
+    case 'contactMessage': return { ...base, type: 'contacts', contacts: [vcardToContact(c)] };
+    case 'contactsArrayMessage': return { ...base, type: 'contacts', contacts: (c.contacts || []).map(vcardToContact) };
     case 'reactionMessage': return { ...base, type: 'reaction', reaction: { message_id: c.key?.id, emoji: c.text || '' } };
     case 'buttonsResponseMessage': return { ...base, type: 'interactive', interactive: { button_reply: { title: c.selectedDisplayText } } };
     case 'listResponseMessage': return { ...base, type: 'interactive', interactive: { list_reply: { title: c.title } } };
@@ -634,4 +649,5 @@ module.exports = {
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
   isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature,
+  _vcardToContact: vcardToContact,
 };

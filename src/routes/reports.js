@@ -21,13 +21,23 @@ function period(query) {
  * Filtros de conversa (número, setor, atendente) como fragmento SQL sobre o alias `c`.
  * Os valores entram em `params`; devolve o texto a anexar ao WHERE.
  */
+/** Faixa de horário (?hour_from&hour_to, 0–23, fuso de São Paulo) sobre uma coluna de data. Vira de madrugada quando de > até. */
+function hourSql(query, col) {
+  const h = (v) => (/^\d{1,2}$/.test(String(v)) && Number(v) >= 0 && Number(v) <= 23 ? Number(v) : null);
+  const a = h(query.hour_from), b = h(query.hour_to);
+  if (a === null && b === null) return '';
+  const from = a === null ? 0 : a, to = b === null ? 23 : b;
+  const hour = `EXTRACT(HOUR FROM ${col} AT TIME ZONE 'America/Sao_Paulo')`;
+  return from <= to ? ` AND ${hour} BETWEEN ${from} AND ${to}` : ` AND (${hour} >= ${from} OR ${hour} <= ${to})`;
+}
 function convFilter(query, params) {
   const parts = [];
   const account = parseId(query.account), sector = parseId(query.sector), agent = parseId(query.agent);
   if (account) { params.push(account); parts.push(`c.account_id = $${params.length}`); }
   if (sector) { params.push(sector); parts.push(`c.sector_id = $${params.length}`); }
   if (agent) { params.push(agent); parts.push(`c.assigned_user_id = $${params.length}`); }
-  return parts.length ? ' AND ' + parts.join(' AND ') : '';
+  // horário: pela hora em que a conversa começou
+  return (parts.length ? ' AND ' + parts.join(' AND ') : '') + hourSql(query, 'c.created_at');
 }
 
 /** Métricas principais de um intervalo (usado para o período atual e o anterior). */
@@ -148,7 +158,7 @@ router.get('/agents', async (req, res, next) => {
   try {
     const { from, to } = period(req.query);
     const params = [from, to];
-    const f = convFilter({ account: req.query.account, sector: req.query.sector }, params);
+    const f = convFilter({ account: req.query.account, sector: req.query.sector, hour_from: req.query.hour_from, hour_to: req.query.hour_to }, params);
     const { rows } = await db.query(
       `WITH seq AS (
          SELECT m.sender_user_id, m.direction, m.created_at,
@@ -323,6 +333,7 @@ router.get('/consultations', async (req, res, next) => {
     const params = [from, to];
     let f = '';
     if (agent) { params.push(agent); f = ` AND k.user_id = $${params.length}`; }
+    f += hourSql(req.query, 'k.created_at');
     const base = `FROM consultations k WHERE k.reversed_at IS NULL AND k.created_at BETWEEN $1 AND $2 ${f}`;
     const totals = await db.query(
       `SELECT COUNT(*)::int AS total,

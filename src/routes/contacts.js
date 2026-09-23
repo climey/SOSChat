@@ -21,6 +21,18 @@ function withId(handler) {
   };
 }
 
+// Aba Contatos: lista paginada com busca. ?q=&page=&limit=
+router.get('/', async (req, res, next) => {
+  try { res.json(await contacts.list({ q: req.query.q, page: req.query.page, limit: req.query.limit })); } catch (err) { fail(res, err, next); }
+});
+// Cadastro manual: { name, phone }
+router.post('/', async (req, res, next) => {
+  try {
+    const contact = await contacts.create(req.user, req.body || {});
+    res.status(contact.created ? 201 : 200).json({ contact });
+  } catch (err) { fail(res, err, next); }
+});
+
 // Ficha: dados, contadores e conversas anteriores (todas, inclusive finalizadas)
 router.get('/:id', withId(async (id, req, res) => {
   const contact = await contacts.getFull(id);

@@ -25,6 +25,65 @@ const CONTACT_COLS = `ct.id, ct.wa_id, ct.name, ct.profile_name, ct.avatar_media
   ct.plan_id, ct.plan_name, ct.plan_credits, ct.plan_used, ct.plan_started_at, ct.plan_expires_at,
   CASE WHEN ct.plan_credits IS NULL THEN NULL ELSE GREATEST(ct.plan_credits - ct.plan_used, 0) END AS plan_left`;
 
+/** Telefone digitado vira o id do WhatsApp (só dígitos; número brasileiro sem 55 ganha o 55). */
+function normalizeWaId(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (!d) return null;
+  if ((d.length === 10 || d.length === 11) && !d.startsWith('55')) d = '55' + d;
+  if (d.length < 10 || d.length > 15) return null;
+  return d;
+}
+
+/** Lista para a aba Contatos: busca por nome/telefone, ordem por última atividade, paginada. */
+async function list({ q = '', page = 1, limit = 50 } = {}) {
+  const params = [];
+  const where = [];
+  const term = String(q || '').trim();
+  if (term) {
+    const digits = term.replace(/\D/g, '');
+    params.push(`%${term}%`);
+    let cond = `(ct.name ILIKE $${params.length} OR ct.profile_name ILIKE $${params.length} OR ct.company ILIKE $${params.length})`;
+    if (digits.length >= 3) { params.push(`%${digits}%`); cond = `(${cond} OR ct.wa_id LIKE $${params.length} OR ct.phone2 LIKE $${params.length})`; }
+    where.push(cond);
+  }
+  const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const total = (await db.query(`SELECT COUNT(*)::int AS n FROM contacts ct ${w}`, params)).rows[0].n;
+  const lim = Math.min(200, Math.max(1, Number(limit) || 50));
+  const off = (Math.max(1, Number(page) || 1) - 1) * lim;
+  const { rows } = await db.query(
+    `SELECT ct.id, ct.wa_id, ct.name, ct.profile_name, ct.company, ct.avatar_media_id, ct.blocked, ct.created_at, ct.last_seen_at,
+            ct.plan_name, ct.credits_bought, ct.purchases_count,
+            lc.id AS last_conversation_id, lc.status AS last_conversation_status, lc.last_message_at, lc.assigned_user_id, u.name AS assigned_user_name,
+            (SELECT COUNT(*)::int FROM conversations c2 WHERE c2.contact_id = ct.id) AS conversations_count,
+            (SELECT COALESCE(json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color) ORDER BY t.name), '[]'::json)
+               FROM conversation_tags cx JOIN tags t ON t.id = cx.tag_id WHERE cx.conversation_id = lc.id) AS tags
+       FROM contacts ct
+       LEFT JOIN LATERAL (SELECT c.id, c.status, c.last_message_at, c.assigned_user_id FROM conversations c WHERE c.contact_id = ct.id ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC LIMIT 1) lc ON TRUE
+       LEFT JOIN users u ON u.id = lc.assigned_user_id
+       ${w}
+      ORDER BY COALESCE(lc.last_message_at, ct.last_seen_at, ct.created_at) DESC, ct.id DESC
+      LIMIT ${lim} OFFSET ${off}`,
+    params
+  );
+  return { contacts: rows, total, page: Math.max(1, Number(page) || 1), limit: lim };
+}
+
+/** Cadastro manual (nome + telefone). Se o número já existir, devolve o contato existente (e completa o nome se estava vazio). */
+async function create(user, body = {}) {
+  const waId = normalizeWaId(body.phone || body.wa_id);
+  if (!waId) throw new ContactError(400, 'Informe um telefone válido com DDD (ex.: 42 99107-5148)');
+  const name = String(body.name || '').replace(/\s+/g, ' ').trim().slice(0, 120) || null;
+  const { rows } = await db.query(
+    `INSERT INTO contacts (wa_id, name) VALUES ($1, $2)
+     ON CONFLICT (wa_id) DO UPDATE SET name = COALESCE(contacts.name, EXCLUDED.name)
+     RETURNING *, (xmax = 0) AS created`,
+    [waId, name]
+  );
+  const contact = rows[0];
+  if (contact.created) await logEvent(contact.id, user.id, 'field', `Contato cadastrado por ${user.name}`);
+  return contact;
+}
+
 async function get(id, client = db) {
   const { rows } = await client.query(`SELECT ${CONTACT_COLS} FROM contacts ct WHERE ct.id = $1`, [id]);
   return rows[0] || null;
@@ -440,7 +499,7 @@ async function deletePurchase(id, purchaseId, user) {
   return broadcast(id);
 }
 
-module.exports = {
+module.exports = { list, create, normalizeWaId,
   listPurchases, addManualPurchase, updatePurchase, deletePurchase,
   ContactError, DEFAULT_KINDS, CONTACT_COLS, get, getFull, update, setBlocked, remove, logEvent,
   setPlan, renewPlan, removePlan, adjustPlan, registerConsultation, reverseConsultation,
