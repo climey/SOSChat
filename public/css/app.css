@@ -395,10 +395,12 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .lb-actions { display: flex; gap: 4px; }
 .lb-actions .icon-btn { color: var(--text-2); }
 .lb-actions .icon-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
-.lb-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 8px 80px; }
-.lb-stage img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform 0.15s; cursor: zoom-in; user-select: none; }
-.lb-stage img.zoomed { max-width: none; max-height: none; cursor: grab; }
-.lb-stage img.sideways { transition: transform 0.2s, max-width 0.2s, max-height 0.2s; }
+.lb-stage { flex: 1; min-height: 0; display: flex; overflow: auto; padding: 8px 80px; }
+.lb-stage > video, .lb-stage > .lb-pdf { margin: auto; }
+.lb-zoom { position: relative; display: flex; align-items: center; justify-content: center; margin: auto; flex-shrink: 0; }
+.lb-zoom img { display: block; max-width: none; max-height: none; transition: transform 0.2s; cursor: zoom-in; user-select: none; -webkit-user-drag: none; }
+.lb-zoom img.zoomed { cursor: grab; }
+.lb-actions .icon-btn[disabled] { opacity: 0.35; cursor: default; }
 .lb-stage video { max-width: 100%; max-height: 100%; outline: none; }
 .lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,0.08); color: #fff; display: flex; align-items: center; justify-content: center; }
 .lb-nav:hover { background: rgba(255,255,255,0.18); }

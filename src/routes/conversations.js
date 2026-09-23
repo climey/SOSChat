@@ -223,8 +223,9 @@ router.post('/:id/audio', (req, res, next) => {
 
     const conv = await conversations.getById(id);
     if (!conv) return res.status(404).json({ error: 'Conversa não encontrada' });
-    const accountId = await resolveAccount(conv);
-    if (whatsapp.multiAccount && !accountId) return res.status(502).json({ error: 'Nenhum número de WhatsApp conectado.' });
+    const isNote = ['1', 'true'].includes(String(req.body?.note || ''));
+    const accountId = isNote ? null : await resolveAccount(conv);
+    if (!isNote && whatsapp.multiAccount && !accountId) return res.status(502).json({ error: 'Nenhum número de WhatsApp conectado.' });
 
     const ext = (file.mimetype || '').includes('mp4') || (file.mimetype || '').includes('aac') ? 'mp4' : (file.mimetype || '').includes('ogg') ? 'ogg' : 'webm';
     let voice;
@@ -232,6 +233,22 @@ router.post('/:id/audio', (req, res, next) => {
       voice = await audio.toVoiceNote(file.buffer, ext);
     } catch (err) {
       return res.status(500).json({ error: `Falha ao converter o áudio: ${err.message.slice(0, 200)}` });
+    }
+    if (isNote) {
+      // áudio gravado como nota interna: fica só na equipe
+      const ins = await db.query(
+        `INSERT INTO messages (conversation_id, direction, type, body, media_mime, status, sender_user_id)
+         VALUES ($1, 'out', 'note', '[Áudio]', $2, 'sent', $3) RETURNING *`,
+        [id, voice.mimetype, req.user.id]
+      );
+      const noteMediaId = `out-${ins.rows[0].id}`;
+      await db.query(`INSERT INTO media_files (id, mime, size, data) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`, [noteMediaId, voice.mimetype, voice.buffer.length, voice.buffer]);
+      const note = (await db.query('UPDATE messages SET media_id = $2 WHERE id = $1 RETURNING *', [ins.rows[0].id, noteMediaId])).rows[0];
+      note.sender_name = req.user.name;
+      note.sender_avatar = req.user.avatar_media_id || null;
+      note.media_size = voice.buffer.length;
+      realtime.broadcast('message:new', { message: note, conversation: conv });
+      return res.status(201).json({ message: note, conversation: conv });
     }
     const quoted = await outbound.loadQuoted(id, parseId(req.body?.quoted_message_id));
 

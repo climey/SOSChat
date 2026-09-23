@@ -1257,15 +1257,19 @@
     const blob = new Blob(rec.chunks, { type });
     const fd = new FormData();
     fd.append('file', blob, `voz.${type.includes('mp4') ? 'mp4' : type.includes('ogg') ? 'ogg' : 'webm'}`);
-    if (state.reply) fd.append('quoted_message_id', state.reply.id);
+    // no modo nota o áudio vira nota interna (não vai ao cliente)
+    if (state.composeMode === 'note') fd.append('note', '1');
+    else if (state.reply) fd.append('quoted_message_id', state.reply.id);
     $('btn-mic').disabled = true;
     try {
       await SOS.upload(`/api/conversations/${state.currentId}/audio`, fd);
-      clearReply();
+      if (state.composeMode !== 'note') clearReply(); else toast('Áudio salvo como nota interna');
     } catch (err) { toast(err.message, true); }
     finally { $('btn-mic').disabled = false; }
   }
   $('btn-mic').addEventListener('click', () => { if (rec.recorder && rec.recorder.state === 'recording') stopRecording(false); else startRecording(); });
+  // dica muda com o modo: no modo nota o áudio fica só na equipe
+  els.composeMode.addEventListener('click', () => { $('btn-mic').title = state.composeMode === 'note' ? 'Gravar áudio como nota interna (o cliente não recebe)' : 'Gravar mensagem de voz'; });
   $('rec-cancel').addEventListener('click', () => stopRecording(true));
   $('rec-send').addEventListener('click', () => stopRecording(false));
 
@@ -1857,7 +1861,7 @@
       ? `<video controls autoplay src="${src}"></video>`
       : isDoc
         ? `<iframe class="lb-pdf" src="${src}#view=FitH" title="${esc(m.body || 'PDF')}"></iframe>`
-        : `<img src="${src}" alt="" id="lb-img">`;
+        : `<div class="lb-zoom" id="lb-zoom"><img src="${src}" alt="" id="lb-img"></div>`;
     const who = m.direction === 'in' ? (c ? contactName(c) : 'Cliente') : (m.sender_name || 'Você');
     $('lb-name').textContent = who;
     $('lb-date').textContent = new Date(m.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', ' às');
@@ -1877,6 +1881,8 @@
     $('lb-rotate-right').hidden = isVideo || isDoc;
     $('lb-flip').hidden = isVideo || isDoc;
     applyImageTransform(); // zera giro/espelho/zoom da imagem anterior
+    const im = $('lb-img');
+    if (im) im.addEventListener('load', () => applyImageTransform(), { once: true });
     $('lb-open').hidden = !isDoc;
     $('lb-open').href = src;
     document.querySelectorAll('.lb-thumb').forEach((t) => t.classList.toggle('current', Number(t.dataset.id) === m.id));
@@ -1893,9 +1899,29 @@
     lb.idx = n;
     showLightbox();
   }
-  function setZoom(z) {
-    lb.zoom = Math.min(4, Math.max(1, z));
+  const ZOOM_MAX = 6;
+  /** Muda o zoom mantendo fixo o ponto (cx, cy, em coordenadas da tela) — sem ponto, o centro do palco. */
+  function setZoom(z, cx = null, cy = null) {
+    const stage = $('lb-stage');
+    const old = lb.zoom;
+    lb.zoom = Math.min(ZOOM_MAX, Math.max(1, Math.round(z * 100) / 100));
+    if (lb.zoom === old) return;
+    const rect = stage.getBoundingClientRect();
+    const px = cx === null ? rect.width / 2 : cx - rect.left;
+    const py = cy === null ? rect.height / 2 : cy - rect.top;
+    // ponto da imagem sob o cursor, em coordenadas do conteúdo, antes e depois
+    const before = { x: stage.scrollLeft + px, y: stage.scrollTop + py };
+    const wrap = $('lb-zoom');
+    const offX = wrap ? wrap.offsetLeft : 0;
+    const offY = wrap ? wrap.offsetTop : 0;
     applyImageTransform();
+    if (wrap) {
+      const ratio = lb.zoom / old;
+      const nx = wrap.offsetLeft + (before.x - offX) * ratio;
+      const ny = wrap.offsetTop + (before.y - offY) * ratio;
+      stage.scrollLeft = nx - px;
+      stage.scrollTop = ny - py;
+    }
   }
   /** Gira em passos de 90° (foto de chassi/motor costuma vir de lado). */
   function rotateImage(dir) {
@@ -1907,26 +1933,63 @@
     applyImageTransform();
   }
   /** Zoom, giro e espelho no mesmo transform; deitada (90/270), a imagem passa a caber pela altura do palco. */
+  /**
+   * A imagem ganha tamanho real (largura/altura em px) em vez de scale(): assim o palco rola até as
+   * bordas e o zoom pode ser centrado no ponto do mouse. Girada de lado, a "caixa" externa troca
+   * largura por altura para a rolagem bater com o que se vê.
+   */
   function applyImageTransform() {
     const img = $('lb-img');
-    if (!img) return;
+    const wrap = $('lb-zoom');
+    if (!img || !wrap) return;
     const stage = $('lb-stage');
     const sideways = lb.rot === 90 || lb.rot === 270;
+    const nw = img.naturalWidth || 0;
+    const nh = img.naturalHeight || 0;
+    if (nw && nh) {
+      const availW = Math.max(100, stage.clientWidth - 160);
+      const availH = Math.max(100, stage.clientHeight - 16);
+      const fit = Math.min(1, availW / (sideways ? nh : nw), availH / (sideways ? nw : nh)); // não amplia imagem pequena
+      const w = Math.round(nw * fit * lb.zoom);
+      const h = Math.round(nh * fit * lb.zoom);
+      img.style.width = `${w}px`;
+      img.style.height = `${h}px`;
+      wrap.style.width = `${sideways ? h : w}px`;
+      wrap.style.height = `${sideways ? w : h}px`;
+    }
     img.classList.toggle('zoomed', lb.zoom > 1);
-    img.classList.toggle('sideways', sideways);
-    if (sideways && lb.zoom <= 1) {
-      img.style.maxWidth = `${stage.clientHeight - 16}px`;
-      img.style.maxHeight = `${stage.clientWidth - 160}px`;
-    } else { img.style.maxWidth = ''; img.style.maxHeight = ''; }
     const parts = [];
-    if (lb.zoom > 1) parts.push(`scale(${lb.zoom})`);
     if (lb.rot) parts.push(`rotate(${lb.rot}deg)`);
     if (lb.flip) parts.push('scaleX(-1)');
     img.style.transform = parts.join(' ');
-    img.style.transformOrigin = 'center';
     img.dataset.rot = lb.rot;
     img.dataset.flip = lb.flip ? '1' : '0';
+    img.dataset.zoom = String(lb.zoom);
+    $('lb-zoom-out').disabled = lb.zoom <= 1;
+    $('lb-zoom-in').disabled = lb.zoom >= ZOOM_MAX;
   }
+  // arrastar para mover quando ampliada; Ctrl + roda do mouse dá zoom no ponto do cursor
+  const drag = { on: false, x: 0, y: 0, sl: 0, st: 0, moved: false };
+  $('lb-stage').addEventListener('mousedown', (e) => {
+    if (e.target.id !== 'lb-img' || lb.zoom <= 1 || e.button !== 0) return;
+    const stage = $('lb-stage');
+    Object.assign(drag, { on: true, x: e.clientX, y: e.clientY, sl: stage.scrollLeft, st: stage.scrollTop, moved: false });
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!drag.on) return;
+    const stage = $('lb-stage');
+    if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) drag.moved = true;
+    stage.scrollLeft = drag.sl - (e.clientX - drag.x);
+    stage.scrollTop = drag.st - (e.clientY - drag.y);
+  });
+  window.addEventListener('mouseup', () => { drag.on = false; });
+  $('lb-stage').addEventListener('wheel', (e) => {
+    if (!$('lb-img') || !e.ctrlKey) return;
+    e.preventDefault();
+    setZoom(lb.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
+  }, { passive: false });
+  window.addEventListener('resize', () => { if (!$('lightbox').hidden) applyImageTransform(); });
   els.messages.addEventListener('click', (e) => {
     const t = e.target.closest('[data-lb]');
     if (t) { e.preventDefault(); openLightbox(Number(t.dataset.lb)); }
@@ -1934,8 +1997,8 @@
   $('lb-close').addEventListener('click', closeLightbox);
   $('lb-prev').addEventListener('click', () => stepLightbox(-1));
   $('lb-next').addEventListener('click', () => stepLightbox(1));
-  $('lb-zoom-in').addEventListener('click', () => setZoom(lb.zoom + 0.5));
-  $('lb-zoom-out').addEventListener('click', () => setZoom(lb.zoom - 0.5));
+  $('lb-zoom-in').addEventListener('click', () => setZoom(lb.zoom * 1.25));
+  $('lb-zoom-out').addEventListener('click', () => setZoom(lb.zoom / 1.25));
   $('lb-rotate-left').addEventListener('click', () => rotateImage(-1));
   $('lb-rotate-right').addEventListener('click', () => rotateImage(1));
   $('lb-flip').addEventListener('click', flipImage);
@@ -1946,16 +2009,18 @@
     showLightbox();
   });
   $('lb-stage').addEventListener('click', (e) => {
-    if (e.target.id === 'lb-img') setZoom(lb.zoom > 1 ? 1 : 2);
-    else if (e.target === $('lb-stage')) closeLightbox();
+    if (drag.moved) { drag.moved = false; return; } // soltou depois de arrastar: não é clique
+    if (e.target.id === 'lb-img') setZoom(lb.zoom > 1 ? 1 : 2, e.clientX, e.clientY); // clique amplia 2× onde clicou; outro clique volta
+    else if (e.target === $('lb-stage') || e.target.id === 'lb-zoom') closeLightbox();
   });
   document.addEventListener('keydown', (e) => {
     if ($('lightbox').hidden) return;
     if (e.key === 'Escape') closeLightbox();
     else if (e.key === 'ArrowLeft') stepLightbox(-1);
     else if (e.key === 'ArrowRight') stepLightbox(1);
-    else if (e.key === '+' || e.key === '=') setZoom(lb.zoom + 0.5);
-    else if (e.key === '-') setZoom(lb.zoom - 0.5);
+    else if (e.key === '+' || e.key === '=') setZoom(lb.zoom * 1.25);
+    else if (e.key === '-') setZoom(lb.zoom / 1.25);
+    else if (e.key === '0') setZoom(1);
     else if (e.key === 'r' || e.key === 'R') rotateImage(e.shiftKey ? -1 : 1);
     else if (e.key === 'f' || e.key === 'F') flipImage();
   });
