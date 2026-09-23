@@ -3,8 +3,8 @@
  * a imagem vai para o Claude (visão), que devolve o que leu de forma estruturada. O resultado entra
  * no mesmo fluxo de quem digitou o dado (conferência, cartão do veículo, confirmação ao cliente).
  *
- * Modo (app_settings.image_read_mode): auto = lê toda foto recebida; manual = só quando o atendente
- * pede; off = desligado. Precisa de ANTHROPIC_API_KEY. Uma leitura por foto, guardada em image_readings.
+ * A leitura é sempre manual: só quando o atendente clica em "Ler imagem" (cada leitura custa centavos).
+ * Precisa de ANTHROPIC_API_KEY. O resultado fica guardado em image_readings; reler cobra de novo.
  */
 const db = require('../db');
 const realtime = require('../realtime');
@@ -75,11 +75,7 @@ function parseItems(text) {
   return out.slice(0, 4);
 }
 
-async function mode() {
-  const { rows } = await db.query(`SELECT value FROM app_settings WHERE key = 'image_read_mode'`);
-  const v = rows.length ? rows[0].value : 'auto';
-  return ['auto', 'manual', 'off'].includes(v) ? v : 'auto';
-}
+async function mode() { return 'manual'; }
 function configured() { return Boolean(process.env.ANTHROPIC_API_KEY); }
 
 async function get(messageId) {
@@ -152,15 +148,4 @@ async function read(messageId, { force = false, requestedBy = null } = {}) {
   }
 }
 
-/** Modo automático: foto recebida do cliente é lida na hora. Erros nunca derrubam o fluxo da mensagem. */
-async function maybeAutoRead(message) {
-  try {
-    if (!message || message.direction !== 'in' || message.type !== 'image' || !message.media_id) return;
-    if (!configured() || (await mode()) !== 'auto') return;
-    await read(message.id);
-  } catch (err) {
-    console.warn('[leitura-foto] falha no modo automático:', err.message);
-  }
-}
-
-module.exports = { read, get, listForConversation, maybeAutoRead, mode, configured, parseItems, ReadError, _setVision, analyze: (buf, mime) => vision(buf, mime), MODEL };
+module.exports = { read, get, listForConversation, mode, configured, parseItems, ReadError, _setVision, analyze: (buf, mime) => vision(buf, mime), MODEL };

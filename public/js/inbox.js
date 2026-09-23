@@ -2371,7 +2371,7 @@
   /** Última mensagem do cliente que contém algo consultável (chassi, placa...), já validado. */
   function latestReferences() {
     if (!window.RefCheck) return null;
-    const imgMode = state.settings.image_read_mode || 'auto';
+    const imgMode = 'manual'; // leitura só quando o atendente pede
     if (state.refFocus) {
       const m = state.messages.find((x) => x.id === state.refFocus && x.type === 'image' && !x.deleted_at);
       const rd = m && state.readings.get(m.id);
@@ -2416,6 +2416,8 @@
   }
   async function readImage(messageId) {
     const c = current();
+    const prev = state.readings.get(messageId);
+    if (prev && prev.status === 'done' && !confirm('Esta foto já foi lida. Ler de novo custa uma nova leitura. Continuar?')) return;
     state.readings.set(messageId, { message_id: messageId, status: 'pending', items: [] });
     state.refFocus = messageId; // foto lida à mão fica em destaque no aviso até ser fechado
     if (c) refDismissed.delete(c.id);
