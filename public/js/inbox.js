@@ -424,6 +424,7 @@
       api('GET', `/api/readings?conversation=${id}`).catch(() => ({ readings: [] })),
     ]);
     state.readings = new Map((readings.readings || []).map((r) => [r.message_id, r]));
+    state.refFocus = null;
     rememberPrefs(conversation);
     state.currentConv = conversation;
     state.messages = messages;
@@ -486,6 +487,17 @@
 
   const isPlaceholder = (body) => /^\[[^\]]*\]$/.test(body || '');
 
+  const READ_LABEL = { chassi: 'Chassi', placa: 'Placa', motor: 'Motor', renavam: 'Renavam' };
+  /** Barra sob a foto recebida: botão "Ler imagem" e o que já foi lido (chassi, placa, motor). */
+  function readBarHtml(m) {
+    if (m.direction !== 'in' || m.type !== 'image' || m.deleted_at) return '';
+    const rd = state.readings.get(m.id);
+    if (rd && rd.status === 'pending') return '<div class="read-bar"><span class="muted">📷 Lendo a numeração…</span></div>';
+    const items = rd && rd.status === 'done' ? (rd.items || []) : [];
+    const chips = items.map((it) => `<button type="button" class="chip read-chip" data-ref-copy="${esc(it.value)}" title="Copiar · confiança ${esc(it.confidence || 'média')}">${esc(READ_LABEL[it.kind] || it.kind)} ${esc(it.value)}</button>`).join('');
+    const label = rd && rd.status === 'done' ? (items.length ? 'Ler de novo' : 'Nada lido · tentar de novo') : rd && rd.status === 'error' ? 'Tentar ler de novo' : 'Ler imagem';
+    return `<div class="read-bar">${chips}<button type="button" class="btn btn-xs ${rd && rd.status === 'done' ? 'btn-ghost' : ''}" data-read-image="${m.id}" title="Lê placa, chassi ou motor na foto e mostra na conferência">📷 ${label}</button></div>`;
+  }
   /** Tipo de mídia para desenhar: mensagens normais têm o tipo; nota interna com arquivo usa o mime. */
   function mediaType(m) {
     if (m.type !== 'note') return m.type;
@@ -497,7 +509,7 @@
     const src = `/api/media/${esc(m.media_id)}`;
     const t = mediaType(m);
     if (t === 'image' || t === 'sticker') {
-      return `<img class="media-img" src="${src}" alt="" loading="lazy" data-lb="${m.id}">`;
+      return `<img class="media-img" src="${src}" alt="" loading="lazy" data-lb="${m.id}">${readBarHtml(m)}`;
     }
     if (t === 'audio') return audioPlayerHtml(m, src);
     if (t === 'video') {
@@ -1880,6 +1892,8 @@
     $('lb-rotate-left').hidden = isVideo || isDoc;
     $('lb-rotate-right').hidden = isVideo || isDoc;
     $('lb-flip').hidden = isVideo || isDoc;
+    $('lb-read').hidden = isVideo || isDoc || m.direction !== 'in';
+    $('lb-read').dataset.readImage = m.id;
     applyImageTransform(); // zera giro/espelho/zoom da imagem anterior
     const im = $('lb-img');
     if (im) im.addEventListener('load', () => applyImageTransform(), { once: true });
@@ -1991,10 +2005,15 @@
   }, { passive: false });
   window.addEventListener('resize', () => { if (!$('lightbox').hidden) applyImageTransform(); });
   els.messages.addEventListener('click', (e) => {
+    const rb = e.target.closest('[data-read-image]');
+    if (rb) { readImage(Number(rb.dataset.readImage)); return; }
+    const cp = e.target.closest('.read-chip[data-ref-copy]');
+    if (cp) { copyText(cp.dataset.refCopy); return; }
     const t = e.target.closest('[data-lb]');
     if (t) { e.preventDefault(); openLightbox(Number(t.dataset.lb)); }
   });
   $('lb-close').addEventListener('click', closeLightbox);
+  $('lb-read').addEventListener('click', () => { const id = Number($('lb-read').dataset.readImage); closeLightbox(); readImage(id); });
   $('lb-prev').addEventListener('click', () => stepLightbox(-1));
   $('lb-next').addEventListener('click', () => stepLightbox(1));
   $('lb-zoom-in').addEventListener('click', () => setZoom(lb.zoom * 1.25));
@@ -2353,6 +2372,17 @@
   function latestReferences() {
     if (!window.RefCheck) return null;
     const imgMode = state.settings.image_read_mode || 'auto';
+    if (state.refFocus) {
+      const m = state.messages.find((x) => x.id === state.refFocus && x.type === 'image' && !x.deleted_at);
+      const rd = m && state.readings.get(m.id);
+      if (m && rd) {
+        if (rd.status === 'pending') return { message: m, image: 'pending', list: [] };
+        if (rd.status === 'error') return { message: m, image: 'error', error: rd.error, list: [] };
+        const list = readingRefs(rd);
+        return list.length ? { message: m, image: 'done', list: list.slice(0, 3) } : { message: m, image: 'empty', list: [] };
+      }
+      state.refFocus = null;
+    }
     const inbound = state.messages.filter((m) => m.direction === 'in' && !m.deleted_at && ((m.type === 'text' && m.body) || (m.type === 'image' && m.media_id && imgMode !== 'off')) && m.id > (refDismissed.get(m.conversation_id) || 0)).slice(-8).reverse();
     for (const m of inbound) {
       if (m.type === 'image') {
@@ -2387,6 +2417,9 @@
   async function readImage(messageId) {
     const c = current();
     state.readings.set(messageId, { message_id: messageId, status: 'pending', items: [] });
+    state.refFocus = messageId; // foto lida à mão fica em destaque no aviso até ser fechado
+    if (c) refDismissed.delete(c.id);
+    renderMessages(false);
     renderRefHint();
     try {
       const { reading } = await api('POST', `/api/readings/${messageId}`);
@@ -2395,7 +2428,7 @@
       state.readings.set(messageId, { message_id: messageId, status: 'error', items: [], error: err.message });
       toast(err.message, true);
     }
-    if (current() === c) renderRefHint();
+    if (current() === c) { renderMessages(false); renderRefHint(); }
   }
   function renderRefHint() {
     const c = current();
@@ -2410,7 +2443,9 @@
         ? `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Lendo a numeração da foto…</span></div>`
         : found.image === 'error'
           ? `<div class="ref-row"><span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text">${esc(found.error || 'Não consegui ler a foto')}</span><button type="button" class="btn btn-sm" data-read-image="${mid}">Tentar de novo</button></div>`
-          : `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Foto recebida do cliente</span><button type="button" class="btn btn-sm btn-primary" data-read-image="${mid}" title="Lê placa, chassi ou motor na foto">Ler numeração</button></div>`)
+          : found.image === 'empty'
+            ? `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Não encontrei placa, chassi nem motor nesta foto</span><button type="button" class="btn btn-sm" data-read-image="${mid}">Ler de novo</button></div>`
+            : `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Foto recebida do cliente</span><button type="button" class="btn btn-sm btn-primary" data-read-image="${mid}" title="Lê placa, chassi ou motor na foto">Ler numeração</button></div>`)
         + '<button type="button" class="icon-btn ref-close" id="ref-close" title="Fechar aviso">✕</button>';
       box.hidden = false;
       return;
@@ -2456,7 +2491,7 @@
     const found = latestReferences();
     if (!found) return;
     const close = e.target.closest('#ref-close');
-    if (close) { refDismissed.set(found.message.conversation_id, found.message.id); renderRefHint(); return; }
+    if (close) { state.refFocus = null; refDismissed.set(found.message.conversation_id, found.message.id); renderRefHint(); return; }
     const readBtn = e.target.closest('[data-read-image]');
     if (readBtn) { readImage(Number(readBtn.dataset.readImage)); return; }
     const copy = e.target.closest('[data-ref-copy]');

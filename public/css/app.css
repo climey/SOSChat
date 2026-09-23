@@ -960,6 +960,11 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .veh-title { font-weight: 700; }
 .veh-meta { font-size: 12px; color: var(--text-2); }
 .veh-sent { font-size: 11px; color: var(--green); margin-top: 2px; }
+.read-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.read-bar .btn-xs { padding: 3px 9px; font-size: 12px; }
+.read-chip { font-family: ui-monospace, Consolas, monospace; font-size: 11px; padding: 2px 8px; letter-spacing: 0.3px; border-color: var(--green); color: var(--text); }
+.lb-read { width: auto; padding: 0 10px; gap: 6px; font-size: 13px; }
+.lb-read span { white-space: nowrap; }
 .ref-photo { display: inline-block; margin-right: 4px; padding: 1px 7px; border-radius: 999px; font-size: 11px; background: rgba(255,255,255,0.08); color: var(--text-2); }
 .veh-alts { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: 4px; }
 .veh-head { font-size: 12px; color: var(--text-2); }
