@@ -2377,7 +2377,7 @@
       const rd = m && state.readings.get(m.id);
       if (m && rd) {
         if (rd.status === 'pending') return { message: m, image: 'pending', list: [] };
-        if (rd.status === 'error') return { message: m, image: 'error', error: rd.error, list: [] };
+        if (rd.status === 'error') return { message: m, image: 'error', error: rd.error, detail: rd.detail, list: [] };
         const list = readingRefs(rd);
         return list.length ? { message: m, image: 'done', list: list.slice(0, 3) } : { message: m, image: 'empty', list: [] };
       }
@@ -2389,7 +2389,7 @@
         const rd = state.readings.get(m.id);
         if (!rd) { if (imgMode === 'manual') return { message: m, image: 'unread', list: [] }; continue; }
         if (rd.status === 'pending') return { message: m, image: 'pending', list: [] };
-        if (rd.status === 'error') return { message: m, image: 'error', error: rd.error, list: [] };
+        if (rd.status === 'error') return { message: m, image: 'error', error: rd.error, detail: rd.detail, list: [] };
         const list = readingRefs(rd);
         if (list.length) return { message: m, image: 'done', list: list.slice(0, 3) };
         continue; // foto sem numeração: olha a mensagem anterior
@@ -2430,6 +2430,9 @@
       state.readings.set(messageId, { message_id: messageId, status: 'error', items: [], error: err.message });
       toast(err.message, true);
     }
+    const done = state.readings.get(messageId);
+    if (done && done.status === 'error' && done.error) { toast(done.error + (done.detail ? ` (${done.detail})` : ''), true);
+    }
     if (current() === c) { renderMessages(false); renderRefHint(); }
   }
   function renderRefHint() {
@@ -2444,7 +2447,7 @@
       box.innerHTML = (found.image === 'pending'
         ? `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Lendo a numeração da foto…</span></div>`
         : found.image === 'error'
-          ? `<div class="ref-row"><span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text">${esc(found.error || 'Não consegui ler a foto')}</span><button type="button" class="btn btn-sm" data-read-image="${mid}">Tentar de novo</button></div>`
+          ? `<div class="ref-row"><span class="ref-ic bad">${WARN_ICON}</span><span class="ref-text">${esc(found.error || 'Não consegui ler a foto')}${found.detail ? ` <span class="muted small" title="Erro técnico (só administradores veem)">· ${esc(found.detail)}</span>` : ''}</span><button type="button" class="btn btn-sm" data-read-image="${mid}">Tentar de novo</button></div>`
           : found.image === 'empty'
             ? `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Não encontrei placa, chassi nem motor nesta foto</span><button type="button" class="btn btn-sm" data-read-image="${mid}">Ler de novo</button></div>`
             : `<div class="ref-row"><span class="ref-ic ok">📷</span><span class="ref-text">Foto recebida do cliente</span><button type="button" class="btn btn-sm btn-primary" data-read-image="${mid}" title="Lê placa, chassi ou motor na foto">Ler numeração</button></div>`)

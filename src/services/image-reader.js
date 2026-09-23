@@ -143,9 +143,23 @@ async function read(messageId, { force = false, requestedBy = null } = {}) {
     return save(messageId, m.conversation_id, { status: 'done', items, model, usage, requested_by: requestedBy });
   } catch (err) {
     const detail = String(err.message || err).slice(0, 300);
-    console.warn(`[leitura-foto] mensagem ${messageId} falhou: ${detail}`);
-    return save(messageId, m.conversation_id, { status: 'error', error: 'Não consegui ler a foto agora', requested_by: requestedBy, model: MODEL, usage: { error: detail } });
+    console.warn(`[leitura-foto] mensagem ${messageId} falhou (${err.status || 'sem status'}): ${detail}`);
+    return save(messageId, m.conversation_id, { status: 'error', error: explainError(err), requested_by: requestedBy, model: MODEL, usage: { error: detail, status: err.status || null } });
   }
+}
+
+/** Motivo em linguagem simples para o atendente/admin, a partir do erro da API. */
+function explainError(err) {
+  const st = Number(err && err.status);
+  const msg = String((err && err.message) || '');
+  if (st === 401 || /invalid x-api-key|authentication/i.test(msg)) return 'Chave da API de leitura inválida ou vencida. Um administrador precisa atualizar ANTHROPIC_API_KEY no servidor.';
+  if (st === 403 || /permission/i.test(msg)) return 'A chave da API de leitura não tem permissão para este uso.';
+  if (/credit|billing|balance/i.test(msg)) return 'A conta da API de leitura está sem créditos. Adicione créditos no console da Anthropic.';
+  if (st === 429 || /rate limit/i.test(msg)) return 'Limite de uso da leitura atingido por agora. Tente de novo em instantes.';
+  if (st === 404 || /model/i.test(msg) && /not found|not exist/i.test(msg)) return 'Modelo de leitura indisponível (VISION_MODEL). Avise um administrador.';
+  if (st === 413 || /too large|exceeds/i.test(msg)) return 'Foto grande demais para a leitura.';
+  if (st >= 500 || /overloaded|timeout|ECONN|fetch failed/i.test(msg)) return 'Serviço de leitura instável agora. Tente de novo em instantes.';
+  return 'Não consegui ler a foto agora';
 }
 
 module.exports = { read, get, listForConversation, mode, configured, parseItems, ReadError, _setVision, analyze: (buf, mime) => vision(buf, mime), MODEL };
