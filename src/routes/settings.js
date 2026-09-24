@@ -27,6 +27,11 @@ const KEYS = {
   sla_alert_minutes: (v) => (Number.isInteger(v) && v >= 1 && v <= 1440 ? v : null),
   consultation_kinds: normalizeKinds,
   vehicle_lookup_mode: (v) => (['off', 'suggest', 'auto'].includes(v) ? v : null),
+  distribution_enabled: (v) => (typeof v === 'boolean' ? (v ? '1' : '0') : (['0', '1'].includes(v) ? v : null)),
+  distribution_waiting_limit: (v) => (Number.isInteger(v) && v >= 0 && v <= 100 ? String(v) : null),
+  distribution_affinity: (v) => (typeof v === 'boolean' ? (v ? '1' : '0') : (['0', '1'].includes(v) ? v : null)),
+  distribution_handoff: (v) => (typeof v === 'boolean' ? (v ? '1' : '0') : (['0', '1'].includes(v) ? v : null)),
+  distribution_offline_grace_seconds: (v) => (Number.isInteger(v) && v >= 10 && v <= 3600 ? String(v) : null),
   vehicle_preview_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   vehicle_fix_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   recurrence_occasional_credits: (v) => (Number.isInteger(v) && v >= 1 && v <= 1000 ? v : null),
@@ -53,6 +58,13 @@ async function getAll() {
   out.vehicle_preview_template_default = require('../services/vehicle-lookup').DEFAULT_TEMPLATE;
   out.vehicle_fix_template_default = require('../services/vehicle-lookup').DEFAULT_FIX_TEMPLATE;
   out.image_read_mode = 'manual'; // leitura de fotos é sempre manual (só quando o atendente clica)
+  const D = require('../services/distribution').DEFAULTS;
+  const on = (v, dflt) => (v === undefined || v === null ? dflt : (v === true || Number(v) === 1));
+  out.distribution_enabled = on(out.distribution_enabled, false);
+  out.distribution_waiting_limit = Number(out.distribution_waiting_limit ?? D.waitingLimit);
+  out.distribution_affinity = on(out.distribution_affinity, true);
+  out.distribution_handoff = on(out.distribution_handoff, true);
+  out.distribution_offline_grace_seconds = Number(out.distribution_offline_grace_seconds ?? D.offlineGraceSeconds);
   out.image_read_available = require('../services/image-reader').configured();
   return out;
 }
@@ -62,6 +74,11 @@ async function consultationKinds(client = db) {
   const { rows } = await client.query(`SELECT value FROM app_settings WHERE key = 'consultation_kinds'`);
   return rows.length ? parseValue('consultation_kinds', rows[0].value) : DEFAULT_KINDS;
 }
+
+/** Situação da distribuição: ligada?, fila, quem está elegível agora. */
+router.get('/distribution', async (req, res, next) => {
+  try { res.json(await require('../services/distribution').status()); } catch (err) { next(err); }
+});
 
 router.get('/', async (req, res, next) => {
   try { res.json({ settings: await getAll() }); } catch (err) { next(err); }
@@ -84,6 +101,7 @@ router.put('/', requireAdmin, async (req, res, next) => {
       );
     }
     require('../services/recurrence').invalidate();
+    require('../services/distribution').invalidate();
     const settings = await getAll();
     realtime.broadcast('settings:updated', settings);
     res.json({ settings });

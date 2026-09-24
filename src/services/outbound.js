@@ -20,6 +20,7 @@ async function touchAfterSend(id, preview, userId) {
       WHERE id = $1`,
     [id, String(preview).slice(0, 120), userId]
   );
+  require('./distribution').scheduleDrain();
   return conversations.getById(id);
 }
 
@@ -148,6 +149,7 @@ async function transfer(conversationId, user, target, note) {
     if (!s) throw new SendError(400, 'Setor inválido');
     await db.query('UPDATE conversations SET sector_id = $2, assigned_user_id = NULL WHERE id = $1', [conversationId, s.id]);
     text = `Transferida para o setor ${s.name} por ${user.name}${reason}`;
+    setTimeout(() => require('./distribution').onSectorTransfer({ id: conversationId, contact_id: conv.contact_id, sector_id: s.id }).catch(() => {}), 200);
   } else if (target.account_id) {
     const { rows } = await db.query('SELECT id, name FROM wa_accounts WHERE id = $1 AND active = TRUE', [target.account_id]);
     const a = rows[0];

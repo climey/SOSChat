@@ -108,6 +108,9 @@ public/                login, inbox, relatórios e configurações
 | POST | `/api/conversations/:id/read` | zera não lidas e marca como lida na Meta |
 | GET | `/api/reports/summary\|volume\|agents\|tags?from&to&group` | relatórios |
 | GET/POST/PATCH/DELETE | `/api/tags`, `/api/users`, `/api/plans` | administração (planos: catálogo de consultas) |
+| PATCH | `/api/users/me/availability` | `{availability: available|away|offline}`; offline encerra o expediente (conversas esperando voltam para a fila) |
+| PATCH | `/api/users/:id/availability` | admin muda o status de outro atendente |
+| GET | `/api/settings/distribution` | situação da distribuição: ligada, fila, elegíveis agora |
 | GET | `/api/contacts?q=&page=&limit=` | aba Contatos: todos que já falaram com a empresa, com busca e paginação |
 | POST | `/api/contacts` | `{name, phone}` cadastro manual (número já existente devolve o contato) |
 | POST | `/api/conversations/start` | `{phone|wa_id, name?, account_id?}` abre (ou reaproveita) a conversa com um número, atribuída a quem pediu |

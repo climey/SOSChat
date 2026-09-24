@@ -15,7 +15,7 @@ router.get('/', async (req, res, next) => {
   try {
     const includeInactive = req.user.role === 'admin' && req.query.all === '1';
     const { rows } = await db.query(
-      `SELECT id, name, email, role, active, availability, avatar_media_id, created_at FROM users
+      `SELECT id, name, email, role, active, availability, avatar_media_id, created_at, receives_new, sector_id FROM users
         ${includeInactive ? '' : 'WHERE active = TRUE'} ORDER BY name`
     );
     res.json({ users: rows.map((u) => ({ ...u, online: realtime.isOnline(u.id) })) });
@@ -28,7 +28,7 @@ router.get('/', async (req, res, next) => {
 router.get('/team', async (req, res, next) => {
   try {
     const { rows } = await db.query(
-      `SELECT u.id, u.name, u.email, u.role, u.availability, u.avatar_media_id, u.last_online_at,
+      `SELECT u.id, u.name, u.email, u.role, u.availability, u.avatar_media_id, u.last_online_at, u.receives_new, u.sector_id,
               (SELECT COUNT(*)::int FROM conversations c WHERE c.assigned_user_id = u.id AND c.status = 'open') AS open_conversations,
               (SELECT COUNT(*)::int FROM conversations c WHERE c.assigned_user_id = u.id AND c.status = 'open'
                  AND c.last_message_direction IS DISTINCT FROM 'out') AS waiting_conversations,
@@ -37,7 +37,7 @@ router.get('/team', async (req, res, next) => {
     );
     const users = rows.map((u) => {
       const online = realtime.isOnline(u.id);
-      return { ...u, online, status: online ? (u.availability === 'away' ? 'away' : 'available') : 'offline' };
+      return { ...u, online, status: online && u.availability !== 'offline' ? (u.availability === 'away' ? 'away' : 'available') : 'offline' };
     });
     res.json({
       users,
@@ -117,12 +117,36 @@ router.patch('/me/profile', async (req, res, next) => {
 });
 
 // Status manual do próprio atendente: available | away
+const AVAILABILITY = ['available', 'away', 'offline'];
+/** Muda o status de um atendente; "offline" encerra o expediente e passa as conversas esperando resposta. */
+async function setAvailability(userId, availability, by) {
+  const dist = require('../services/distribution');
+  await db.query('UPDATE users SET availability = $2 WHERE id = $1', [userId, availability]);
+  realtime.broadcast('presence', { user_id: userId, online: realtime.isOnline(userId), availability, by: by || null });
+  let handed = 0;
+  if (availability === 'offline') handed = await dist.handoff(userId, by ? `foi colocado offline por ${by}` : 'encerrou o expediente');
+  else if (availability === 'available') dist.scheduleDrain();
+  return { availability, handed };
+}
 router.patch('/me/availability', async (req, res, next) => {
   try {
-    const availability = req.body?.availability === 'away' ? 'away' : 'available';
-    await db.query('UPDATE users SET availability = $2 WHERE id = $1', [req.user.id, availability]);
-    realtime.broadcast('presence', { user_id: req.user.id, online: realtime.isOnline(req.user.id), availability });
-    res.json({ availability });
+    const availability = AVAILABILITY.includes(req.body?.availability) ? req.body.availability : 'available';
+    res.json(await setAvailability(req.user.id, availability, null));
+  } catch (err) {
+    next(err);
+  }
+});
+// Administrador muda o status de outro atendente (ex.: esqueceu de ficar offline ao sair)
+router.patch('/:id/availability', requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const availability = AVAILABILITY.includes(req.body?.availability) ? req.body.availability : null;
+    if (!id || !availability) return res.status(400).json({ error: 'Status inválido' });
+    const { rows } = await db.query('SELECT id, name FROM users WHERE id = $1 AND active = TRUE', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Atendente não encontrado' });
+    const out = await setAvailability(id, availability, id === req.user.id ? null : req.user.name);
+    realtime.toUser(id, 'availability:changed', { availability, by: req.user.name });
+    res.json(out);
   } catch (err) {
     next(err);
   }
@@ -170,6 +194,12 @@ router.patch('/:id', requireAdmin, async (req, res, next) => {
       if (id === req.user.id && !b.active) return res.status(400).json({ error: 'Você não pode desativar a si mesmo' });
       params.push(Boolean(b.active)); sets.push(`active = $${params.length}`);
     }
+    if (b.receives_new !== undefined) { params.push(Boolean(b.receives_new)); sets.push(`receives_new = $${params.length}`); }
+    if (b.sector_id !== undefined) {
+      const sid = b.sector_id === null || b.sector_id === '' ? null : Number(b.sector_id);
+      if (sid !== null && !Number.isInteger(sid)) return res.status(400).json({ error: 'Setor inválido' });
+      params.push(sid); sets.push(`sector_id = $${params.length}`);
+    }
     if (b.password !== undefined) {
       const pw = String(b.password);
       if (pw.length < 8) return res.status(400).json({ error: 'Senha deve ter no mínimo 8 caracteres' });
@@ -178,7 +208,7 @@ router.patch('/:id', requireAdmin, async (req, res, next) => {
     if (!sets.length) return res.status(400).json({ error: 'Nada para atualizar' });
 
     const { rows } = await db.query(
-      `UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING id, name, email, role, active, created_at`,
+      `UPDATE users SET ${sets.join(', ')} WHERE id = $1 RETURNING id, name, email, role, active, created_at, receives_new, sector_id`,
       params
     );
     if (!rows.length) return res.status(404).json({ error: 'Usuário não encontrado' });

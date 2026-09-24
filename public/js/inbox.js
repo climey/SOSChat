@@ -200,8 +200,8 @@
   /** Bolinha de presença de um atendente (verde online, amarelo ausente, cinza offline). */
   function pdot(userId) {
     const p = state.presence.get(Number(userId));
-    const cls = p?.online ? (p.availability === 'away' ? 'away' : 'online') : '';
-    const title = p?.online ? (p.availability === 'away' ? 'Ausente' : 'Online') : 'Offline';
+    const cls = p?.online && p.availability !== 'offline' ? (p.availability === 'away' ? 'away' : 'online') : '';
+    const title = p?.online && p.availability !== 'offline' ? (p.availability === 'away' ? 'Ausente' : 'Online') : 'Offline';
     return `<span class="pdot ${cls}" title="${title}"></span>`;
   }
   /** Tempo que o cliente está esperando resposta, com cor pelo limite configurado. */
@@ -1049,10 +1049,23 @@
           <div class="team-name">${esc(u.name)}${me ? ' <span class="muted">(você)</span>' : ''}${u.role === 'admin' ? ' <span class="tag">admin</span>' : ''}</div>
           <div class="team-meta">${esc(load)} · ${esc(when)}</div>
         </div>
-        <span class="team-status ${u.status}">${esc(TEAM_LABEL[u.status])}</span>
+        <span class="team-status ${u.status}">${esc(TEAM_LABEL[u.status])}${u.receives_new === false ? ' <span class="muted" title="Não entra na distribuição de conversas novas">· só transferência</span>' : ''}</span>
+        ${state.me.role === 'admin' && u.online ? `<span class="team-actions">${u.status !== 'available' ? `<button type="button" class="btn btn-xs" data-team-av="available" data-user="${u.id}" title="Colocar como disponível">Disponível</button>` : ''}${u.status !== 'away' ? `<button type="button" class="btn btn-xs btn-ghost" data-team-av="away" data-user="${u.id}" title="Colocar como ausente">Ausente</button>` : ''}${u.status !== 'offline' ? `<button type="button" class="btn btn-xs btn-ghost" data-team-av="offline" data-user="${u.id}" title="Encerrar o expediente dele (as conversas esperando voltam para a fila)">Offline</button>` : ''}</span>` : ''}
       </div>`;
     }).join('') || '<div class="d-empty">Nenhum atendente cadastrado</div>';
   }
+  $('team-list').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-team-av]');
+    if (!b) return;
+    const u = (state.team || []).find((x) => x.id === Number(b.dataset.user));
+    if (!u) return;
+    if (b.dataset.teamAv === 'offline' && !confirm(`Colocar ${u.name} offline? As conversas dele(a) com cliente esperando voltam para a fila.`)) return;
+    try {
+      const out = await api('PATCH', `/api/users/${u.id}/availability`, { availability: b.dataset.teamAv });
+      toast(`${u.name}: ${AV_LABEL[b.dataset.teamAv]}${out.handed ? ` · ${out.handed} conversa(s) voltaram para a fila` : ''}`);
+      await loadTeam();
+    } catch (err) { toast(err.message, true); }
+  });
   function openTeam() {
     $('team-modal').hidden = false;
     renderTeam();
@@ -1117,12 +1130,31 @@
     const cur = state.presence.get(userId) || { online: false, availability: 'available' };
     state.presence.set(userId, { ...cur, ...data });
   }
+  const AV_LABEL = { available: 'Disponível', away: 'Ausente', offline: 'Offline' };
+  /** Muda o meu status. "Offline" encerra o expediente: com a distribuição ligada, as conversas esperando voltam para a fila. */
+  async function setMyAvailability(av) {
+    if (av === 'offline' && state.settings.distribution_enabled && state.settings.distribution_handoff !== false) {
+      if (!confirm('Encerrar o expediente? As suas conversas em que o cliente está esperando resposta voltam para a fila e vão para quem estiver disponível.')) return;
+    }
+    try {
+      const out = await api('PATCH', '/api/users/me/availability', { availability: av });
+      setPresence(state.me.id, { availability: av, online: true });
+      renderMyPresence(); renderList();
+      document.querySelectorAll('#pref-availability .chip').forEach((c) => c.classList.toggle('active', c.dataset.availability === av));
+      toast(av === 'offline' ? `Você está offline${out.handed ? ` · ${out.handed} conversa(s) voltaram para a fila` : ''}` : av === 'away' ? 'Você está ausente (não recebe conversas novas)' : 'Você está disponível');
+      if (av === 'available') loadConversations();
+    } catch (err) { toast(err.message, true); }
+  }
+  $('status-bar').addEventListener('click', (e) => { const b = e.target.closest('button[data-availability]'); if (b) setMyAvailability(b.dataset.availability); });
   function renderMyPresence() {
     const p = state.presence.get(state.me.id);
     const el = $('me-avatar');
     el.querySelector('.pdot')?.remove();
-    el.insertAdjacentHTML('beforeend', `<span class="pdot ${p?.availability === 'away' ? 'away' : 'online'}"></span>`);
-    el.title = `${state.me.name} · ${p?.availability === 'away' ? 'Ausente' : 'Disponível'} (clique para mudar)`;
+    const av = p?.availability || 'available';
+    el.insertAdjacentHTML('beforeend', `<span class="pdot ${av === 'away' ? 'away' : av === 'offline' ? '' : 'online'}"></span>`);
+    el.title = `${state.me.name} · ${AV_LABEL[av] || 'Disponível'} (clique para mudar)`;
+    document.querySelectorAll('#status-bar button').forEach((b) => b.classList.toggle('active', b.dataset.availability === av));
+    $('status-bar').classList.toggle('is-offline', av === 'offline');
   }
   $('me-avatar').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1136,7 +1168,7 @@
     const b = e.target.closest('button[data-availability]');
     $('presence-menu').hidden = true;
     if (!b) return;
-    try { await api('PATCH', '/api/users/me/availability', { availability: b.dataset.availability }); setPresence(state.me.id, { availability: b.dataset.availability, online: true }); renderMyPresence(); renderList(); }
+    try { await setMyAvailability(b.dataset.availability); }
     catch (err) { toast(err.message, true); }
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#presence-menu') && !e.target.closest('#me-avatar')) $('presence-menu').hidden = true; });
@@ -3158,7 +3190,7 @@
         t.online = online;
         if (availability) t.availability = availability;
         if (last_online_at) t.last_online_at = last_online_at;
-        t.status = online ? (t.availability === 'away' ? 'away' : 'available') : 'offline';
+        t.status = online && t.availability !== 'offline' ? (t.availability === 'away' ? 'away' : 'available') : 'offline';
         const on = state.team.filter((u) => u.status === 'available').length;
         $('team-online').hidden = !on;
         $('team-online').textContent = on;
@@ -3193,6 +3225,16 @@
       try { const { quick_replies: qr } = await api('GET', '/api/quick-replies'); state.quickReplies = qr || []; if (!$('qr-popup').hidden) renderQuickPopup($('qr-popup').dataset.term || ''); } catch { /* ignora */ }
     });
     socket.on('user:renamed', ({ user_id, name }) => applyRename(user_id, name));
+    socket.on('distribution:assigned', ({ conversation, reason }) => {
+      toast(`Nova conversa para você: ${conversation.contact_name || conversation.profile_name || formatPhone(conversation.wa_id)} (${reason})`);
+      try { const prefs = SOS.sound.load(); SOS.sound.play(prefs.sound, prefs.volume); } catch { /* sem som */ }
+      loadConversations();
+    });
+    socket.on('availability:changed', ({ availability, by }) => {
+      setPresence(state.me.id, { availability, online: true });
+      renderMyPresence(); renderList();
+      toast(`Seu status foi alterado para ${AV_LABEL[availability] || availability}${by ? ` por ${by}` : ''}`, availability === 'offline');
+    });
     socket.on('user:avatar', ({ user_id, avatar_media_id, version }) => {
       if (avatar_media_id && version) avatarVersion.set(avatar_media_id, version);
       for (const u of state.users) if (u.id === user_id) u.avatar_media_id = avatar_media_id;
@@ -3506,10 +3548,7 @@
     const b = e.target.closest('button[data-availability]');
     if (!b) return;
     try {
-      await api('PATCH', '/api/users/me/availability', { availability: b.dataset.availability });
-      setPresence(state.me.id, { availability: b.dataset.availability, online: true });
-      renderMyPresence(); renderList();
-      document.querySelectorAll('#pref-availability .chip').forEach((c) => c.classList.toggle('active', c === b));
+      await setMyAvailability(b.dataset.availability);
     } catch (err) { toast(err.message, true); }
   });
   $('prefs-cancel').addEventListener('click', () => { stopMicTest(); $('prefs-modal').hidden = true; });
@@ -3665,7 +3704,7 @@
     state.quickReplies = qr.quick_replies || [];
     Object.assign(state.settings, st.settings || {});
     for (const u of users) setPresence(u.id, { online: Boolean(u.online), availability: u.availability || 'available' });
-    setPresence(state.me.id, { online: true });
+    setPresence(state.me.id, { online: true, availability: state.me.availability || 'available' });
     renderMyPresence();
     await loadSectors();
     loadPlans();

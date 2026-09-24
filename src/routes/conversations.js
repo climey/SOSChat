@@ -419,6 +419,7 @@ router.patch('/:id', async (req, res, next) => {
       if (status === 'resolved') {
         params.push(req.user.id);
         sets.push(`resolved_at = NOW(), resolved_by_user_id = $${params.length}`);
+        require('../services/distribution').scheduleDrain(800);
       } else {
         sets.push('resolved_at = NULL, resolved_by_user_id = NULL');
       }

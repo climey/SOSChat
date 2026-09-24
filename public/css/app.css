@@ -164,6 +164,14 @@ table.table tr:last-child td { border-bottom: none; }
 .conv-item .mid { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .conv-item .preview { flex: 1; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; min-width: 0; }
 .conv-item .preview > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.status-bar { display: flex; gap: 4px; padding: 0 14px 8px; }
+.status-bar button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 4px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: 12px; font-weight: 600; cursor: pointer; }
+.status-bar button:hover { background: var(--surface-2); color: var(--text); }
+.status-bar button.active { border-color: var(--primary); color: var(--text); background: var(--primary-soft); }
+.status-bar button .pdot { position: static; width: 8px; height: 8px; border: none; }
+.status-bar.is-offline button[data-availability="available"] { animation: pulse-border 1.6s ease-in-out infinite; }
+@keyframes pulse-border { 0%, 100% { box-shadow: 0 0 0 0 rgba(64,192,87,0.0); } 50% { box-shadow: 0 0 0 4px rgba(64,192,87,0.25); } }
+.team-actions { display: flex; gap: 4px; margin-left: 8px; }
 .conv-item .preview .tick { color: var(--muted); flex-shrink: 0; letter-spacing: -2px; }
 .conv-item .preview .tick.read { color: var(--blue); }
 .conv-item .preview .tick.failed { color: var(--primary); letter-spacing: 0; }

@@ -117,6 +117,10 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
     realtime.broadcast('message:new', { message: result.message, conversation: result.conversation });
     realtime.broadcast('conversation:updated', result.conversation);
     require('./schedules').cancelFor(result.conversation.id, 'contact').catch(() => {});
+    // distribuição automática: conversa sem dono ganha um; dono offline passa adiante
+    const dist = require('./distribution');
+    if (!result.conversation.assigned_user_id) dist.onNewConversation(result.conversation);
+    else dist.onClientMessage(result.conversation);
     require('./vehicle-lookup').maybeAutoPreview(result.message, result.conversation);
   }
   return result;

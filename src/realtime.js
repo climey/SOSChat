@@ -37,6 +37,7 @@ function init(httpServer) {
     online.set(socket.user.id, set);
     touchLastOnline(socket.user.id);
     broadcast('presence', { user_id: socket.user.id, online: true, availability: socket.user.availability || 'available' });
+    if (set.size === 1) require('./services/distribution').onUserOnline(socket.user.id);
     socket.emit('presence:all', presenceList());
 
     /** Quem está com a conversa aberta agora (para ninguém responder em cima do outro). */
@@ -77,7 +78,11 @@ function init(httpServer) {
       setViewing(null);
       const s = online.get(socket.user.id);
       if (s) { s.delete(socket.id); if (!s.size) online.delete(socket.user.id); }
-      if (!online.has(socket.user.id)) { touchLastOnline(socket.user.id); broadcast('presence', { user_id: socket.user.id, online: false, last_online_at: new Date().toISOString() }); }
+      if (!online.has(socket.user.id)) {
+        touchLastOnline(socket.user.id);
+        broadcast('presence', { user_id: socket.user.id, online: false, last_online_at: new Date().toISOString() });
+        require('./services/distribution').onUserOffline(socket.user.id);
+      }
     });
   });
 
@@ -99,9 +104,11 @@ function presenceList() {
   return [...online.keys()];
 }
 
+const testOnline = new Set(); // só para testes automatizados (simula atendente conectado)
 function isOnline(userId) {
-  return online.has(userId);
+  return online.has(userId) || testOnline.has(Number(userId));
 }
+function _setTestOnline(userId, on) { if (on) testOnline.add(Number(userId)); else testOnline.delete(Number(userId)); }
 
 /** Envia um evento para todos os atendentes conectados. */
 function broadcast(event, payload) {
@@ -115,4 +122,4 @@ function toUser(userId, event, payload) {
   io.to(`user:${userId}`).emit(event, payload);
 }
 
-module.exports = { init, broadcast, toUser, presenceList, isOnline, viewerList, allViewers };
+module.exports = { init, broadcast, toUser, presenceList, isOnline, viewerList, allViewers, _setTestOnline };

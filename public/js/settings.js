@@ -53,15 +53,20 @@
   });
 
   // ---------- Usuários ----------
+  let sectorOptions = [];
   async function loadUsers() {
     const admin = me.role === 'admin';
-    const { users } = await api('GET', `/api/users${admin ? '?all=1' : ''}`);
+    const [{ users }, sec] = await Promise.all([api('GET', `/api/users${admin ? '?all=1' : ''}`), api('GET', '/api/sectors').catch(() => ({ sectors: [] }))]);
+    sectorOptions = sec.sectors || [];
+    const sectorSel = (u) => `<select class="select select-sm" data-field="sector_id" ${admin ? '' : 'disabled'}><option value="">Qualquer setor</option>${sectorOptions.map((s) => `<option value="${s.id}" ${u.sector_id === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`;
     $('users-table').innerHTML = `
-      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th>${admin ? '<th></th>' : ''}</tr></thead>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Status</th><th title="Entra na distribuição automática de conversas novas">Recebe novas</th><th title="Setor do atendente (distribuição por setor e transferências)">Setor</th>${admin ? '<th></th>' : ''}</tr></thead>
       <tbody>${users.map((u) => `<tr data-id="${u.id}" data-name="${esc(u.name)}">
         <td>${esc(u.name)}</td><td class="muted">${esc(u.email)}</td>
         <td>${u.role === 'admin' ? 'Admin' : 'Atendente'}</td>
         <td>${u.active ? '<span class="status-pill open">Ativo</span>' : '<span class="status-pill resolved">Inativo</span>'}</td>
+        <td><input type="checkbox" data-field="receives_new" ${u.receives_new !== false ? 'checked' : ''} ${admin ? '' : 'disabled'} title="Desmarque para quem só recebe por transferência (ex.: pós-venda)"></td>
+        <td>${sectorSel(u)}</td>
         ${admin ? `<td class="row-actions">
           <button class="btn btn-sm" data-act="pw">Senha</button>
           <button class="btn btn-sm" data-act="role" data-role="${u.role}">${u.role === 'admin' ? 'Tornar atendente' : 'Tornar admin'}</button>
@@ -82,6 +87,13 @@
     } catch (err) { toast(err.message, true); }
   });
 
+  $('users-table').addEventListener('change', async (e) => {
+    const el = e.target.closest('[data-field]');
+    if (!el) return;
+    const id = el.closest('tr').dataset.id;
+    const body = el.dataset.field === 'receives_new' ? { receives_new: el.checked } : { sector_id: el.value ? Number(el.value) : null };
+    try { await api('PATCH', `/api/users/${id}`, body); toast('Atualizado'); } catch (err) { toast(err.message, true); loadUsers(); }
+  });
   let pwUserId = null;
   $('users-table').addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-act]');
@@ -402,6 +414,32 @@
     } catch (err) { toast(err.message, true); }
   });
 
+  // ---------- Distribuição ----------
+  async function loadDistribution() {
+    const { settings } = await api('GET', '/api/settings');
+    $('dist-enabled').checked = Boolean(settings.distribution_enabled);
+    $('dist-limit').value = settings.distribution_waiting_limit ?? 5;
+    $('dist-affinity').checked = settings.distribution_affinity !== false;
+    $('dist-handoff').checked = settings.distribution_handoff !== false;
+    $('dist-grace').value = settings.distribution_offline_grace_seconds ?? 120;
+    const ro = me.role !== 'admin';
+    for (const id of ['dist-enabled', 'dist-limit', 'dist-affinity', 'dist-handoff', 'dist-grace']) $(id).disabled = ro;
+    try {
+      const st = await api('GET', '/api/settings/distribution');
+      $('dist-status').innerHTML = st.enabled
+        ? `<b>Ligada.</b> ${st.queued} conversa(s) na fila · elegíveis agora: ${st.eligible.length ? st.eligible.map((u) => `${esc(u.name)} (${u.waiting} esperando)`).join(', ') : 'ninguém (todos offline, ausentes ou no limite)'}`
+        : `<b>Desligada.</b> ${st.queued} conversa(s) sem responsável no momento.`;
+    } catch { $('dist-status').textContent = ''; }
+  }
+  $('dist-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('PUT', '/api/settings', { distribution_enabled: $('dist-enabled').checked, distribution_waiting_limit: Number($('dist-limit').value), distribution_affinity: $('dist-affinity').checked, distribution_handoff: $('dist-handoff').checked, distribution_offline_grace_seconds: Number($('dist-grace').value) });
+      toast('Distribuição salva');
+      loadDistribution();
+    } catch (err) { toast(err.message, true); }
+  });
+
   // ---------- Alerta de conversa parada ----------
   async function loadSla() {
     const { settings } = await api('GET', '/api/settings');
@@ -419,7 +457,7 @@
   });
 
   // ---------- Navegação por seção ----------
-  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'alertas'];
+  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'distribuicao', 'alertas'];
   // ---------- Planos de consultas ----------
   let plans = [];
   let planEditing = null;
@@ -590,7 +628,7 @@
   async function init() {
     me = await SOS.loadMe();
     await loadTags();
-    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence(), loadVehicle()]);
+    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence(), loadVehicle(), loadDistribution()]);
   }
   init().catch((err) => toast(err.message, true));
 })();
