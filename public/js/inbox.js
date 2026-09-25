@@ -347,7 +347,7 @@
         case 'tag': await openConversation(c.id); setDetailsOpen(true); els.dTags.scrollIntoView({ block: 'center' }); break;
         case 'mute': await pref({ muted: !c.muted }); toast(c.muted ? 'Notificações ativadas para você' : 'Notificações silenciadas só para você'); break;
         case 'unread': await patch({ unread: !(c.unread_count > 0) }); break;
-        case 'resolve': await patch({ status: 'resolved' }); toast('Conversa finalizada'); break;
+        case 'resolve': if (!confirmResolve(c)) return; await patch({ status: 'resolved' }); toast('Conversa finalizada'); break;
         case 'reopen': await patch({ status: 'open' }); toast('Conversa reaberta'); break;
         case 'waiting': await patch({ waiting: true }); toast('Conversa movida para Esperando'); break;
         case 'inbox': await patch({ waiting: false }); toast('Conversa tirada de Esperando: agora só na Entrada'); break;
@@ -3005,9 +3005,17 @@
   els.composeText.addEventListener('input', autosize);
 
   // Ações do cabeçalho
+  /** Finalizar é fácil de clicar sem querer (fica ao lado de outros botões): pede confirmação. */
+  function confirmResolve(c) {
+    const who = c.contact_name || c.profile_name || formatPhone(c.wa_id);
+    return confirm(`Finalizar a conversa com ${who}?
+
+Ela sai da Entrada e vai para Finalizados. Se o cliente escrever de novo, uma conversa nova entra na Entrada.`);
+  }
   els.btnResolve.addEventListener('click', async () => {
     const c = current();
     if (!c) return;
+    if (c.status !== 'resolved' && !confirmResolve(c)) return;
     try {
       await api('PATCH', `/api/conversations/${c.id}`, { status: c.status === 'resolved' ? 'open' : 'resolved' });
       toast(c.status === 'resolved' ? 'Conversa reaberta' : 'Conversa finalizada');
