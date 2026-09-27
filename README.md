@@ -127,6 +127,8 @@ public/                login, inbox, relatórios e configurações
 | GET/POST/PATCH/DELETE | `/api/contacts/:id/notes` | observações fixadas na ficha (separadas das notas internas da conversa) |
 | GET | `/api/contacts/:id/events` | log de atividade do contato |
 | PATCH | `/api/whatsapp/accounts/:id` | `{name, auto_tag_id}` renomeia o número e define a etiqueta automática das conversas novas |
+| GET | `/api/whatsapp/debug/decrypt` | (admin) mensagens que chegaram cifradas e não puderam ser lidas: motivo técnico e as que ainda estão em "aguardando" |
+| POST | `/api/whatsapp/debug/reset-session` | (admin) `{conversation_id}` apaga a sessão criptografada com o contato; a próxima mensagem enviada recria do zero |
 | GET | `/api/reports/consultations?from&to&agent` | consultas por dia, tipo e atendente; situação dos planos |
 | GET/POST/PATCH/DELETE | `/api/contacts/:id/purchases` | compras do cliente (planos atribuídos/renovados e avulsas com valor entram sozinhas; compra antiga à mão) |
 | GET | `/api/reports/recurrence?from&to` | clientes por faixa (Novo/Ocasional/Recorrente/Fiel) pelas consultas adquiridas, inativos, maiores compradores, taxa de retorno |

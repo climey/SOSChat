@@ -93,6 +93,40 @@ router.get('/debug/messages', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Diagnóstico (admin): mensagens que chegaram cifradas e não puderam ser lidas (o celular do cliente precisa reenviar)
+router.get('/debug/decrypt', requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT m.id, m.conversation_id, m.wa_message_id, m.meta->>'reason' AS reason, m.created_at, ct.wa_id, c.account_id
+         FROM messages m JOIN conversations c ON c.id = m.conversation_id JOIN contacts ct ON ct.id = c.contact_id
+        WHERE m.meta->>'pending' = 'true' ORDER BY m.created_at DESC LIMIT 50`
+    );
+    res.json({ failures: whatsapp.decryptFailures(), pending: rows });
+  } catch (err) { next(err); }
+});
+
+// Reinicia a sessão criptografada com o contato da conversa (admin). A próxima mensagem enviada a ele recria a sessão.
+router.post('/debug/reset-session', requireAdmin, async (req, res, next) => {
+  try {
+    const convId = parseId(req.body?.conversation_id);
+    if (!convId) return res.status(400).json({ error: 'Informe a conversa' });
+    const { rows } = await db.query('SELECT c.id, c.account_id, ct.wa_id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId]);
+    if (!rows.length) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const accountId = rows[0].account_id || whatsapp.pickAccount();
+    if (!whatsapp.multiAccount || !accountId) return res.status(400).json({ error: 'Só disponível com um número conectado pelo QR code' });
+    let result;
+    try { result = await whatsapp.resetSession(accountId, rows[0].wa_id); }
+    catch (err) { return res.status(400).json({ error: err.message }); }
+    const note = await db.query(
+      `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id) VALUES ($1, 'out', 'note', $2, 'sent', $3) RETURNING *`,
+      [convId, `Sessão criptografada com o contato reiniciada por ${req.user.name}. Envie uma mensagem ao cliente para restabelecer; as respostas dele voltam a chegar normalmente.`, req.user.id]
+    );
+    const conv = await conversations.getById(convId);
+    realtime.broadcast('message:new', { message: { ...note.rows[0], sender_name: req.user.name }, conversation: conv });
+    res.json({ ok: true, ...result });
+  } catch (err) { next(err); }
+});
+
 router.get('/orphans', requireAdmin, async (req, res, next) => {
   try {
     res.json({ count: await conversations.countOrphans() });

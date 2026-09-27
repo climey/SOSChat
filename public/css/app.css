@@ -984,6 +984,8 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .read-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .read-bar .btn-xs { padding: 3px 9px; font-size: 12px; }
+.pending-msg { font-style: italic; opacity: 0.85; }
+.pending-admin { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
 .read-chip { font-family: ui-monospace, Consolas, monospace; font-size: 11px; padding: 2px 8px; letter-spacing: 0.3px; border-color: var(--green); color: var(--text); }
 .lb-read { width: auto; padding: 0 10px; gap: 6px; font-size: 13px; }
 .lb-read span { white-space: nowrap; }

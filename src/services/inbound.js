@@ -43,6 +43,8 @@ function extractContent(msg) {
       return { type, body: msg.button?.text || '[Botão]' };
     case 'reaction':
       return { type, body: `Reagiu com ${msg.reaction?.emoji || ''}` };
+    case 'pending': // chegou cifrada e ainda não pôde ser lida; o conteúdo real substitui esta linha quando o celular reenviar
+      return { type: 'unsupported', body: '[Aguardando mensagem]', meta: { pending: true, reason: msg.pending?.reason || null } };
     default:
       return { type, body: '[Mensagem não suportada]' };
   }
@@ -91,30 +93,49 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
     const { rows: msgRows } = await client.query(
       `INSERT INTO messages (conversation_id, direction, wa_message_id, type, body, media_id, media_mime, status, created_at, quoted_message_id, meta)
        VALUES ($1, 'in', $2, $3, $4, $5, $6, 'received', $7, $8, $9)
-       ON CONFLICT (wa_message_id) DO NOTHING
-       RETURNING *`,
+       ON CONFLICT (wa_message_id) DO UPDATE
+         SET type = EXCLUDED.type, body = EXCLUDED.body, media_id = EXCLUDED.media_id, media_mime = EXCLUDED.media_mime,
+             quoted_message_id = EXCLUDED.quoted_message_id, meta = EXCLUDED.meta
+         WHERE messages.meta->>'pending' = 'true' AND COALESCE(EXCLUDED.meta->>'pending', '') <> 'true'
+       RETURNING *, (xmax = 0) AS inserted`,
       [conversationId, msg.id || null, content.type, content.body, content.mediaId || null, content.mediaMime || null, sentAt, quotedMessageId, content.meta ? JSON.stringify(content.meta) : null]
     );
-    if (!msgRows.length) return null; // duplicado (Meta reenvia webhooks)
+    if (!msgRows.length) return null; // duplicado (Meta reenvia webhooks; o WhatsApp repete o "aguardando" a cada tentativa)
+    const { inserted, ...message } = msgRows[0];
 
-    await client.query(
-      `UPDATE conversations
-          SET unread_count = unread_count + 1,
-              last_message_at = GREATEST(last_message_at, $2::timestamptz),
-              last_message_preview = $3,
-              last_message_direction = 'in'
-        WHERE id = $1`,
-      [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]
-    );
+    if (inserted) {
+      await client.query(
+        `UPDATE conversations
+            SET unread_count = unread_count + 1,
+                last_message_at = GREATEST(last_message_at, $2::timestamptz),
+                last_message_preview = $3,
+                last_message_direction = 'in'
+          WHERE id = $1`,
+        [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]
+      );
+    } else {
+      // O celular do cliente reenviou o conteúdo de um "aguardando mensagem": a linha já contou como não lida,
+      // só a prévia muda (e, se a conversa original já foi finalizada, a mensagem fica nela mesmo)
+      if (message.conversation_id !== conversationId) {
+        if (isNew) { await client.query('DELETE FROM conversations WHERE id = $1', [conversationId]); isNew = false; }
+        conversationId = message.conversation_id;
+      }
+      await client.query(
+        `UPDATE conversations SET last_message_preview = $2
+          WHERE id = $1 AND (SELECT id FROM messages WHERE conversation_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1) = $3`,
+        [conversationId, content.body.slice(0, PREVIEW_MAX), message.id]
+      );
+    }
     await client.query('UPDATE contacts SET last_seen_at = GREATEST(COALESCE(last_seen_at, $2::timestamptz), $2::timestamptz) WHERE id = $1', [contactId, sentAt]);
     await recurrence.refreshContact(contactId, client);
 
     const conversation = await conversations.getById(conversationId, client);
-    return { message: await withQuoted(msgRows[0], client), conversation, isNew };
+    return { message: await withQuoted(message, client), conversation, isNew, replaced: !inserted };
   });
 
   if (result) {
-    realtime.broadcast('message:new', { message: result.message, conversation: result.conversation });
+    if (result.replaced) realtime.broadcast('message:updated', result.message);
+    else realtime.broadcast('message:new', { message: result.message, conversation: result.conversation });
     realtime.broadcast('conversation:updated', result.conversation);
     require('./schedules').cancelFor(result.conversation.id, 'contact').catch(() => {});
     // distribuição automática: conversa sem dono ganha um; dono offline passa adiante

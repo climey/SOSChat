@@ -41,5 +41,8 @@ module.exports = {
   reconnect: (id) => provider.reconnect(id),
   getQr: (id) => provider.getQr(id),
   setBlocked: (accountId, waId, blocked) => (isBaileys ? provider.setBlocked(accountId, waId, blocked) : provider.setBlocked(waId, blocked)),
+  // Diagnóstico de mensagens cifradas que não puderam ser lidas e reinício da sessão com um contato (só baileys)
+  decryptFailures: () => (isBaileys ? provider.decryptFailures() : []),
+  resetSession: (accountId, waId) => (isBaileys ? provider.resetSession(accountId, waId) : Promise.reject(new Error('Só disponível com número conectado pelo QR code'))),
   refreshAvatar: (accountId, waId) => (isBaileys && accountId ? provider.refreshAvatar(accountId, waId) : Promise.resolve()),
 };

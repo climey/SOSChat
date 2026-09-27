@@ -17,9 +17,12 @@ router.post('/simulate-inbound', async (req, res, next) => {
     const name = String(req.body?.name || '').trim() || undefined;
     const image = typeof req.body?.image_base64 === 'string' ? req.body.image_base64 : null;
     const hasContacts = Array.isArray(req.body?.contacts) && req.body.contacts.length > 0;
-    if (!from || (!text && !image && !hasContacts)) return res.status(400).json({ error: 'Informe from e text (ou image_base64, ou contacts)' });
-    const id = `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const pending = req.body?.pending === true || req.body?.pending === 1 || req.body?.pending === '1';
+    if (!from || (!text && !image && !hasContacts && !pending)) return res.status(400).json({ error: 'Informe from e text (ou image_base64, contacts ou pending)' });
+    // id pode ser informado para simular o reenvio de uma mensagem que chegou cifrada (mesmo id substitui o "aguardando")
+    const id = typeof req.body?.id === 'string' && req.body.id.trim() ? req.body.id.trim().slice(0, 80) : `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     let msg = { id, from, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text } };
+    if (pending) msg = { id, from, timestamp: msg.timestamp, type: 'pending', pending: { reason: String(req.body?.reason || 'Bad MAC') } };
     if (Array.isArray(req.body?.contacts) && req.body.contacts.length) {
       msg = { id, from, timestamp: msg.timestamp, type: 'contacts', contacts: req.body.contacts.map((c) => ({ name: { formatted_name: String(c.name || 'Contato') }, phones: (c.phones || []).map((p) => (typeof p === 'string' ? { phone: p, wa_id: p.replace(/\D/g, '') } : p)) })) };
     }

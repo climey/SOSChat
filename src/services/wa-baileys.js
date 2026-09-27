@@ -201,6 +201,7 @@ class Session {
     this.starting = false;
     this.stopped = false;
     this.timer = null;
+    this.decryptFailures = []; // últimas mensagens que chegaram cifradas e não puderam ser lidas (diagnóstico)
   }
 
   status() {
@@ -304,10 +305,17 @@ class Session {
   }
 
   async onMessagesUpsert({ messages, type }) {
-    if (type !== 'notify') return; // 'append' = histórico / ecos de envios via API
+    // 'notify' = ao vivo; 'append' = entregues ao reconectar (chegaram enquanto o servidor estava fora, ex.: durante um deploy)
+    // e ecos dos próprios envios (esses já existem no banco e são ignorados pelo eco).
+    if (type !== 'notify' && type !== 'append') return;
     for (const m of messages) {
       try {
-        if (!m.message || !acceptChat(m.key)) continue;
+        if (!acceptChat(m.key)) continue;
+        if (!m.message) {
+          // Chegou cifrada e não deu para ler: o WhatsApp Web mostra "Aguardando mensagem"; aqui também avisamos
+          if (m.messageStubType === WAMessageStubType.CIPHERTEXT && !m.key.fromMe) await this.onUndecryptable(m);
+          continue;
+        }
         const waId = fromKey(m.key);
         if (!waId) continue;
         const cloudMsg = toCloudMessage(m);
@@ -339,6 +347,45 @@ class Session {
         console.error(`[baileys:${this.account.id}] erro ao processar mensagem`, m.key?.id, err);
       }
     }
+  }
+
+  /**
+   * Mensagem que o WhatsApp entregou mas não conseguimos descriptografar (sessão quebrada, chave faltando).
+   * A Baileys já pede o reenvio ao celular do cliente; enquanto isso o atendente vê um "aguardando mensagem"
+   * que é substituído pelo conteúdo real quando ele chega (mesmo id).
+   */
+  async onUndecryptable(m) {
+    const waId = fromKey(m.key);
+    if (!waId) return;
+    const reason = String(m.messageStubParameters?.[0] || 'erro desconhecido').slice(0, 200);
+    this.decryptFailures.unshift({ at: new Date().toISOString(), id: m.key.id, from: waId, remote_jid: m.key.remoteJid || null, remote_jid_alt: m.key.remoteJidAlt || null, reason });
+    this.decryptFailures.splice(50);
+    console.warn(`[baileys:${this.account.id}] não deu para ler a mensagem ${m.key.id} de ${waId} (${reason}); pedido o reenvio ao celular do cliente`);
+    const ts = m.messageTimestamp;
+    await getInbound().handleInboundMessage(
+      { id: m.key.id, from: waId, type: 'pending', pending: { reason }, timestamp: String(typeof ts === 'object' && ts ? ts.toNumber() : Number(ts) || Math.floor(Date.now() / 1000)) },
+      m.pushName ? { profile: { name: m.pushName } } : {},
+      this.account.id
+    );
+  }
+
+  /**
+   * Apaga a sessão criptografada com o contato (todas as chaves de aparelho, pelo número e pelo LID).
+   * A próxima mensagem enviada a ele recria a sessão do zero; serve quando as mensagens dele ficam presas em "aguardando".
+   */
+  async resetSession(waId) {
+    if (!this.sock) throw new Error(`Número "${this.account.name}" desconectado.`);
+    const jid = toJid(waId);
+    const users = new Set([jidNormalizedUser(jid).split('@')[0]]);
+    // mapeamento número → LID fica no próprio armazenamento de chaves ('lid-mapping-<número>' = '"<lid>"')
+    const map = await db.query(`SELECT key, value FROM wa_auth WHERE account_id = $1 AND key IN ($2, $3)`, [this.account.id, `lid-mapping-${[...users][0]}`, `lid-mapping-${[...users][0]}_reverse`]);
+    for (const r of map.rows) { try { const v = JSON.parse(r.value); if (typeof v === 'string' && v) users.add(v); } catch { /* ignora */ } }
+    const { rows } = await db.query(`SELECT key FROM wa_auth WHERE account_id = $1 AND key LIKE 'session-%'`, [this.account.id]);
+    // chave da sessão: session-<usuário>.<aparelho>; LID vira "<lid>_1"
+    const ids = rows.map((r) => r.key.slice('session-'.length)).filter((id) => users.has(id.split('.')[0].replace(/_\d+$/, '')));
+    if (ids.length) await this.sock.authState.keys.set({ session: Object.fromEntries(ids.map((id) => [id, null])) });
+    console.log(`[baileys:${this.account.id}] sessão com ${waId} reiniciada (${ids.length} chave(s): ${ids.join(', ') || 'nenhuma'})`);
+    return { sessions: ids.length, users: [...users] };
   }
 
   async onMessagesUpdate(updates) {
@@ -648,6 +695,9 @@ module.exports = {
   refreshAvatar: (accountId, waId) => (sessions.has(Number(accountId)) ? getSession(accountId).refreshAvatar(waId) : Promise.resolve()),
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
+  resetSession: (accountId, waId) => getSession(accountId).resetSession(waId),
+  decryptFailures: () => [...sessions.values()].flatMap((s) => s.decryptFailures.map((f) => ({ account_id: s.account.id, ...f }))),
   isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature,
   _vcardToContact: vcardToContact,
+  _getSession: getSession,
 };

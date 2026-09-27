@@ -595,14 +595,23 @@
           ${canDelete ? `<button type="button" data-msg-act="delete" title="Apagar para todos">${TRASH_ICON}</button>` : ''}
         </div>` : (isNote && !m.deleted_at && m.body ? `<div class="msg-actions"><button type="button" data-msg-act="pin" title="Fixar na ficha do contato (vira observação permanente)">📌</button>${mine ? `<button type="button" data-msg-act="edit" title="Editar nota">${EDIT_ICON}</button><button type="button" data-msg-act="delete" title="Apagar nota">${TRASH_ICON}</button>` : ''}</div>` : '');
       const stickerCls = m.type === 'sticker' && m.media_id && !m.deleted_at ? 'sticker' : '';
+      const pendingIn = m.type === 'unsupported' && m.meta && m.meta.pending && !m.deleted_at;
+      const bodyHtml = pendingIn ? pendingHtml(m) : (showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : '');
       return `${sep}<div class="msg-row ${rowCls} ${m.deleted_at ? 'deleted' : ''} ${dimmed} ${stickerCls}" data-id="${m.id}">
-        <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${m.type === 'contacts' && m.meta && m.meta.contacts && !m.deleted_at ? contactCardsHtml(m) : (showBody ? `<span class="body">${waFormat(highlight(m.body))}</span>` : '')}
+        <div class="msg">${sender}${quoteHtml(m)}${mediaHtml(m)}${m.type === 'contacts' && m.meta && m.meta.contacts && !m.deleted_at ? contactCardsHtml(m) : bodyHtml}
           <span class="foot">${m.edited_at && !m.deleted_at ? '<span class="edited">editada</span>' : ''}<span>${esc(fmtClock(m.created_at))}</span>${statusIcon(m)}</span>
           ${reactionsHtml(m)}
         </div>${agent}${actions}
       </div>`;
     }).join('');
     if (scroll) els.messages.scrollTop = els.messages.scrollHeight;
+  }
+
+  /** Mensagem que chegou cifrada e ainda não pôde ser lida: o celular do cliente precisa reenviar (como o "Aguardando mensagem" do WhatsApp Web). */
+  function pendingHtml(m) {
+    const admin = state.me && state.me.role === 'admin';
+    return `<span class="body pending-msg">⏳ O cliente enviou uma mensagem, mas ainda não foi possível lê-la. Pedimos o reenvio ao celular dele; o conteúdo aparece aqui assim que chegar.</span>${admin
+      ? `<div class="pending-admin"><span class="muted small">Motivo técnico: ${esc(m.meta.reason || 'desconhecido')}</span><button type="button" class="btn btn-sm" data-msg-act="reset-session">Reiniciar sessão com o contato</button></div>` : ''}`;
   }
 
   // ---------- Setores e etiqueta rápida ----------
@@ -721,7 +730,16 @@
     if (act.dataset.msgAct === 'delete') deleteMessage(m);
     if (act.dataset.msgAct === 'failed') explainFailure(m);
     if (act.dataset.msgAct === 'retry') retryMessage(m);
+    if (act.dataset.msgAct === 'reset-session') resetSession(m);
   });
+  /** Admin: apaga a sessão criptografada com o contato; a próxima mensagem enviada a ele recria do zero. */
+  async function resetSession(m) {
+    if (!confirm('Reiniciar a sessão criptografada com este contato?\n\nDepois, envie qualquer mensagem a ele: a sessão é recriada e as respostas seguintes voltam a chegar. Use só quando as mensagens do cliente ficam presas em "aguardando".')) return;
+    try {
+      const r = await api('POST', '/api/whatsapp/debug/reset-session', { conversation_id: m.conversation_id });
+      toast(r.sessions ? `Sessão reiniciada (${r.sessions} chave(s) apagada(s)). Agora envie uma mensagem ao cliente.` : 'Não havia sessão guardada com este contato. Envie uma mensagem ao cliente para criar uma nova.');
+    } catch (err) { toast(err.message, true); }
+  }
   /** Motivo da falha em linguagem simples + reenvio. */
   function failureText(err) {
     const e = String(err || '');
