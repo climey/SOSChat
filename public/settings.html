@@ -103,8 +103,19 @@
               <p class="small muted" id="wa-help"></p>
               <form class="inline-form" id="wa-add-form" data-admin-only>
                 <input class="input" id="wa-add-name" placeholder="Nome do número (ex.: Vendas, Suporte)" maxlength="60" required>
-                <button class="btn btn-primary" type="submit">Adicionar número</button>
+                <button class="btn btn-primary" type="submit">Adicionar número por QR code</button>
               </form>
+              <details class="wa-cloud-add" id="wa-cloud-add" data-admin-only>
+                <summary>Adicionar número oficial (API da Meta)</summary>
+                <p class="small muted">Número da sua conta do WhatsApp Business (WABA), pelo app da Meta. Em <b>developers.facebook.com → seu app → WhatsApp → API Setup</b> copie o <b>Phone number ID</b>; o token permanente vem de um usuário do sistema no Gerenciador de Negócios. Antes, configure no app o webhook <code id="wa-webhook-url"></code> (campo <b>messages</b>) e defina no servidor <code>WA_APP_SECRET</code> e <code>WA_VERIFY_TOKEN</code>.</p>
+                <form class="inline-form" id="wa-cloud-form">
+                  <input class="input" id="wa-cloud-name" placeholder="Nome (ex.: Oficial)" maxlength="60" required>
+                  <input class="input" id="wa-cloud-pnid" placeholder="Phone number ID" pattern="\d{5,25}" required>
+                  <input class="input" id="wa-cloud-waba" placeholder="WABA ID (opcional)" pattern="\d{5,25}">
+                  <input class="input" id="wa-cloud-token" type="password" placeholder="Token de acesso permanente" required autocomplete="off">
+                  <button class="btn btn-primary" type="submit">Conectar número oficial</button>
+                </form>
+              </details>
               <div id="wa-accounts" class="wa-accounts"></div>
               <div id="wa-orphans" class="wa-orphans" hidden>
                 <span>Há <b id="wa-orphans-count">0</b> conversa(s) de números que já foram removidos, ainda no histórico.</span>

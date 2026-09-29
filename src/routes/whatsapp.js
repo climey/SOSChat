@@ -24,13 +24,15 @@ router.get('/status', (req, res) => {
   res.json(whatsapp.getStatus());
 });
 
-// Cadastra um novo número (a sessão inicia e gera o QR)
+// Cadastra um novo número: por QR code (a sessão inicia e gera o QR) ou oficial (provider: 'cloud', com as credenciais da Meta)
 router.post('/accounts', requireAdmin, requireMulti, async (req, res, next) => {
   try {
     const name = String(req.body?.name || '').trim().slice(0, 60);
     if (!name) return res.status(400).json({ error: 'Informe um nome para o número (ex.: Vendas)' });
-    res.status(201).json({ account: await whatsapp.addAccount(name) });
+    const provider = req.body?.provider === 'cloud' ? 'cloud' : 'baileys';
+    res.status(201).json({ account: await whatsapp.addAccount(name, { provider, phone_number_id: req.body?.phone_number_id, access_token: req.body?.access_token, waba_id: req.body?.waba_id }) });
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });
@@ -55,9 +57,17 @@ router.patch('/accounts/:id', requireAdmin, requireMulti, async (req, res, next)
       }
       account = await whatsapp.setAutoTag(id, tagId);
     }
+    // credenciais do número oficial (revalidadas na Meta)
+    if (body.access_token !== undefined || body.phone_number_id !== undefined || body.waba_id !== undefined) {
+      if (whatsapp.providerOf(id) !== 'cloud') return res.status(400).json({ error: 'Credenciais só se aplicam a número oficial (API da Meta)' });
+      const patch = {};
+      for (const k of ['access_token', 'phone_number_id', 'waba_id']) if (body[k] !== undefined) patch[k] = body[k];
+      account = await whatsapp.updateCloudAccount(id, patch);
+    }
     if (!account) return res.status(400).json({ error: 'Nada para atualizar' });
     res.json({ account });
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });
@@ -113,7 +123,7 @@ router.post('/debug/reset-session', requireAdmin, async (req, res, next) => {
     const { rows } = await db.query('SELECT c.id, c.account_id, ct.wa_id FROM conversations c JOIN contacts ct ON ct.id = c.contact_id WHERE c.id = $1', [convId]);
     if (!rows.length) return res.status(404).json({ error: 'Conversa não encontrada' });
     const accountId = rows[0].account_id || whatsapp.pickAccount();
-    if (!whatsapp.multiAccount || !accountId) return res.status(400).json({ error: 'Só disponível com um número conectado pelo QR code' });
+    if (!whatsapp.multiAccount || !accountId || whatsapp.providerOf(accountId) !== 'baileys') return res.status(400).json({ error: 'Só disponível com um número conectado pelo QR code' });
     let result;
     try { result = await whatsapp.resetSession(accountId, rows[0].wa_id); }
     catch (err) { return res.status(400).json({ error: err.message }); }
@@ -162,6 +172,7 @@ router.post('/accounts/:id/logout', requireAdmin, requireMulti, async (req, res,
     await whatsapp.logout(parseId(req.params.id));
     res.json(whatsapp.getStatus());
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });

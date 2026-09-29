@@ -298,10 +298,20 @@ async function processWebhook(payload) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
       if (change.field !== 'messages') continue;
+      // Modo multi-número: o webhook diz por qual número (phone_number_id) a mensagem entrou
+      const whatsapp = require('./whatsapp');
+      let accountId = null;
+      let cloudAccount = null;
+      if (whatsapp.multiAccount) {
+        cloudAccount = whatsapp.cloudAccountByPhoneNumberId(value.metadata?.phone_number_id);
+        if (!cloudAccount) { console.warn('[webhook] número oficial não cadastrado:', value.metadata?.phone_number_id); continue; }
+        accountId = cloudAccount.account.id;
+      }
       const contactsById = new Map((value.contacts || []).map((c) => [c.wa_id, c]));
       for (const msg of value.messages || []) {
         try {
-          await handleInboundMessage(msg, contactsById.get(msg.from));
+          if (cloudAccount) await cloudAccount.api.storeInboundMedia(msg);
+          await handleInboundMessage(msg, contactsById.get(msg.from), accountId);
         } catch (err) {
           console.error('[inbound] erro ao processar mensagem', msg.id, err);
         }

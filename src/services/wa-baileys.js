@@ -569,7 +569,7 @@ class Session {
 
 // ---------- Gerenciador de contas ----------
 async function loadAccounts() {
-  const { rows } = await db.query('SELECT id, name, phone, active, auto_tag_id FROM wa_accounts WHERE active = TRUE ORDER BY id');
+  const { rows } = await db.query(`SELECT id, name, phone, active, auto_tag_id FROM wa_accounts WHERE active = TRUE AND provider = 'baileys' ORDER BY id`);
   return rows;
 }
 
@@ -602,7 +602,7 @@ function pickAccount() {
 }
 
 async function addAccount(name) {
-  const { rows } = await db.query('INSERT INTO wa_accounts (name) VALUES ($1) RETURNING id, name, phone, active, auto_tag_id', [name]);
+  const { rows } = await db.query(`INSERT INTO wa_accounts (name, provider) VALUES ($1, 'baileys') RETURNING id, name, phone, active, auto_tag_id`, [name]);
   const session = new Session(rows[0]);
   sessions.set(rows[0].id, session);
   session.connect().catch((err) => console.error(`[baileys:${rows[0].id}] erro ao conectar`, err));

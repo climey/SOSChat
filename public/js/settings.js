@@ -137,12 +137,33 @@
     disconnected: ['resolved', 'Desconectado'],
     off: ['resolved', 'Desligado'],
     mock: ['resolved', 'Modo simulado'],
+    error: ['resolved', 'Com erro'],
   };
   let waTimer = null;
   let waAccounts = [];
 
   function accountCard(a, isAdmin, multi) {
     const [cls, label] = WA_LABELS[a.status] || ['resolved', a.status];
+    const cloud = a.provider === 'cloud';
+    if (cloud && multi) {
+      return `
+      <div class="wa-account cloud" data-id="${a.id}">
+        <div class="info">
+          <div class="title">${esc(a.name)} <span class="chip-soft">API oficial</span> <span class="status-pill ${cls}">${esc(label)}</span></div>
+          <div class="phone">${a.phone ? esc(a.phone) : 'Telefone aparece após validar'}${a.verified_name ? ` · ${esc(a.verified_name)}` : ''} · ID ${esc(a.phone_number_id || '')}</div>
+          ${a.lastError ? `<div class="err">${esc(a.lastError)}</div>` : ''}
+          ${isAdmin
+            ? `<label class="wa-autotag">Etiqueta automática nas conversas novas <select class="select" data-autotag="${a.id}"><option value="">Nenhuma</option>${allTags.map((t) => `<option value="${t.id}" ${a.auto_tag_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>`
+            : (a.auto_tag_id ? `<div class="wa-autotag">Etiqueta automática: <b>${esc((allTags.find((t) => t.id === a.auto_tag_id) || {}).name || '')}</b></div>` : '')}
+          ${isAdmin ? `<div class="actions">
+            <button class="btn btn-sm" data-act="rename">Renomear</button>
+            <button class="btn btn-sm" data-act="reconnect">Testar conexão</button>
+            <button class="btn btn-sm" data-act="token">Trocar token</button>
+            <button class="btn btn-sm btn-ghost" data-act="remove">Remover</button>
+          </div>` : ''}
+        </div>
+      </div>`;
+    }
     return `
       <div class="wa-account" data-id="${a.id ?? ''}">
         <div class="info">
@@ -185,9 +206,11 @@
     waAccounts = st.accounts || [];
 
     $('wa-help').innerHTML = multi
-      ? 'Cada número tem sua própria sessão. Todos os atendentes veem as conversas de todos os números, e a resposta sai pelo número por onde o cliente falou.'
+      ? 'Números por QR code (como o WhatsApp Web) e números oficiais (API da Meta) convivem na mesma inbox. Todos os atendentes veem as conversas de todos os números, e a resposta sai pelo número por onde o cliente falou.'
       : `Provedor oficial (Cloud API da Meta). Para usar vários números por QR code, defina <code>WA_PROVIDER=baileys</code>. Webhook: <code>${esc(location.origin)}/webhook/whatsapp</code>`;
     $('wa-add-form').hidden = !(isAdmin && multi);
+    $('wa-cloud-add').hidden = !(isAdmin && multi);
+    $('wa-webhook-url').textContent = `${location.origin}/webhook/whatsapp`;
 
     $('wa-accounts').innerHTML = waAccounts.length
       ? waAccounts.map((a) => accountCard(a, isAdmin, multi)).join('')
@@ -203,7 +226,7 @@
     }));
 
     clearTimeout(waTimer);
-    if (multi && waAccounts.some((a) => a.status !== 'connected')) waTimer = setTimeout(loadIntegration, 3000);
+    if (multi && waAccounts.some((a) => a.provider !== 'cloud' && a.status !== 'connected')) waTimer = setTimeout(loadIntegration, 3000);
   }
 
   async function loadOrphans() {
@@ -234,6 +257,20 @@
     } catch (err) { toast(err.message, true); }
   });
 
+  $('wa-cloud-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    try {
+      await api('POST', '/api/whatsapp/accounts', { name: $('wa-cloud-name').value, provider: 'cloud', phone_number_id: $('wa-cloud-pnid').value.trim(), waba_id: $('wa-cloud-waba').value.trim(), access_token: $('wa-cloud-token').value.trim() });
+      $('wa-cloud-form').reset();
+      $('wa-cloud-add').open = false;
+      toast('Número oficial conectado');
+      loadIntegration();
+    } catch (err) { toast(err.message, true); }
+    finally { btn.disabled = false; }
+  });
+
   $('wa-accounts').addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
@@ -247,8 +284,16 @@
         await api('PATCH', `/api/whatsapp/accounts/${id}`, { name });
         toast('Renomeado');
       } else if (btn.dataset.act === 'reconnect') {
-        await api('POST', `/api/whatsapp/accounts/${id}/reconnect`);
-        toast('Reconectando…');
+        const st = await api('POST', `/api/whatsapp/accounts/${id}/reconnect`);
+        if (acc?.provider === 'cloud') {
+          const me = (st.accounts || []).find((a) => String(a.id) === id);
+          toast(me?.lastError ? `A Meta recusou: ${me.lastError}` : 'Conexão com a Meta OK', Boolean(me?.lastError));
+        } else toast('Reconectando…');
+      } else if (btn.dataset.act === 'token') {
+        const token = prompt('Novo token de acesso permanente da Meta:');
+        if (token === null || !token.trim()) return;
+        await api('PATCH', `/api/whatsapp/accounts/${id}`, { access_token: token.trim() });
+        toast('Token atualizado e validado');
       } else if (btn.dataset.act === 'logout') {
         if (!confirm(`Desconectar "${acc?.name}"? Será preciso ler o QR code de novo.`)) return;
         await api('POST', `/api/whatsapp/accounts/${id}/logout`);

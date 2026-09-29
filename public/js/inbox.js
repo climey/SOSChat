@@ -54,7 +54,7 @@
   }
 
   // ---------- Estado dos números ----------
-  const ACCOUNT_LABELS = { qr: 'aguardando leitura do QR code', connecting: 'conectando…', reconnecting: 'reconectando…', disconnected: 'desconectado', off: 'desligado' };
+  const ACCOUNT_LABELS = { qr: 'aguardando leitura do QR code', connecting: 'conectando…', reconnecting: 'reconectando…', disconnected: 'desconectado', off: 'desligado', error: 'com erro na API da Meta', mock: 'em modo simulado' };
   function accountOffline(accountId) {
     if (!state.multiAccount || !accountId) return false;
     const a = state.accounts.get(Number(accountId));

@@ -44,6 +44,8 @@ O sistema suporta dois provedores, escolhidos pela variável `WA_PROVIDER`:
 | `baileys` (recomendado para começar) | QR code, como o WhatsApp Web | Funciona em minutos com qualquer número, sem aprovação da Meta | Não oficial: viola os termos do WhatsApp e há risco de banimento, principalmente em envios em massa |
 | `cloud` (padrão) | WhatsApp Business Cloud API da Meta | Oficial, estável, sem risco de ban | Exige app na Meta, número dedicado e templates fora da janela de 24h |
 
+No modo `baileys` os dois convivem: além dos números por QR code, dá para cadastrar números oficiais (API da Meta) em **Configurações → Números de WhatsApp → Adicionar número oficial**, cada um com seu Phone number ID e token. O webhook identifica por qual número a mensagem entrou.
+
 ### Opção A: QR code (Baileys)
 
 1. Defina `WA_PROVIDER=baileys` no ambiente e reinicie.
@@ -64,6 +66,7 @@ Mensagens enviadas pelo celular também aparecem na inbox (como "Celular"). Míd
    - Callback URL: `https://SEU-DOMINIO/webhook/whatsapp`
    - Verify token: o mesmo valor de `WA_VERIFY_TOKEN`
    - Assine o campo **messages**.
+   Com `WA_PROVIDER=baileys`, só `WA_APP_SECRET` e `WA_VERIFY_TOKEN` vão nas variáveis; o Phone number ID e o token são cadastrados na tela (Configurações → Números), e o número passa a aparecer ao lado dos de QR code.
 5. Regra dos 24h: a Meta só permite texto livre até 24h após a última mensagem do cliente. Fora dessa janela é preciso usar **templates aprovados** (ainda não implementado, ver roadmap).
 
 ## Estrutura
@@ -126,7 +129,9 @@ public/                login, inbox, relatórios e configurações
 | GET/POST/DELETE | `/api/contacts/:id/consultations` | registrar consulta (debita 1 do plano), estornar |
 | GET/POST/PATCH/DELETE | `/api/contacts/:id/notes` | observações fixadas na ficha (separadas das notas internas da conversa) |
 | GET | `/api/contacts/:id/events` | log de atividade do contato |
-| PATCH | `/api/whatsapp/accounts/:id` | `{name, auto_tag_id}` renomeia o número e define a etiqueta automática das conversas novas |
+| POST | `/api/whatsapp/accounts` | `{name}` número por QR code; `{name, provider: 'cloud', phone_number_id, access_token, waba_id?}` número oficial (credenciais validadas na Meta) |
+| PATCH | `/api/whatsapp/accounts/:id` | `{name, auto_tag_id}` renomeia o número e define a etiqueta automática das conversas novas; `{access_token, phone_number_id, waba_id}` troca as credenciais de um número oficial |
+| POST | `/api/whatsapp/accounts/:id/reconnect` | QR code: reconecta a sessão; oficial: testa as credenciais na Meta |
 | GET | `/api/whatsapp/debug/decrypt` | (admin) mensagens que chegaram cifradas e não puderam ser lidas: motivo técnico e as que ainda estão em "aguardando" |
 | POST | `/api/whatsapp/debug/reset-session` | (admin) `{conversation_id}` apaga a sessão criptografada com o contato; a próxima mensagem enviada recria do zero |
 | GET | `/api/reports/consultations?from&to&agent` | consultas por dia, tipo e atendente; situação dos planos |
