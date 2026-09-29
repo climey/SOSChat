@@ -87,9 +87,12 @@
   }
 
   // ---------- Lista de conversas ----------
-  async function loadConversations() {
+  // A lista vem em páginas de 50: a primeira ao abrir/filtrar, as seguintes ao rolar até o fim (ou pelo botão "Carregar mais")
+  const LIST_PAGE = 50;
+  const listPage = { hasMore: false, loading: false, seq: 0 };
+  function listQuery(offset) {
     const f = state.filters;
-    const qs = new URLSearchParams({ status: f.status, assigned: f.assigned });
+    const qs = new URLSearchParams({ status: f.status, assigned: f.assigned, limit: String(LIST_PAGE), offset: String(offset) });
     if (f.tag) qs.set('tag', f.tag);
     if (f.account) qs.set('account', f.account);
     if (f.sector) qs.set('sector', f.sector);
@@ -98,12 +101,53 @@
     if (f.recurrence) qs.set('recurrence', f.recurrence);
     if (f.q) qs.set('q', f.q);
     if (f.hidden !== 'none') qs.set('hidden', f.hidden);
-    const { conversations } = await api('GET', `/api/conversations?${qs}`);
-    conversations.forEach(rememberPrefs);
-    state.conversations = conversations;
+    return qs;
+  }
+  async function loadConversations() {
+    const seq = ++listPage.seq;
+    listPage.loading = true;
+    try {
+      const { conversations } = await api('GET', `/api/conversations?${listQuery(0)}`);
+      if (seq !== listPage.seq) return; // outro filtro foi aplicado enquanto esperava
+      conversations.forEach(rememberPrefs);
+      state.conversations = conversations;
+      listPage.hasMore = conversations.length >= LIST_PAGE;
+    } finally { if (seq === listPage.seq) listPage.loading = false; }
     renderList();
     loadCounts();
+    fillListIfShort();
   }
+  /** Próxima página: entra no fim da lista, sem repetir as que já estão (podem ter mudado de posição). */
+  async function loadMoreConversations() {
+    if (listPage.loading || !listPage.hasMore) return;
+    const seq = listPage.seq;
+    listPage.loading = true;
+    renderListFooter();
+    try {
+      const { conversations } = await api('GET', `/api/conversations?${listQuery(state.conversations.length)}`);
+      if (seq !== listPage.seq) return;
+      const have = new Set(state.conversations.map((c) => c.id));
+      for (const c of conversations) { rememberPrefs(c); if (!have.has(c.id)) { state.conversations.push(c); have.add(c.id); } }
+      listPage.hasMore = conversations.length >= LIST_PAGE;
+    } catch (err) { toast(err.message, true); }
+    finally { if (seq === listPage.seq) listPage.loading = false; }
+    renderList();
+    fillListIfShort();
+  }
+  /** Tela alta: se a primeira página não encheu a lista, já busca a próxima. */
+  function fillListIfShort() {
+    if (listPage.hasMore && !listPage.loading && els.items.scrollHeight <= els.items.clientHeight + 40) loadMoreConversations();
+  }
+  function renderListFooter() {
+    let foot = els.items.querySelector('.list-more');
+    if (!listPage.hasMore) { if (foot) foot.remove(); return; }
+    if (!foot) { foot = document.createElement('button'); foot.type = 'button'; foot.className = 'list-more'; foot.dataset.more = '1'; els.items.appendChild(foot); }
+    foot.textContent = listPage.loading ? 'Carregando mais conversas…' : 'Carregar mais conversas';
+    foot.disabled = listPage.loading;
+  }
+  els.items.addEventListener('scroll', () => {
+    if (els.items.scrollTop + els.items.clientHeight >= els.items.scrollHeight - 400) loadMoreConversations();
+  });
 
   // Contadores das abas (Entrada / Esperando), com os mesmos filtros
   let countsTimer = null;
@@ -257,12 +301,14 @@
           <button type="button" class="more" data-menu="${c.id}" title="Mais opções"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
         </div>`).join('');
     }
+    renderListFooter();
     const unread = list.reduce((n, c) => n + (c.status === 'open' && c.unread_count > 0 ? 1 : 0), 0);
     els.railUnread.hidden = unread === 0;
     els.railUnread.textContent = unread > 99 ? '99+' : unread;
   }
 
   els.items.addEventListener('click', (e) => {
+    if (e.target.closest('button[data-more]')) { loadMoreConversations(); return; }
     const more = e.target.closest('button[data-menu]');
     if (more) { e.stopPropagation(); openConvMenu(Number(more.dataset.menu), more); return; }
     const item = e.target.closest('.conv-item');
