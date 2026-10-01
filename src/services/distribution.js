@@ -216,12 +216,14 @@ async function onClientMessage(conversation) {
       if (!ownerOff) return null;
       const snapshot = await agentsSnapshot({ sectorId: conversation.sector_id || null, forNew: false });
       const candidates = snapshot.filter((u) => u.eligible && u.id !== owner.id);
-      const pick = choose(candidates, null, cfg.mode);
+      // prefere quem falou com o cliente por último (ex.: colega do turno seguinte que mandou mensagem pelo celular)
+      const preferred = cfg.affinity ? await lastAgentFor(conversation.contact_id, cfg.affinityDays) : null;
+      const pick = choose(candidates, preferred, cfg.mode);
       if (!pick) return null;
       return assign(conversation, pick.user, 'assumida', {
         fromUserId: owner.id,
         expectedOwner: owner.id,
-        reasonText: `assumida de ${owner.name}, que está offline`,
+        reasonText: pick.rule === 'afinidade' ? `assumida de ${owner.name}, que está offline; ${pick.user.name} foi quem falou com o cliente por último` : `assumida de ${owner.name}, que está offline`,
         details: { ...detailsOf(snapshot, cfg, 'assumida', pick.user.id), from: { id: owner.id, name: owner.name } },
       });
     });

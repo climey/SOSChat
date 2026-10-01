@@ -6,8 +6,39 @@ const conversations = require('./conversations');
 
 const MESSAGE_MAX = 4096; // limite da Cloud API para texto
 
+/**
+ * Quem escreve para o cliente assume a conversa quando o responsável não está atendendo (offline, fora do
+ * chat ou desativado). Responsável disponível ou ausente continua dono: quem escreveu só ajudou.
+ */
+async function takeOverIfOwnerAway(id, userId) {
+  if (!userId) return;
+  const { rows } = await db.query(
+    `SELECT c.assigned_user_id AS owner_id, o.name AS owner_name, o.availability, o.active, me.name AS my_name
+       FROM conversations c LEFT JOIN users o ON o.id = c.assigned_user_id JOIN users me ON me.id = $2
+      WHERE c.id = $1`,
+    [id, userId]
+  );
+  const r = rows[0];
+  if (!r || !r.owner_id || r.owner_id === userId) return;
+  const ownerOut = !r.active || r.availability === 'offline' || !realtime.isOnline(r.owner_id);
+  if (!ownerOut) return;
+  const upd = await db.query('UPDATE conversations SET assigned_user_id = $2, attended = TRUE WHERE id = $1 AND assigned_user_id = $3', [id, userId, r.owner_id]);
+  if (!upd.rowCount) return;
+  const why = `${r.my_name} falou com o cliente enquanto ${r.owner_name} estava fora`;
+  await db.query(
+    'INSERT INTO distribution_log (conversation_id, user_id, from_user_id, reason, rule) VALUES ($1, $2, $3, $4, $5)',
+    [id, userId, r.owner_id, `assumida: ${why}`, 'assumida']
+  );
+  const note = await db.query(
+    `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id) VALUES ($1, 'out', 'note', $2, 'sent', NULL) RETURNING *`,
+    [id, `Conversa passou para ${r.my_name}: ${why}.`]
+  );
+  realtime.broadcast('message:new', { message: { ...note.rows[0], sender_name: 'Sistema' }, conversation: await conversations.getById(id) });
+}
+
 /** Atualiza a conversa após um envio do atendente e devolve a versão nova. */
 async function touchAfterSend(id, preview, userId) {
+  await takeOverIfOwnerAway(id, userId);
   await db.query(
     `UPDATE conversations
         SET last_message_at = NOW(),
