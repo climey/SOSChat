@@ -3297,6 +3297,9 @@ Ela sai da Entrada e vai para Finalizados. Se o cliente escrever de novo, uma co
   function connectSocket() {
     const socket = io({ withCredentials: true });
     typingSocket = socket;
+    // saiu da página (outro site na mesma aba): o navegador pode guardá-la em cache com a conexão aberta
+    window.addEventListener('pagehide', () => socket.disconnect());
+    window.addEventListener('pageshow', (e) => { if (e.persisted) socket.connect(); });
     socket.on('connect', () => { if (state.currentId) emitViewing(state.currentId); });
     socket.on('presence:all', (ids) => { for (const id of ids) setPresence(id, { online: true }); renderList(); if (current()) renderChat(); });
     socket.on('presence', ({ user_id, online, availability, last_online_at }) => {

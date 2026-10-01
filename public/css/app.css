@@ -119,6 +119,12 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
 .empty svg { width: 48px; height: 48px; opacity: 0.4; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--surface-3); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: 9px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); z-index: 100; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
 .toast.show { opacity: 1; }
+.presence-notices { position: fixed; right: 20px; bottom: 20px; z-index: 120; display: flex; flex-direction: column; gap: 10px; width: min(340px, calc(100vw - 32px)); }
+.presence-notice { background: var(--surface-3); border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+.presence-notice .pn-title { font-weight: 600; font-size: 13px; }
+.presence-notice .pn-body { font-size: 13px; color: var(--muted); margin-top: 3px; word-break: break-word; }
+.presence-notice .pn-actions { display: flex; gap: 6px; margin-top: 10px; }
+.presence-notice .pn-actions a { text-decoration: none; }
 .toast.error { border-color: var(--primary); }
 table.table { width: 100%; border-collapse: collapse; }
 table.table th, table.table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
