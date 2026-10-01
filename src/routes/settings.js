@@ -74,7 +74,7 @@ async function getAll() {
   out.distribution_affinity_days = Number(out.distribution_affinity_days ?? D.affinityDays);
   out.auto_resolve_enabled = on(out.auto_resolve_enabled, false);
   out.auto_resolve_hours = Number(out.auto_resolve_hours ?? 24);
-  out.return_window_days = Number(out.return_window_days ?? 7);
+  out.return_window_days = Number(out.return_window_days ?? 2);
   out.image_read_available = require('../services/image-reader').configured();
   return out;
 }

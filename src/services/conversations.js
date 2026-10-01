@@ -229,7 +229,7 @@ async function defaultSectorId(client = db) {
  */
 async function reopenRecent(client, contactId, accountId, at = new Date()) {
   const { rows: cfg } = await client.query(`SELECT value FROM app_settings WHERE key = 'return_window_days'`);
-  const days = cfg.length ? Number(cfg[0].value) : 7;
+  const days = cfg.length ? Number(cfg[0].value) : 2;
   if (!Number.isInteger(days) || days <= 0) return null;
   const { rows } = await client.query(
     `SELECT id, status, last_message_at FROM conversations

@@ -639,7 +639,7 @@
     const { settings } = await api('GET', '/api/settings');
     $('fin-auto').checked = Boolean(settings.auto_resolve_enabled);
     $('fin-hours').value = settings.auto_resolve_hours ?? 24;
-    $('fin-return').value = settings.return_window_days ?? 7;
+    $('fin-return').value = settings.return_window_days ?? 2;
     const ro = me.role !== 'admin';
     for (const id of ['fin-auto', 'fin-hours', 'fin-return']) $(id).disabled = ro;
   }
