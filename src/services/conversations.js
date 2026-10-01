@@ -222,6 +222,36 @@ async function defaultSectorId(client = db) {
   return rows[0]?.id || null;
 }
 
+/**
+ * Retorno do cliente: se a última conversa dele neste número foi finalizada e a última mensagem dela tem até
+ * return_window_days dias, reabre essa mesma conversa (com o mesmo responsável) em vez de abrir outra.
+ * Assim o retorno não conta como um novo atendimento. Devolve { id, note } ou null (0 dias = sempre nova).
+ */
+async function reopenRecent(client, contactId, accountId, at = new Date()) {
+  const { rows: cfg } = await client.query(`SELECT value FROM app_settings WHERE key = 'return_window_days'`);
+  const days = cfg.length ? Number(cfg[0].value) : 7;
+  if (!Number.isInteger(days) || days <= 0) return null;
+  const { rows } = await client.query(
+    `SELECT id, status, last_message_at FROM conversations
+      WHERE contact_id = $1 AND account_id IS NOT DISTINCT FROM $2
+      ORDER BY created_at DESC, id DESC LIMIT 1 FOR UPDATE`,
+    [contactId, accountId]
+  );
+  const prev = rows[0];
+  if (!prev || prev.status !== 'resolved' || !prev.last_message_at) return null;
+  const gapDays = (new Date(at).getTime() - new Date(prev.last_message_at).getTime()) / 86400000;
+  if (gapDays > days) return null;
+  await client.query(`UPDATE conversations SET status = 'open', resolved_at = NULL, resolved_by_user_id = NULL WHERE id = $1`, [prev.id]);
+  const hours = Math.round(Math.max(gapDays * 24, 0));
+  const when = hours < 1 ? 'menos de 1 hora depois' : hours < 48 ? `${hours} h depois` : `${Math.round(gapDays)} dias depois`;
+  const { rows: noteRows } = await client.query(
+    `INSERT INTO messages (conversation_id, direction, type, body, status, sender_user_id, created_at)
+     VALUES ($1, 'out', 'note', $2, 'sent', NULL, $3::timestamptz - INTERVAL '1 millisecond') RETURNING *`,
+    [prev.id, `Conversa reaberta: o cliente voltou ${when}. Retorno não conta como novo atendimento.`, at]
+  );
+  return { id: prev.id, note: { ...noteRows[0], sender_name: 'Sistema' } };
+}
+
 /** Remove arquivos de mídia que nenhuma mensagem nem contato referencia mais. */
 async function purgeOrphanMedia() {
   const { rowCount } = await db.query(
@@ -250,4 +280,4 @@ async function deleteByAccount(accountId) {
   return rowCount;
 }
 
-module.exports = { start, getById, list, counts, setPrefs, defaultSectorId, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };
+module.exports = { start, getById, list, counts, setPrefs, defaultSectorId, reopenRecent, purgeOrphanMedia, countOrphans, deleteOrphans, deleteByAccount };

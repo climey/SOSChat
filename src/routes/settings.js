@@ -34,6 +34,9 @@ const KEYS = {
   distribution_offline_grace_seconds: (v) => (Number.isInteger(v) && v >= 10 && v <= 3600 ? String(v) : null),
   distribution_mode: (v) => (['rodizio', 'carga'].includes(v) ? v : null),
   distribution_affinity_days: (v) => (Number.isInteger(v) && v >= 0 && v <= 365 ? String(v) : null),
+  auto_resolve_enabled: (v) => (typeof v === 'boolean' ? (v ? '1' : '0') : (['0', '1'].includes(v) ? v : null)),
+  auto_resolve_hours: (v) => (Number.isInteger(v) && v >= 1 && v <= 720 ? String(v) : null),
+  return_window_days: (v) => (Number.isInteger(v) && v >= 0 && v <= 90 ? String(v) : null),
   vehicle_preview_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   vehicle_fix_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   recurrence_occasional_credits: (v) => (Number.isInteger(v) && v >= 1 && v <= 1000 ? v : null),
@@ -69,6 +72,9 @@ async function getAll() {
   out.distribution_offline_grace_seconds = Number(out.distribution_offline_grace_seconds ?? D.offlineGraceSeconds);
   out.distribution_mode = ['rodizio', 'carga'].includes(out.distribution_mode) ? out.distribution_mode : D.mode;
   out.distribution_affinity_days = Number(out.distribution_affinity_days ?? D.affinityDays);
+  out.auto_resolve_enabled = on(out.auto_resolve_enabled, false);
+  out.auto_resolve_hours = Number(out.auto_resolve_hours ?? 24);
+  out.return_window_days = Number(out.return_window_days ?? 7);
   out.image_read_available = require('../services/image-reader').configured();
   return out;
 }

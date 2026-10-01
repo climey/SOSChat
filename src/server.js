@@ -96,6 +96,7 @@ async function start() {
   await db.query('SELECT 1');
   whatsapp.start().catch((err) => console.error('[whatsapp] falha ao iniciar provedor', err));
   require('./services/schedules').start();
+  require('./services/auto-resolve').start();
   server.listen(config.port, () => {
     console.log(`SOS Chat rodando em ${config.appUrl} (${config.isProd ? 'produção' : 'desenvolvimento'})`);
     const veh = require('./services/vehicle-lookup');

@@ -78,8 +78,11 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
     );
     let conversationId;
     let isNew = false;
+    let reopened = null;
     if (convRows.length) {
       conversationId = convRows[0].id;
+    } else if ((reopened = await conversations.reopenRecent(client, contactId, accountId, sentAt))) {
+      conversationId = reopened.id;
     } else {
       const ins = await client.query(
         `INSERT INTO conversations (contact_id, status, last_message_at, account_id, sector_id) VALUES ($1, 'open', $2, $3, $4) RETURNING id`,
@@ -130,17 +133,19 @@ async function handleInboundMessage(msg, contactInfo = {}, accountId = null) {
     await recurrence.refreshContact(contactId, client);
 
     const conversation = await conversations.getById(conversationId, client);
-    return { message: await withQuoted(message, client), conversation, isNew, replaced: !inserted };
+    return { message: await withQuoted(message, client), conversation, isNew, replaced: !inserted, reopenNote: reopened?.note || null };
   });
 
   if (result) {
+    if (result.reopenNote) realtime.broadcast('message:new', { message: result.reopenNote, conversation: result.conversation });
     if (result.replaced) realtime.broadcast('message:updated', result.message);
     else realtime.broadcast('message:new', { message: result.message, conversation: result.conversation });
     realtime.broadcast('conversation:updated', result.conversation);
     require('./schedules').cancelFor(result.conversation.id, 'contact').catch(() => {});
     // distribuição automática: conversa sem dono ganha um; dono offline passa adiante
     const dist = require('./distribution');
-    if (!result.conversation.assigned_user_id) dist.onNewConversation(result.conversation);
+    if (result.reopenNote) dist.onReopened(result.conversation);
+    else if (!result.conversation.assigned_user_id) dist.onNewConversation(result.conversation);
     else dist.onClientMessage(result.conversation);
     require('./vehicle-lookup').maybeAutoPreview(result.message, result.conversation);
   }
@@ -172,6 +177,8 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
       [contactId, accountId]
     );
     let conversationId = convRows[0]?.id;
+    let reopened = null;
+    if (!conversationId && (reopened = await conversations.reopenRecent(client, contactId, accountId, sentAt))) conversationId = reopened.id;
     if (!conversationId) {
       const ins = await client.query(
         `INSERT INTO conversations (contact_id, status, last_message_at, account_id, sector_id) VALUES ($1, 'open', $2, $3, $4) RETURNING id`,
@@ -199,10 +206,11 @@ async function handleOutboundEcho(waId, msg, accountId = null) {
       [conversationId, sentAt, content.body.slice(0, PREVIEW_MAX)]
     );
     const conversation = await conversations.getById(conversationId, client);
-    return { message: { ...(await withQuoted(msgRows[0], client)), sender_name: 'Celular' }, conversation };
+    return { message: { ...(await withQuoted(msgRows[0], client)), sender_name: 'Celular' }, conversation, reopenNote: reopened?.note || null };
   });
 
   if (result) {
+    if (result.reopenNote) realtime.broadcast('message:new', { message: result.reopenNote, conversation: result.conversation });
     realtime.broadcast('message:new', result);
     realtime.broadcast('conversation:updated', result.conversation);
   }

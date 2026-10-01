@@ -90,6 +90,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
             <span>Distribuição</span>
           </a>
+          <a href="#finalizacao" data-section="finalizacao">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span>Finalização e retorno</span>
+          </a>
           <a href="#alertas" data-section="alertas">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>Alertas de espera</span>
@@ -320,6 +324,22 @@
               <div class="dist-head"><h3>Últimas distribuições</h3>
                 <select class="select" id="dist-log-user" style="max-width:220px"><option value="">Todos os atendentes</option></select></div>
               <div id="dist-log" class="dist-log small muted">Carregando…</div>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="finalizacao" hidden>
+            <div class="card">
+              <h3>Finalização e retorno do cliente</h3>
+              <p class="small muted">Cada conversa conta como um atendimento. Aqui você define quando ela é finalizada sozinha e quando um cliente que volta continua no mesmo atendimento.</p>
+              <form id="fin-form">
+                <div class="field"><label class="label" style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="fin-auto"> Finalizar automaticamente conversas paradas</label>
+                  <label class="label" style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:400">depois de <input class="input" type="number" id="fin-hours" min="1" max="720" style="max-width:80px"> horas sem mensagens</label>
+                  <p class="small muted" style="margin:4px 0 0">Só finaliza quando a última mensagem foi do atendente. Conversa com cliente esperando resposta ou com mensagem agendada nunca é finalizada sozinha.</p></div>
+                <div class="field"><label class="label">Retorno do cliente</label>
+                  <label class="label" style="display:flex;align-items:center;gap:8px;font-weight:400">se o cliente voltar em até <input class="input" type="number" id="fin-return" min="0" max="90" style="max-width:80px"> dias, reabrir a mesma conversa (0 = sempre abrir uma nova)</label>
+                  <p class="small muted" style="margin:4px 0 0">A conversa reaberta continua com quem atendeu, se ele estiver disponível, e não conta como novo atendimento. Consulta feita no retorno conta para esse mesmo atendimento. Depois do prazo, o cliente abre um atendimento novo.</p></div>
+                <div class="actions" data-admin-only><button class="btn btn-primary" type="submit">Salvar</button></div>
+              </form>
             </div>
           </section>
 

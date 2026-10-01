@@ -228,6 +228,34 @@ async function onClientMessage(conversation) {
   } catch (err) { console.warn('[distribuição] mensagem do cliente:', err.message); return null; }
 }
 
+/**
+ * Cliente voltou e a conversa finalizada foi reaberta: continua com quem atendeu se ele estiver disponível
+ * no chat; senão, entra na distribuição como uma conversa nova (a afinidade traz de volta quando ele voltar).
+ */
+async function onReopened(conversation) {
+  try {
+    const cfg = await settings();
+    if (!cfg.enabled || !conversation) return null;
+    return await exclusive(async () => {
+      const ownerId = conversation.assigned_user_id;
+      let owner = null;
+      if (ownerId) {
+        const { rows } = await db.query('SELECT id, name, availability, active FROM users WHERE id = $1', [ownerId]);
+        owner = rows[0] || null;
+        if (owner && owner.active && owner.availability === 'available' && realtime.isOnline(owner.id)) return null;
+        const r = await db.query('UPDATE conversations SET assigned_user_id = NULL WHERE id = $1 AND assigned_user_id = $2', [conversation.id, ownerId]);
+        if (!r.rowCount) return null;
+      }
+      const done = await distributeNow({ id: conversation.id }, { forNew: true, logQueue: true });
+      if (!done) {
+        const conversations = require('./conversations');
+        realtime.broadcast('conversation:updated', await conversations.getById(conversation.id));
+      }
+      return done;
+    });
+  } catch (err) { console.warn('[distribuição] conversa reaberta:', err.message); return null; }
+}
+
 /** Transferência para um setor sem escolher pessoa: distribui entre os do setor. */
 async function onSectorTransfer(conversation) {
   try { return await distribute(conversation, { forNew: false }); } catch (err) { console.warn('[distribuição] setor:', err.message); return null; }
@@ -361,6 +389,6 @@ async function recentLog({ limit = 50, userId = null } = {}) {
 }
 
 module.exports = {
-  settings, invalidate, eligible, agentsSnapshot, choose, distribute, onNewConversation, onClientMessage, onSectorTransfer,
+  settings, invalidate, eligible, agentsSnapshot, choose, distribute, onNewConversation, onClientMessage, onReopened, onSectorTransfer,
   drainQueue, scheduleDrain, handoff, onUserOffline, onUserOnline, status, recentLog, DEFAULTS, MODES,
 };

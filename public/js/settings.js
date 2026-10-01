@@ -634,8 +634,26 @@
     catch (err) { toast(err.message, true); }
   });
 
+  // ---------- Finalização automática e retorno ----------
+  async function loadFinalize() {
+    const { settings } = await api('GET', '/api/settings');
+    $('fin-auto').checked = Boolean(settings.auto_resolve_enabled);
+    $('fin-hours').value = settings.auto_resolve_hours ?? 24;
+    $('fin-return').value = settings.return_window_days ?? 7;
+    const ro = me.role !== 'admin';
+    for (const id of ['fin-auto', 'fin-hours', 'fin-return']) $(id).disabled = ro;
+  }
+  $('fin-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('PUT', '/api/settings', { auto_resolve_enabled: $('fin-auto').checked, auto_resolve_hours: Number($('fin-hours').value), return_window_days: Number($('fin-return').value) });
+      toast('Finalização e retorno salvos');
+      loadFinalize();
+    } catch (err) { toast(err.message, true); }
+  });
+
   // ---------- Navegação por seção ----------
-  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'distribuicao', 'alertas'];
+  const SECTIONS = ['numeros', 'atendentes', 'setores', 'etiquetas', 'respostas', 'planos', 'recorrencia', 'preconsulta', 'distribuicao', 'finalizacao', 'alertas'];
   // ---------- Planos de consultas ----------
   let plans = [];
   let planEditing = null;
@@ -806,7 +824,7 @@
   async function init() {
     me = await SOS.loadMe();
     await loadTags();
-    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence(), loadVehicle(), loadDistribution()]);
+    await Promise.all([loadUsers(), loadIntegration(), loadQuickReplies(), loadSla(), loadSectors(), loadPlans(), loadKinds(), loadRecurrence(), loadVehicle(), loadDistribution(), loadFinalize()]);
   }
   init().catch((err) => toast(err.message, true));
 })();
