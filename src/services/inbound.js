@@ -291,6 +291,18 @@ async function handleStatus(st) {
   if (rows.length) realtime.broadcast('message:status', rows[0]);
 }
 
+/** Contato criado só pelo LID (`<id>@lid`) ganhou número: unifica no contato do número e avisa as telas. */
+async function mergeLidContact(lidJid, waId) {
+  const { rows } = await db.query('SELECT id FROM contacts WHERE wa_id = $1', [lidJid]);
+  if (!rows.length) return null;
+  const out = await require('./contacts').mergeInto(rows[0].id, waId);
+  if (out) {
+    console.log(`[inbound] contato ${lidJid} unificado no número ${waId}`);
+    realtime.broadcast('conversations:reload', { reason: 'lid-merged' });
+  }
+  return out;
+}
+
 /** Percorre o payload do webhook da Meta e despacha mensagens e status. */
 async function processWebhook(payload) {
   if (payload?.object !== 'whatsapp_business_account') return;
@@ -327,4 +339,4 @@ async function processWebhook(payload) {
   }
 }
 
-module.exports = { processWebhook, handleInboundMessage, handleOutboundEcho, handleReaction, handleEdit, handleRevoke, handleStatus, extractContent, withQuoted };
+module.exports = { processWebhook, mergeLidContact, handleInboundMessage, handleOutboundEcho, handleReaction, handleEdit, handleRevoke, handleStatus, extractContent, withQuoted };

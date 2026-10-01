@@ -67,6 +67,7 @@
   }
 
   function formatPhone(waId) {
+    if (/@lid$/.test(String(waId || ''))) return 'Contato sem número (WhatsApp)';
     const d = String(waId || '').replace(/\D/g, '');
     if (d.startsWith('55') && d.length >= 12) {
       const ddd = d.slice(2, 4), rest = d.slice(4);

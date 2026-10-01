@@ -166,6 +166,38 @@ async function remove(id) {
 }
 
 // ---------- Plano ----------
+/**
+ * Unifica o contato `fromId` no contato de número `waId` (criado se não existir): conversas, consultas, compras,
+ * observações e eventos passam para o destino; campos da ficha vazios no destino são copiados; o de origem é apagado.
+ * Usado quando um contato foi criado só pelo LID do WhatsApp e o número dele ficou conhecido depois.
+ */
+async function mergeInto(fromId, waId) {
+  return db.withTransaction(async (client) => {
+    const from = (await client.query('SELECT * FROM contacts WHERE id = $1 FOR UPDATE', [fromId])).rows[0];
+    if (!from) return null;
+    const target = (await client.query(
+      `INSERT INTO contacts (wa_id) VALUES ($1) ON CONFLICT (wa_id) DO UPDATE SET wa_id = EXCLUDED.wa_id RETURNING *`, [waId]
+    )).rows[0];
+    if (target.id === from.id) return { from: from.id, to: target.id, wa_id: waId };
+    // ficha: o que o destino não tem vem da origem (plano inteiro vem junto se o destino não tem plano)
+    const skip = new Set(['id', 'wa_id', 'created_at']);
+    const planCols = new Set(['plan_id', 'plan_name', 'plan_credits', 'plan_used', 'plan_started_at', 'plan_expires_at', 'plan_renewals']);
+    const cols = Object.keys(from).filter((c) => !skip.has(c)).map((c) => c.replace(/"/g, ''));
+    const pick = (c) => (planCols.has(c) ? `CASE WHEN t.plan_id IS NULL THEN f."${c}" ELSE t."${c}" END` : `COALESCE(t."${c}", f."${c}")`);
+    await client.query(
+      `UPDATE contacts t SET ${cols.map((c) => `"${c}" = x."${c}"`).join(', ')}
+         FROM (SELECT ${cols.map((c) => `${pick(c)} AS "${c}"`).join(', ')} FROM contacts t, contacts f WHERE t.id = $1 AND f.id = $2) x
+        WHERE t.id = $1`,
+      [target.id, from.id]
+    );
+    for (const t of ['conversations', 'consultations', 'contact_events', 'contact_notes', 'purchases']) {
+      await client.query(`UPDATE ${t} SET contact_id = $2 WHERE contact_id = $1`, [from.id, target.id]);
+    }
+    await client.query('DELETE FROM contacts WHERE id = $1', [from.id]);
+    return { from: from.id, to: target.id, wa_id: waId };
+  });
+}
+
 function expiresFrom(startedAt, validityDays) {
   if (!validityDays) return null;
   return new Date(new Date(startedAt).getTime() + validityDays * 86400e3);
@@ -499,7 +531,8 @@ async function deletePurchase(id, purchaseId, user) {
   return broadcast(id);
 }
 
-module.exports = { list, create, normalizeWaId,
+module.exports = {
+  mergeInto, list, create, normalizeWaId,
   listPurchases, addManualPurchase, updatePurchase, deletePurchase,
   ContactError, DEFAULT_KINDS, CONTACT_COLS, get, getFull, update, setBlocked, remove, logEvent,
   setPlan, renewPlan, removePlan, adjustPlan, registerConsultation, reverseConsultation,

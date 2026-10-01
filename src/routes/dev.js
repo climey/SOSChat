@@ -12,7 +12,8 @@ router.use(requireAuth);
  */
 router.post('/simulate-inbound', async (req, res, next) => {
   try {
-    const from = String(req.body?.from || '').replace(/\D/g, '');
+    const rawFrom = String(req.body?.from || '').trim();
+    const from = /@lid$/.test(rawFrom) ? rawFrom : rawFrom.replace(/\D/g, '');
     const text = String(req.body?.text || '').trim();
     const name = String(req.body?.name || '').trim() || undefined;
     const image = typeof req.body?.image_base64 === 'string' ? req.body.image_base64 : null;

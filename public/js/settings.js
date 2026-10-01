@@ -236,7 +236,20 @@
       box.hidden = count === 0;
       $('wa-orphans-count').textContent = count;
     } catch { /* ignora */ }
+    try {
+      const { count } = await api('GET', '/api/whatsapp/lids');
+      $('wa-lids').hidden = count === 0;
+      $('wa-lids-count').textContent = count;
+    } catch { /* ignora */ }
   }
+  $('wa-lids-merge').addEventListener('click', async () => {
+    if (!confirm('Unificar os contatos sem número com o número correspondente? As conversas deles passam para o contato certo (nada é apagado).')) return;
+    try {
+      const { merged, unresolved } = await api('POST', '/api/whatsapp/lids/merge');
+      toast(`${merged.length} contato(s) unificado(s)${unresolved.length ? `; ${unresolved.length} ainda sem número conhecido (resolve quando o cliente escrever de novo)` : ''}`);
+      loadOrphans();
+    } catch (err) { toast(err.message, true); }
+  });
   $('wa-orphans-delete').addEventListener('click', async () => {
     const n = $('wa-orphans-count').textContent;
     if (!confirm(`Apagar ${n} conversa(s) de números removidos, com todo o histórico de mensagens e arquivos? Isso não pode ser desfeito.`)) return;

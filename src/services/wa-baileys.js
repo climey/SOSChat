@@ -304,6 +304,24 @@ class Session {
     }
   }
 
+  /**
+   * Identificador do contato pelo número. Mensagem endereçada pelo LID sem o número junto: consulta o mapeamento
+   * que a Baileys guarda (chega em mensagens anteriores) e, se um contato já tinha sido criado pelo LID, unifica.
+   */
+  async resolveWaId(key) {
+    const lid = key.remoteJid && key.remoteJid.endsWith('@lid') ? jidNormalizedUser(key.remoteJid) : null;
+    let waId = fromKey(key);
+    if (lid && (!waId || waId.endsWith('@lid'))) {
+      try {
+        const pn = await this.sock?.signalRepository?.lidMapping?.getPNForLID(lid);
+        if (pn) waId = jidNormalizedUser(pn).split('@')[0];
+      } catch (err) { console.warn(`[baileys:${this.account.id}] falha ao resolver LID ${lid}:`, err.message); }
+      if (!waId || waId.endsWith('@lid')) console.warn(`[baileys:${this.account.id}] mensagem de ${lid} sem número conhecido; fica pelo LID até o número aparecer`);
+    }
+    if (lid && waId && !waId.endsWith('@lid')) await getInbound().mergeLidContact(lid, waId).catch((err) => console.warn(`[baileys:${this.account.id}] falha ao unificar ${lid}:`, err.message));
+    return waId;
+  }
+
   async onMessagesUpsert({ messages, type }) {
     // 'notify' = ao vivo; 'append' = entregues ao reconectar (chegaram enquanto o servidor estava fora, ex.: durante um deploy)
     // e ecos dos próprios envios (esses já existem no banco e são ignorados pelo eco).
@@ -316,7 +334,7 @@ class Session {
           if (m.messageStubType === WAMessageStubType.CIPHERTEXT && !m.key.fromMe) await this.onUndecryptable(m);
           continue;
         }
-        const waId = fromKey(m.key);
+        const waId = await this.resolveWaId(m.key);
         if (!waId) continue;
         const cloudMsg = toCloudMessage(m);
         if (!cloudMsg) continue;
@@ -355,7 +373,7 @@ class Session {
    * que é substituído pelo conteúdo real quando ele chega (mesmo id).
    */
   async onUndecryptable(m) {
-    const waId = fromKey(m.key);
+    const waId = await this.resolveWaId(m.key);
     if (!waId) return;
     const reason = String(m.messageStubParameters?.[0] || 'erro desconhecido').slice(0, 200);
     this.decryptFailures.unshift({ at: new Date().toISOString(), id: m.key.id, from: waId, remote_jid: m.key.remoteJid || null, remote_jid_alt: m.key.remoteJidAlt || null, reason });

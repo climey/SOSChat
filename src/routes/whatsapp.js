@@ -137,6 +137,32 @@ router.post('/debug/reset-session', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Contatos criados só pelo LID do WhatsApp (sem número): quantos há e unificação com o número pelo mapeamento guardado
+router.get('/lids', requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(`SELECT COUNT(*)::int AS n FROM contacts WHERE wa_id LIKE '%@lid'`);
+    res.json({ count: rows[0].n });
+  } catch (err) { next(err); }
+});
+router.post('/lids/merge', requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(`SELECT id, wa_id FROM contacts WHERE wa_id LIKE '%@lid' ORDER BY id`);
+    const merged = []; const unresolved = [];
+    const contacts = require('../services/contacts');
+    for (const c of rows) {
+      const lidUser = c.wa_id.split('@')[0].split(':')[0];
+      const map = await db.query('SELECT value FROM wa_auth WHERE key = $1 LIMIT 1', [`lid-mapping-${lidUser}_reverse`]);
+      let pn = null;
+      try { pn = map.rows[0] ? JSON.parse(map.rows[0].value) : null; } catch { pn = null; }
+      if (typeof pn !== 'string' || !/^\d{8,20}$/.test(pn)) { unresolved.push(c.wa_id); continue; }
+      const out = await contacts.mergeInto(c.id, pn);
+      if (out) merged.push({ lid: c.wa_id, wa_id: pn });
+    }
+    if (merged.length) realtime.broadcast('conversations:reload', { reason: 'lid-merged' });
+    res.json({ merged, unresolved });
+  } catch (err) { next(err); }
+});
+
 router.get('/orphans', requireAdmin, async (req, res, next) => {
   try {
     res.json({ count: await conversations.countOrphans() });
