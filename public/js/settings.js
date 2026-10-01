@@ -512,26 +512,107 @@
   });
 
   // ---------- Distribuição ----------
+  const AV_TEXT = { available: 'Disponível', away: 'Ausente', offline: 'Offline' };
+  const RULE_LABEL = { afinidade: 'afinidade', revezamento: 'revezamento', carga: 'carga', assumida: 'assumida', devolvida: 'voltou à fila', fila: 'fila', outro: 'outros' };
+  const hhmm = (d) => (d ? new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—');
+  const whenShort = (d) => {
+    if (!d) return '—';
+    const x = new Date(d);
+    return x.toDateString() === new Date().toDateString() ? hhmm(d) : `${x.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} ${hhmm(d)}`;
+  };
   async function loadDistribution() {
     const { settings } = await api('GET', '/api/settings');
     $('dist-enabled').checked = Boolean(settings.distribution_enabled);
+    $('dist-mode').value = settings.distribution_mode || 'rodizio';
     $('dist-limit').value = settings.distribution_waiting_limit ?? 5;
     $('dist-affinity').checked = settings.distribution_affinity !== false;
+    $('dist-affinity-days').value = settings.distribution_affinity_days ?? 30;
     $('dist-handoff').checked = settings.distribution_handoff !== false;
     $('dist-grace').value = settings.distribution_offline_grace_seconds ?? 120;
     const ro = me.role !== 'admin';
-    for (const id of ['dist-enabled', 'dist-limit', 'dist-affinity', 'dist-handoff', 'dist-grace']) $(id).disabled = ro;
-    try {
-      const st = await api('GET', '/api/settings/distribution');
-      $('dist-status').innerHTML = st.enabled
-        ? `<b>Ligada.</b> ${st.queued} conversa(s) na fila · elegíveis agora: ${st.eligible.length ? st.eligible.map((u) => `${esc(u.name)} (${u.waiting} esperando)`).join(', ') : 'ninguém (todos offline, ausentes ou no limite)'}`
-        : `<b>Desligada.</b> ${st.queued} conversa(s) sem responsável no momento.`;
-    } catch { $('dist-status').textContent = ''; }
+    for (const id of ['dist-enabled', 'dist-mode', 'dist-limit', 'dist-affinity', 'dist-affinity-days', 'dist-handoff', 'dist-grace']) $(id).disabled = ro;
+    await loadDistStatus();
+    if (me.role === 'admin') await loadDistLog();
   }
+  /** Situação de cada atendente agora. */
+  async function loadDistStatus() {
+    let st;
+    try { st = await api('GET', '/api/settings/distribution'); } catch { $('dist-status').textContent = ''; return; }
+    const modeText = st.mode === 'carga' ? 'por carga (menos esperando)' : 'revezamento';
+    $('dist-status').innerHTML = st.enabled
+      ? `<b>Ligada</b> · critério: ${modeText} · ${st.queued} conversa(s) na fila · podem receber agora: <b>${st.eligible.length}</b>`
+      : `<b>Desligada.</b> ${st.queued} conversa(s) sem responsável no momento.`;
+    const agents = [...st.agents].sort((a, b) => (b.eligible - a.eligible) || (b.today - a.today) || a.name.localeCompare(b.name));
+    const sel = $('dist-log-user');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Todos os atendentes</option>' + st.agents.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+    sel.value = cur;
+    $('dist-agents').innerHTML = `<thead><tr><th>Atendente</th><th>Situação</th><th class="num">Esperando</th><th class="num">Ativas</th><th class="num">Abertas</th><th class="num">Recebidas hoje</th><th>Última</th><th>Recebe agora?</th></tr></thead>
+      <tbody>${agents.map((a) => {
+        const rules = Object.entries(a.today_by_rule || {}).map(([r, n]) => `${n} ${RULE_LABEL[r] || r}`).join(' · ');
+        return `<tr class="${a.eligible ? '' : 'off'}">
+          <td><b>${esc(a.name)}</b>${a.sector_name ? ` <span class="chip-soft">${esc(a.sector_name)}</span>` : ''}</td>
+          <td><span class="av-dot av-${a.availability}"></span>${AV_TEXT[a.availability] || a.availability}${a.online ? '' : ' <span class="muted">(fora do chat)</span>'}</td>
+          <td class="num">${a.waiting}</td>
+          <td class="num">${a.active}</td>
+          <td class="num">${a.open}</td>
+          <td class="num"><b>${a.today}</b>${rules ? `<div class="small muted">${esc(rules)}</div>` : ''}</td>
+          <td>${esc(whenShort(a.last_assigned_at))}</td>
+          <td>${a.eligible ? '<span class="dist-yes">Sim</span>' : `<span class="muted">Não: ${esc(a.why_not)}</span>`}</td>
+        </tr>`;
+      }).join('')}</tbody>`;
+  }
+  /** Explica uma decisão: regra, quem podia receber (com os números) e quem ficou de fora. */
+  function whyHtml(d) {
+    const det = d.details;
+    if (!det) return '<div class="muted">Sem detalhes registrados (decisão anterior à atualização do painel).</div>';
+    const rule = {
+      afinidade: `Já atendeu este cliente${det.affinity_days ? ` nos últimos ${det.affinity_days} dias` : ''}, e podia receber.`,
+      revezamento: 'Era a vez: entre quem podia receber, foi quem recebeu conversa há mais tempo.',
+      carga: 'Entre quem podia receber, era quem tinha menos clientes esperando resposta.',
+      assumida: `A dona da conversa (${esc(det.from?.name || '')}) estava offline quando o cliente escreveu.`,
+      fila: 'Ninguém podia receber naquele momento; a conversa ficou na fila.',
+    }[d.rule] || '';
+    const cand = (det.candidates || []).map((c) => `<li${c.id === det.chosen ? ' class="chosen"' : ''}>${esc(c.name)}: ${c.waiting} esperando, ${c.today} recebida(s) hoje, última às ${esc(hhmm(c.last_assigned_at))}${c.id === det.chosen ? ' <b>← escolhido</b>' : ''}</li>`).join('');
+    const exc = (det.excluded || []).map((c) => `<li>${esc(c.name)}: ${esc(c.why)}</li>`).join('');
+    return `<div>${rule}</div>
+      ${cand ? `<div class="dist-why-h">Podiam receber</div><ul>${cand}</ul>` : ''}
+      ${exc ? `<div class="dist-why-h">Fora da distribuição</div><ul>${exc}</ul>` : ''}`;
+  }
+  async function loadDistLog() {
+    const user = $('dist-log-user').value;
+    let log;
+    try { ({ log } = await api('GET', `/api/settings/distribution/log?limit=60${user ? `&user=${user}` : ''}`)); }
+    catch (err) { $('dist-log').textContent = err.message; return; }
+    const open = new Set([...document.querySelectorAll('#dist-log details[open]')].map((x) => x.dataset.id));
+    $('dist-log').innerHTML = log.length ? log.map((d) => {
+      const to = d.user_name ? `→ <b>${esc(d.user_name)}</b>` : '<span class="muted">→ fila</span>';
+      return `<details class="dist-entry" data-id="${d.id}" ${open.has(String(d.id)) ? 'open' : ''}>
+        <summary><span class="t">${esc(whenShort(d.created_at))}</span>
+          <a href="/?c=${d.conversation_id}" target="_blank" rel="noopener">${esc(d.contact || 'Cliente')}</a> ${to}
+          <span class="chip-soft">${esc(RULE_LABEL[d.rule] || d.reason)}</span>${d.from_user_name && d.rule === 'devolvida' ? ` <span class="muted">(${esc(d.reason)})</span>` : ''}</summary>
+        <div class="dist-why">${whyHtml(d)}</div>
+      </details>`;
+    }).join('') : '<div>Nenhuma distribuição registrada ainda.</div>';
+  }
+  $('dist-log-user').addEventListener('change', loadDistLog);
+  $('dist-refresh').addEventListener('click', () => { loadDistStatus(); if (me.role === 'admin') loadDistLog(); });
+  // atualiza sozinho enquanto a seção está aberta
+  setInterval(() => {
+    const sec = document.querySelector('.settings-section[data-section="distribuicao"]');
+    if (!sec || sec.hidden || document.hidden || !me) return;
+    loadDistStatus();
+    if (me.role === 'admin') loadDistLog();
+  }, 15000);
   $('dist-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await api('PUT', '/api/settings', { distribution_enabled: $('dist-enabled').checked, distribution_waiting_limit: Number($('dist-limit').value), distribution_affinity: $('dist-affinity').checked, distribution_handoff: $('dist-handoff').checked, distribution_offline_grace_seconds: Number($('dist-grace').value) });
+      await api('PUT', '/api/settings', {
+        distribution_enabled: $('dist-enabled').checked, distribution_mode: $('dist-mode').value,
+        distribution_waiting_limit: Number($('dist-limit').value), distribution_affinity: $('dist-affinity').checked,
+        distribution_affinity_days: Number($('dist-affinity-days').value), distribution_handoff: $('dist-handoff').checked,
+        distribution_offline_grace_seconds: Number($('dist-grace').value),
+      });
       toast('Distribuição salva');
       loadDistribution();
     } catch (err) { toast(err.message, true); }

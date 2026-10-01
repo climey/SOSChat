@@ -92,6 +92,25 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
 .tag.selectable:hover { background: var(--surface-2); }
 .tag.selectable.on { border-color: var(--tag-color, var(--primary)); background: color-mix(in srgb, var(--tag-color, var(--primary)) 18%, transparent); color: var(--text); }
 .chip-soft { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.dist-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dist-head h3 { margin: 0; }
+.dist-table-wrap { overflow-x: auto; margin-top: 10px; }
+.dist-table td { vertical-align: top; font-size: 13px; }
+.dist-table tr.off td { opacity: 0.75; }
+.dist-yes { color: var(--green); font-weight: 600; }
+.av-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+.av-dot.av-available { background: var(--green); }
+.av-dot.av-away { background: #f59f00; }
+.dist-log { margin-top: 10px; max-height: 560px; overflow-y: auto; }
+.dist-entry { border-bottom: 1px solid var(--border); padding: 8px 2px; color: var(--text); }
+.dist-entry summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dist-entry summary .t { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 78px; }
+.dist-entry summary a { color: var(--text); text-decoration: none; font-weight: 500; }
+.dist-entry summary a:hover { text-decoration: underline; }
+.dist-why { margin: 8px 0 4px 86px; color: var(--muted); }
+.dist-why ul { margin: 4px 0 6px; padding-left: 18px; }
+.dist-why li.chosen { color: var(--text); }
+.dist-why-h { margin-top: 6px; font-weight: 600; color: var(--text); }
 .chip-soft.off { color: #ff8787; border-color: rgba(224,49,49,0.5); }
 .badge { background: var(--primary); color: #fff; border-radius: 999px; padding: 1px 7px; font-size: 11px; font-weight: 700; min-width: 20px; text-align: center; }
 .muted { color: var(--muted); }

@@ -32,6 +32,8 @@ const KEYS = {
   distribution_affinity: (v) => (typeof v === 'boolean' ? (v ? '1' : '0') : (['0', '1'].includes(v) ? v : null)),
   distribution_handoff: (v) => (typeof v === 'boolean' ? (v ? '1' : '0') : (['0', '1'].includes(v) ? v : null)),
   distribution_offline_grace_seconds: (v) => (Number.isInteger(v) && v >= 10 && v <= 3600 ? String(v) : null),
+  distribution_mode: (v) => (['rodizio', 'carga'].includes(v) ? v : null),
+  distribution_affinity_days: (v) => (Number.isInteger(v) && v >= 0 && v <= 365 ? String(v) : null),
   vehicle_preview_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   vehicle_fix_template: (v) => (typeof v === 'string' && v.trim().length >= 10 && v.length <= 1500 ? v.trim() : null),
   recurrence_occasional_credits: (v) => (Number.isInteger(v) && v >= 1 && v <= 1000 ? v : null),
@@ -65,6 +67,8 @@ async function getAll() {
   out.distribution_affinity = on(out.distribution_affinity, true);
   out.distribution_handoff = on(out.distribution_handoff, true);
   out.distribution_offline_grace_seconds = Number(out.distribution_offline_grace_seconds ?? D.offlineGraceSeconds);
+  out.distribution_mode = ['rodizio', 'carga'].includes(out.distribution_mode) ? out.distribution_mode : D.mode;
+  out.distribution_affinity_days = Number(out.distribution_affinity_days ?? D.affinityDays);
   out.image_read_available = require('../services/image-reader').configured();
   return out;
 }
@@ -78,6 +82,14 @@ async function consultationKinds(client = db) {
 /** Situação da distribuição: ligada?, fila, quem está elegível agora. */
 router.get('/distribution', async (req, res, next) => {
   try { res.json(await require('../services/distribution').status()); } catch (err) { next(err); }
+});
+
+/** Registro das últimas distribuições (admin): para quem foi, por quê e como estava cada atendente. ?user=ID filtra. */
+router.get('/distribution/log', requireAdmin, async (req, res, next) => {
+  try {
+    const userId = Number.isInteger(Number(req.query.user)) && Number(req.query.user) > 0 ? Number(req.query.user) : null;
+    res.json({ log: await require('../services/distribution').recentLog({ limit: req.query.limit, userId }) });
+  } catch (err) { next(err); }
 });
 
 router.get('/', async (req, res, next) => {

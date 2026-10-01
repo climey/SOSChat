@@ -132,6 +132,8 @@ public/                login, inbox, relatórios e configurações
 | POST | `/api/whatsapp/accounts` | `{name}` número por QR code; `{name, provider: 'cloud', phone_number_id, access_token, waba_id?}` número oficial (credenciais validadas na Meta) |
 | PATCH | `/api/whatsapp/accounts/:id` | `{name, auto_tag_id}` renomeia o número e define a etiqueta automática das conversas novas; `{access_token, phone_number_id, waba_id}` troca as credenciais de um número oficial |
 | POST | `/api/whatsapp/accounts/:id/reconnect` | QR code: reconecta a sessão; oficial: testa as credenciais na Meta |
+| GET | `/api/settings/distribution` | distribuição agora: critério, fila e cada atendente (esperando, ativas, abertas, recebidas hoje por regra, se pode receber e por quê) |
+| GET | `/api/settings/distribution/log?user&limit` | (admin) últimas decisões da distribuição: para quem foi, a regra e a situação de cada atendente no momento |
 | GET/POST | `/api/whatsapp/debug/contact?phone=&ask=1`, `/debug/contact/merge` | (admin) onde estão as conversas de um número, inclusive a provisória criada pelo código interno (LID) do WhatsApp, e unificação das duas |
 | GET/POST | `/api/whatsapp/lids`, `/api/whatsapp/lids/merge` | (admin) quantos contatos estão só pelo código interno e unificação em lote pelos mapeamentos já conhecidos |
 | GET | `/api/whatsapp/debug/decrypt` | (admin) mensagens que chegaram cifradas e não puderam ser lidas: motivo técnico e as que ainda estão em "aguardando" |

@@ -294,19 +294,32 @@
           <section class="settings-section" data-section="distribuicao" hidden>
             <div class="card">
               <h3>Distribuição automática de conversas</h3>
-              <p class="small muted">Conversa nova vai para quem está <b>no chat com status Disponível</b> e marcado para receber conversas novas (aba Atendentes). Escolha: quem já atendeu o cliente antes; senão, quem tem menos clientes esperando; empate pelo rodízio. Sem ninguém elegível, a conversa fica sem responsável e é distribuída assim que alguém entrar, voltar de ausente, responder ou finalizar uma conversa.</p>
+              <p class="small muted">Conversa nova vai para quem está <b>no chat com status Disponível</b> e marcado para receber conversas novas (aba Atendentes). Primeiro, quem já atendeu o cliente (afinidade); senão, pelo critério escolhido abaixo. Sem ninguém disponível, a conversa fica sem responsável e é distribuída assim que alguém entrar, voltar de ausente, responder ou finalizar uma conversa.</p>
               <form id="dist-form">
                 <div class="field"><label class="label" style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="dist-enabled"> Ligar a distribuição automática</label></div>
+                <div class="field"><label class="label">Critério</label>
+                  <select class="select" id="dist-mode" style="max-width:520px">
+                    <option value="rodizio">Revezamento: cada um na sua vez (quantidades iguais para quem está disponível)</option>
+                    <option value="carga">Por carga: quem tem menos clientes esperando (favorece quem responde mais rápido)</option>
+                  </select></div>
                 <div class="field"><label class="label">Limite de clientes esperando resposta por atendente (0 = sem limite)</label><input class="input" type="number" id="dist-limit" min="0" max="100" style="max-width:120px"></div>
-                <div class="field"><label class="label" style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="dist-affinity"> Preferir o último atendente do cliente (afinidade)</label></div>
+                <div class="field"><label class="label" style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="dist-affinity"> Preferir o último atendente do cliente (afinidade)</label>
+                  <label class="label" style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:400">vale se ele atendeu o cliente nos últimos <input class="input" type="number" id="dist-affinity-days" min="0" max="365" style="max-width:80px"> dias (0 = sem prazo)</label></div>
                 <div class="field"><label class="label" style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="dist-handoff"> Passagem de turno: ao ficar offline, as conversas com cliente esperando voltam para a fila</label></div>
                 <div class="field"><label class="label">Tolerância para considerar que o atendente saiu do chat (segundos)</label><input class="input" type="number" id="dist-grace" min="10" max="3600" style="max-width:120px"><p class="small muted" style="margin:6px 0 0">Cobre atualizar a página ou uma queda rápida de internet. Só depois desse tempo as conversas dele voltam para a fila.</p></div>
                 <div class="row-actions"><button class="btn btn-primary" type="submit" data-admin-only>Salvar</button></div>
               </form>
             </div>
             <div class="card" style="margin-top:16px">
-              <h3>Agora</h3>
+              <div class="dist-head"><h3>Agora</h3><button type="button" class="btn btn-sm btn-ghost" id="dist-refresh">Atualizar</button></div>
               <div id="dist-status" class="small muted">Carregando…</div>
+              <div class="dist-table-wrap"><table class="table dist-table" id="dist-agents"></table></div>
+              <p class="small muted" style="margin:8px 0 0"><b>Esperando</b>: clientes aguardando resposta dele. <b>Ativas</b>: conversas dele com mensagem na última hora. <b>Recebidas hoje</b>: entregues pela distribuição desde 00:00.</p>
+            </div>
+            <div class="card" style="margin-top:16px" data-admin-only>
+              <div class="dist-head"><h3>Últimas distribuições</h3>
+                <select class="select" id="dist-log-user" style="max-width:220px"><option value="">Todos os atendentes</option></select></div>
+              <div id="dist-log" class="dist-log small muted">Carregando…</div>
             </div>
           </section>
 
