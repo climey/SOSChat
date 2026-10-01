@@ -210,6 +210,7 @@
       : `Provedor oficial (Cloud API da Meta). Para usar vários números por QR code, defina <code>WA_PROVIDER=baileys</code>. Webhook: <code>${esc(location.origin)}/webhook/whatsapp</code>`;
     $('wa-add-form').hidden = !(isAdmin && multi);
     $('wa-cloud-add').hidden = !(isAdmin && multi);
+    $('wa-lidfind').hidden = !(isAdmin && multi);
     $('wa-webhook-url').textContent = `${location.origin}/webhook/whatsapp`;
 
     $('wa-accounts').innerHTML = waAccounts.length
@@ -242,6 +243,44 @@
       $('wa-lids-count').textContent = count;
     } catch { /* ignora */ }
   }
+  // Procurar as conversas de um número, inclusive a provisória criada pelo código interno do WhatsApp
+  function convLine(c) {
+    const when = c.last_message_at ? new Date(c.last_message_at).toLocaleString('pt-BR') : 'sem mensagens';
+    return `<li>Conversa #${c.id} (${c.status === 'open' ? 'aberta' : 'finalizada'}, ${c.messages} mensagem(ns)) · última em ${esc(when)}: "${esc((c.last_message_preview || '').slice(0, 60))}"</li>`;
+  }
+  async function findPhone(phone) {
+    const out = $('wa-lidfind-out');
+    out.innerHTML = '<span class="muted small">Procurando…</span>';
+    let r;
+    try { r = await api('GET', `/api/whatsapp/debug/contact?ask=1&phone=${encodeURIComponent(phone)}`); }
+    catch (err) { out.innerHTML = `<span class="err">${esc(err.message)}</span>`; return; }
+    const parts = [];
+    parts.push(r.phone
+      ? `<div><b>Pelo número ${esc(r.wa_id)}</b><ul>${r.phone.conversations.map(convLine).join('') || '<li>Nenhuma conversa</li>'}</ul></div>`
+      : `<div><b>Pelo número ${esc(r.wa_id)}</b>: nenhum contato cadastrado.</div>`);
+    if (r.lid_contact) {
+      parts.push(`<div class="warn"><b>Conversa provisória encontrada</b> (o WhatsApp identificou este cliente só pelo código interno ${esc(r.lid)}):<ul>${r.lid_contact.conversations.map(convLine).join('')}</ul>
+        <button class="btn btn-sm btn-primary" id="wa-lidfind-merge" data-phone="${esc(r.wa_id)}">Unificar com o número</button></div>`);
+    } else if (r.lid) {
+      parts.push(`<div class="muted small">Código interno deste cliente: ${esc(r.lid)} (${r.lid_source === 'whatsapp' ? 'consultado agora no WhatsApp' : 'já conhecido'}). Não há conversa provisória: as mensagens dele chegam pelo número.</div>`);
+    } else {
+      parts.push(`<div class="muted small">Não foi possível descobrir o código interno deste número${r.ask_error ? ` (${esc(r.ask_error)})` : ''}.</div>`);
+    }
+    out.innerHTML = parts.join('');
+  }
+  $('wa-lidfind-form').addEventListener('submit', (e) => { e.preventDefault(); const p = $('wa-lidfind-phone').value.trim(); if (p) findPhone(p); });
+  $('wa-lidfind-out').addEventListener('click', async (e) => {
+    const b = e.target.closest('#wa-lidfind-merge');
+    if (!b) return;
+    b.disabled = true;
+    try {
+      const r = await api('POST', '/api/whatsapp/debug/contact/merge', { phone: b.dataset.phone });
+      toast(`${r.conversations} conversa(s) passaram para o contato do número`);
+      findPhone(b.dataset.phone);
+      loadOrphans();
+    } catch (err) { toast(err.message, true); b.disabled = false; }
+  });
+
   $('wa-lids-merge').addEventListener('click', async () => {
     if (!confirm('Unificar os contatos sem número com o número correspondente? As conversas deles passam para o contato certo (nada é apagado).')) return;
     try {

@@ -554,6 +554,16 @@ class Session {
     }
   }
 
+  /**
+   * Pergunta ao WhatsApp qual é o código interno (LID) de um número. O mapeamento fica guardado nos dois
+   * sentidos, então as mensagens seguintes desse cliente já chegam pelo número.
+   */
+  async lidForPhone(waId) {
+    if (!this.isConnected()) throw new Error(`Número "${this.account.name}" desconectado. Reconecte em Configurações para consultar.`);
+    const lid = await this.sock.signalRepository.lidMapping.getLIDForPN(toJid(waId));
+    return lid ? jidNormalizedUser(lid) : null;
+  }
+
   /** Encerra a sessão no WhatsApp, limpa as credenciais e gera um novo QR. */
   async logout() {
     const old = this.sock;
@@ -714,6 +724,7 @@ module.exports = {
   logout: (accountId) => getSession(accountId).logout(),
   reconnect: (accountId) => getSession(accountId).reconnect(),
   resetSession: (accountId, waId) => getSession(accountId).resetSession(waId),
+  lidForPhone: (accountId, waId) => getSession(accountId).lidForPhone(waId),
   decryptFailures: () => [...sessions.values()].flatMap((s) => s.decryptFailures.map((f) => ({ account_id: s.account.id, ...f }))),
   isConfigured, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, verifySignature,
   _vcardToContact: vcardToContact,

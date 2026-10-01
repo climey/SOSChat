@@ -463,6 +463,13 @@ mark.hit.current { background: var(--amber); color: #1a1500; }
 .conv-menu button svg { width: 16px; height: 16px; color: var(--muted); }
 .conv-menu button.danger { color: #ff8787; }
 .conv-menu .sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.wa-lidfind { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; }
+.wa-lidfind .inline-form { margin-bottom: 0; }
+.wa-lidfind #wa-lidfind-out:not(:empty) { margin-top: 10px; font-size: 13px; }
+.wa-lidfind ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+.wa-lidfind .warn { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: rgba(245, 159, 0, 0.1); border: 1px solid rgba(245, 159, 0, 0.35); }
+.wa-lidfind .warn button { margin-top: 8px; }
+.wa-lidfind .err { color: #ff6b6b; }
 .wa-orphans { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding: 10px 14px; border-radius: 10px; background: rgba(245, 159, 0, 0.1); border: 1px solid rgba(245, 159, 0, 0.35); font-size: 13px; color: #ffd43b; }
 
 /* ---------- Aviso de nova versão ---------- */

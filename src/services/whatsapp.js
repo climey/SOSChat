@@ -80,6 +80,7 @@ module.exports = {
   refreshAvatar: (accountId, waId) => (isBaileys && accountId && !cloudOf(accountId) ? baileys.refreshAvatar(accountId, waId) : Promise.resolve()),
   // Diagnóstico de mensagens cifradas que não puderam ser lidas e reinício da sessão com um contato (só QR code)
   decryptFailures: () => (isBaileys ? baileys.decryptFailures() : []),
+  lidForPhone: (accountId, waId) => (isBaileys && accountId && !cloudOf(accountId) ? baileys.lidForPhone(accountId, waId) : Promise.resolve(null)),
   resetSession: (accountId, waId) => (isBaileys && !cloudOf(accountId) ? baileys.resetSession(accountId, waId) : Promise.reject(new Error('Só disponível em número conectado pelo QR code'))),
   CloudError: cloud.CloudError,
 };

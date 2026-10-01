@@ -163,6 +163,65 @@ router.post('/lids/merge', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * Onde estão as conversas de um número (admin). Mostra também a conversa provisória que o WhatsApp
+ * pode ter criado identificando o cliente só pelo código interno (LID). ?ask=1 pergunta o LID ao WhatsApp.
+ */
+async function findByPhone(phone, { ask = false } = {}) {
+  const contacts = require('../services/contacts');
+  const waId = contacts.normalizeWaId(phone);
+  if (!waId) return { error: 'Informe um telefone válido com DDD (ex.: 11 97730-3668)' };
+  let lidUser = null;
+  let lidSource = null;
+  const stored = await db.query('SELECT value FROM wa_auth WHERE key = $1 LIMIT 1', [`lid-mapping-${waId}`]);
+  try { const v = stored.rows[0] ? JSON.parse(stored.rows[0].value) : null; if (typeof v === 'string' && v) { lidUser = v; lidSource = 'guardado'; } } catch { /* ignora */ }
+  let askError = null;
+  if (!lidUser && ask) {
+    try {
+      const accountId = whatsapp.pickAccount();
+      const lid = accountId ? await whatsapp.lidForPhone(accountId, waId) : null;
+      if (lid) { lidUser = String(lid).split('@')[0].split(':')[0]; lidSource = 'whatsapp'; }
+    } catch (err) { askError = err.message; }
+  }
+  const convsOf = async (contactId) => (await db.query(
+    `SELECT id, status, last_message_at, last_message_preview, last_message_direction,
+            (SELECT COUNT(*)::int FROM messages m WHERE m.conversation_id = c.id) AS messages
+       FROM conversations c WHERE contact_id = $1 ORDER BY last_message_at DESC LIMIT 10`, [contactId])).rows;
+  const one = async (where, params) => {
+    const { rows } = await db.query(`SELECT id, wa_id, name, profile_name FROM contacts WHERE ${where} ORDER BY id LIMIT 1`, params);
+    if (!rows.length) return null;
+    return { ...rows[0], conversations: await convsOf(rows[0].id) };
+  };
+  return {
+    wa_id: waId,
+    lid: lidUser ? `${lidUser}@lid` : null,
+    lid_source: lidSource,
+    ask_error: askError,
+    phone: await one('wa_id = $1', [waId]),
+    lid_contact: lidUser ? await one('wa_id = $1 OR wa_id LIKE $2', [`${lidUser}@lid`, `${lidUser}:%@lid`]) : null,
+  };
+}
+
+router.get('/debug/contact', requireAdmin, async (req, res, next) => {
+  try {
+    const out = await findByPhone(req.query.phone, { ask: req.query.ask === '1' });
+    if (out.error) return res.status(400).json({ error: out.error });
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+/** Unifica a conversa provisória (LID) de um número com a conversa do próprio número. */
+router.post('/debug/contact/merge', requireAdmin, async (req, res, next) => {
+  try {
+    const out = await findByPhone(req.body?.phone, { ask: true });
+    if (out.error) return res.status(400).json({ error: out.error });
+    if (!out.lid_contact) return res.status(404).json({ error: out.lid ? 'Nenhuma conversa provisória para este número.' : `Não foi possível descobrir o código interno deste número${out.ask_error ? ` (${out.ask_error})` : ''}.` });
+    const merged = await require('../services/contacts').mergeInto(out.lid_contact.id, out.wa_id);
+    realtime.broadcast('conversations:reload', { reason: 'lid-merged' });
+    res.json({ ...merged, conversations: out.lid_contact.conversations.length });
+  } catch (err) { next(err); }
+});
+
 router.get('/orphans', requireAdmin, async (req, res, next) => {
   try {
     res.json({ count: await conversations.countOrphans() });
