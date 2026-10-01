@@ -77,10 +77,5 @@
     window.SOS.toast(`Seu status foi alterado para ${AV_LABEL[availability] || availability}${by ? ` por ${by}` : ''}`, availability === 'offline');
   });
 
-  // Ao sair da página (outro site na mesma aba), o navegador pode guardá-la em cache com a conexão aberta:
-  // desconecta para não contar como presente; se a página voltar do cache, reconecta.
-  window.addEventListener('pagehide', () => socket.disconnect());
-  window.addEventListener('pageshow', (e) => { if (e.persisted) socket.connect(); });
-
   window.SOS.socket = socket;
 })();
