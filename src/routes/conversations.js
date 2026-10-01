@@ -102,10 +102,16 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+/**
+ * Histórico da conversa, das mais novas para trás (a tela mostra em ordem e carrega o resto ao subir).
+ * ?before=ID traz o pedaço anterior a essa mensagem; has_more diz se ainda há mensagens mais antigas.
+ */
 router.get('/:id/messages', async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     if (!id) return res.status(404).json({ error: 'Conversa não encontrada' });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+    const before = parseId(req.query.before);
     const { rows } = await db.query(
       `SELECT m.*, u.name AS sender_name, u.avatar_media_id AS sender_avatar, mf.size AS media_size,
               CASE WHEN q.id IS NULL THEN NULL ELSE json_build_object(
@@ -117,11 +123,13 @@ router.get('/:id/messages', async (req, res, next) => {
          LEFT JOIN messages q ON q.id = m.quoted_message_id
          LEFT JOIN users qu ON qu.id = q.sender_user_id
         WHERE m.conversation_id = $1
-        ORDER BY m.created_at ASC, m.id ASC
-        LIMIT 500`,
-      [id]
+          AND ($2::int IS NULL OR (m.created_at, m.id) < ((SELECT created_at FROM messages WHERE id = $2), $2))
+        ORDER BY m.created_at DESC, m.id DESC
+        LIMIT $3`,
+      [id, before, limit + 1]
     );
-    res.json({ messages: rows });
+    const hasMore = rows.length > limit;
+    res.json({ messages: rows.slice(0, limit).reverse(), has_more: hasMore });
   } catch (err) {
     next(err);
   }

@@ -141,6 +141,8 @@ public/                login, inbox, relatórios e configurações
 | GET | `/api/reports/recurrence?from&to` | clientes por faixa (Novo/Ocasional/Recorrente/Fiel) pelas consultas adquiridas, inativos, maiores compradores, taxa de retorno |
 | GET | `/api/conversations?recurrence=new\|occasional\|recurrent\|loyal\|inactive` | filtro por recorrência do cliente |
 
+| GET | `/api/conversations/:id/messages?limit&before` | histórico da conversa, das mais novas para trás; `has_more` indica se ainda há anteriores |
+
 Toda chamada que altera dados exige o header `X-Requested-With: XMLHttpRequest` (proteção CSRF) e o cookie de sessão.
 
 ## Roadmap

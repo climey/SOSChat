@@ -460,20 +460,53 @@
   });
 
   // ---------- Conversa aberta ----------
+  // O histórico vem das mensagens mais novas para trás; o resto é carregado ao subir a rolagem.
+  const MSG_PAGE = 200;
+  const msgPage = { hasMore: false, loading: false };
+  async function loadOlderMessages() {
+    if (msgPage.loading || !msgPage.hasMore || !state.messages.length) return;
+    const id = state.currentId;
+    msgPage.loading = true;
+    const btn = els.messages.querySelector('[data-older]');
+    if (btn) { btn.textContent = 'Carregando…'; btn.disabled = true; }
+    try {
+      const r = await api('GET', `/api/conversations/${id}/messages?limit=${MSG_PAGE}&before=${state.messages[0].id}`);
+      if (id !== state.currentId) return;
+      const have = new Set(state.messages.map((m) => m.id));
+      const older = r.messages.filter((m) => !have.has(m.id));
+      msgPage.hasMore = Boolean(r.has_more);
+      // mantém a leitura no mesmo ponto: o que foi acrescentado acima empurra o conteúdo para baixo
+      const prevHeight = els.messages.scrollHeight;
+      const prevTop = els.messages.scrollTop;
+      state.messages = older.concat(state.messages);
+      renderMessages(false);
+      els.messages.scrollTop = els.messages.scrollHeight - prevHeight + prevTop;
+    } catch (err) { toast(err.message, true); if (btn) { btn.textContent = 'Carregar mensagens anteriores'; btn.disabled = false; } }
+    finally { msgPage.loading = false; }
+  }
+  /** Carrega a conversa inteira (usado pela busca dentro da conversa). */
+  async function loadAllOlderMessages(maxPages = 30) {
+    for (let i = 0; i < maxPages && msgPage.hasMore; i++) await loadOlderMessages();
+  }
+  els.messages.addEventListener('scroll', () => { if (els.messages.scrollTop < 300) loadOlderMessages(); });
+  els.messages.addEventListener('click', (e) => { if (e.target.closest('[data-older]')) loadOlderMessages(); });
+
   async function openConversation(id) {
     state.currentId = id;
     emitViewing(id);
     state.vehicles.clear();
-    const [{ conversation }, { messages }, readings] = await Promise.all([
+    const [{ conversation }, page, readings] = await Promise.all([
       api('GET', `/api/conversations/${id}`),
-      api('GET', `/api/conversations/${id}/messages`),
+      api('GET', `/api/conversations/${id}/messages?limit=${MSG_PAGE}`),
       api('GET', `/api/readings?conversation=${id}`).catch(() => ({ readings: [] })),
     ]);
     state.readings = new Map((readings.readings || []).map((r) => [r.message_id, r]));
     state.refFocus = null;
     rememberPrefs(conversation);
     state.currentConv = conversation;
-    state.messages = messages;
+    state.messages = page.messages;
+    msgPage.hasMore = Boolean(page.has_more);
+    msgPage.loading = false;
     if (state.search.open) closeSearch();
     clearReply();
     cancelEdit();
@@ -617,7 +650,8 @@
 
   function renderMessages(scroll) {
     let lastDay = null;
-    els.messages.innerHTML = state.messages.map((m) => {
+    const older = msgPage.hasMore ? '<button type="button" class="msg-more" data-older="1">Carregar mensagens anteriores</button>' : '';
+    els.messages.innerHTML = older + state.messages.map((m) => {
       const day = fmtDay(m.created_at);
       const sep = day !== lastDay ? `<div class="day-sep">${esc(day)}</div>` : '';
       lastDay = day;
@@ -2367,12 +2401,20 @@
     const re = new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
     return safe.replace(re, (m) => `<mark class="hit">${m}</mark>`);
   }
-  function openSearch() {
+  async function openSearch() {
     state.search.open = true;
     $('msg-search').hidden = false;
     $('btn-search').classList.add('active');
     $('msg-search-input').focus();
     $('msg-search-input').select();
+    // a busca olha as mensagens na tela: numa conversa longa, traz o resto do histórico antes
+    if (msgPage.hasMore) {
+      $('msg-search-count').textContent = 'carregando o histórico…';
+      await loadAllOlderMessages();
+      if (!state.search.open) return;
+      $('msg-search-count').textContent = '';
+      if (state.search.q) runSearch(state.search.q);
+    }
   }
   // ---------- Conferência de chassi, placa, Renavam, CPF e CNPJ ----------
   state.readings = new Map(); // message id -> leitura da foto
@@ -2715,6 +2757,7 @@
     state.currentConv = null;
     state.contact = null;
     state.messages = [];
+    msgPage.hasMore = false;
     els.messages.innerHTML = '';
     els.chatPanel.hidden = true;
     els.chatEmpty.hidden = false;
