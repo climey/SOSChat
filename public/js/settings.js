@@ -150,7 +150,7 @@
     const rejectedLast = w.rejected && (!w.last_at || w.last_rejected_at > w.last_at);
     if (rejectedLast) out.push(`<div class="err">A Meta mandou ${w.rejected} aviso(s) e o SOS Chat recusou (último às ${esc(when(w.last_rejected_at))}). A chave WA_APP_SECRET no Railway não confere com a "Chave secreta do aplicativo" do app na Meta.</div>`);
     if (w.last_at) out.push(`<div class="phone">Última mensagem recebida da Meta: ${esc(when(w.last_at))}</div>`);
-    else if (!rejectedLast) out.push(`<div class="phone">Nenhuma mensagem recebida da Meta desde o último reinício${w.test_at ? `. O teste do painel da Meta chegou às ${esc(when(w.test_at))}: o webhook funciona. Se as mensagens reais não chegam, falta publicar o app na Meta.` : '.'}</div>`);
+    else if (!rejectedLast) out.push(`<div class="phone">Nenhuma mensagem de cliente recebida da Meta ainda${w.test_at ? `. O teste do painel da Meta chegou às ${esc(when(w.test_at))}: o webhook funciona. Se as mensagens reais não chegam, falta publicar o app na Meta.` : '.'}</div>`);
     return out.join('');
   }
 

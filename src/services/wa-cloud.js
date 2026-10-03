@@ -318,6 +318,14 @@ const accounts = {
       add(number.platform_type === 'CLOUD_API', 'Número na API de nuvem da Meta', `tipo: ${number.platform_type || '?'} · situação: ${number.status || '?'} · verificação: ${number.code_verification_status || '?'}`);
     } catch (err) { add(false, 'Consultar o número na Meta', err.message); }
 
+    try {
+      const wc = (await api.get(`${a.phone_number_id}?fields=webhook_configuration`)).webhook_configuration || {};
+      const parts = [['número', wc.phone_number], ['conta do WhatsApp', wc.whatsapp_business_account], ['app', wc.application]].filter(([, u]) => u);
+      const override = wc.phone_number || wc.whatsapp_business_account;
+      add(!override || override === expectedUrl, 'Para onde a Meta manda os avisos deste número', (parts.map(([k, u]) => `${k}: ${u}`).join(' · ') || 'nenhum endereço informado')
+        + (override && override !== expectedUrl ? ' · há um endereço próprio no número/conta que vale acima do webhook do app' : ''));
+    } catch (err) { add(false, 'Consultar para onde vão os avisos do número', err.message); }
+
     let app = null;
     try { app = await api.get('app'); add(true, 'App do token', `${app.name} (ID ${app.id})`); }
     catch (err) { add(false, 'Descobrir o app do token', err.message); }
@@ -350,7 +358,7 @@ const accounts = {
     } else if (!wa.appSecret) add(false, 'Chave secreta do app no servidor', 'WA_APP_SECRET não está definida no Railway.');
 
     const w = require('./webhook-stats').forPhoneNumberId(a.phone_number_id);
-    add(Boolean(w.last_at), 'Mensagem real recebida pelo SOS Chat (desde o último reinício)', w.last_at ? new Date(w.last_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : 'nenhuma ainda');
+    add(Boolean(w.last_at), 'Mensagem de cliente recebida pelo SOS Chat', w.last_at ? new Date(w.last_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : 'nenhuma ainda');
     return { checks, expected_url: expectedUrl, number, app };
   },
   async remove(id) {
