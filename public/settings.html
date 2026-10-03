@@ -111,11 +111,11 @@
               </form>
               <details class="wa-cloud-add" id="wa-cloud-add" data-admin-only>
                 <summary>Adicionar número oficial (API da Meta)</summary>
-                <p class="small muted">Número da sua conta do WhatsApp Business (WABA), pelo app da Meta. Em <b>developers.facebook.com → seu app → WhatsApp → API Setup</b> copie o <b>Phone number ID</b>; o token permanente vem de um usuário do sistema no Gerenciador de Negócios. Antes, configure no app o webhook <code id="wa-webhook-url"></code> (campo <b>messages</b>) e defina no servidor <code>WA_APP_SECRET</code> e <code>WA_VERIFY_TOKEN</code>.</p>
+                <p class="small muted">Número da sua conta do WhatsApp Business (WABA), pelo app da Meta. Em <b>developers.facebook.com → seu app → WhatsApp → API Setup</b> copie a <b>Identificação do número de telefone</b> e a <b>Identificação da conta do WhatsApp Business</b> (o SOS Chat usa a segunda para se inscrever na conta e receber as mensagens); o token permanente vem de um usuário do sistema no Gerenciador de Negócios. Antes, configure no app o webhook <code id="wa-webhook-url"></code> (campo <b>messages</b>) e defina no servidor <code>WA_APP_SECRET</code> e <code>WA_VERIFY_TOKEN</code>.</p>
                 <form class="inline-form" id="wa-cloud-form">
                   <input class="input" id="wa-cloud-name" placeholder="Nome (ex.: Oficial)" maxlength="60" required>
                   <input class="input" id="wa-cloud-pnid" placeholder="Phone number ID" pattern="\d{5,25}" required>
-                  <input class="input" id="wa-cloud-waba" placeholder="WABA ID (opcional)" pattern="\d{5,25}">
+                  <input class="input" id="wa-cloud-waba" placeholder="Identificação da conta do WhatsApp Business (WABA ID)" pattern="\d{5,25}" required>
                   <input class="input" id="wa-cloud-token" type="password" placeholder="Token de acesso permanente" required autocomplete="off">
                   <button class="btn btn-primary" type="submit">Conectar número oficial</button>
                 </form>

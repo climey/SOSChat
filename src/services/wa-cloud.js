@@ -159,7 +159,14 @@ function makeClient(creds) {
     throw new Error('A API oficial da Meta não permite apagar mensagens');
   }
 
-  return { isConfigured, info, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, storeInboundMedia };
+  /** Inscreve este app na conta do WhatsApp (WABA): sem isso a Meta não manda as mensagens dela para o nosso webhook. */
+  async function subscribeApp(wabaId) {
+    if (!isConfigured() || !wabaId) return false;
+    await graphRequest(`${wabaId}/subscribed_apps`, { method: 'POST' });
+    return true;
+  }
+
+  return { isConfigured, info, subscribeApp, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, storeInboundMedia };
 }
 
 /** Valida a assinatura X-Hub-Signature-256 do webhook (HMAC-SHA256 com o App Secret). */
@@ -223,6 +230,8 @@ const accounts = {
     if (!entry) throw new CloudError(404, 'Número não encontrado');
     try {
       const i = await entry.api.info();
+      try { await entry.api.subscribeApp(entry.account.waba_id); }
+      catch (err) { throw new Error(`Número conectado, mas a Meta não deixou inscrever o app na conta do WhatsApp (sem isso as mensagens não chegam): ${err.message}`); }
       const { rows } = await db.query(
         `UPDATE wa_accounts SET phone = COALESCE($2, phone), verified_name = $3, last_error = NULL, checked_at = NOW() WHERE id = $1 RETURNING ${COLS}`,
         [entry.account.id, i.mock ? null : i.phone, i.verified_name]
@@ -256,8 +265,7 @@ const accounts = {
       [name, phoneNumberId, wabaId, accessToken, i.mock ? null : i.phone, i.verified_name]
     );
     const entry = register(rows[0]);
-    broadcastStatus(entry);
-    return statusOf(entry);
+    return accounts.check(entry.account.id);
   },
   /** Atualiza nome, etiqueta automática ou credenciais (token/IDs, revalidados na Meta). */
   async update(id, patch) {
@@ -285,6 +293,7 @@ const accounts = {
     if (!sets.length) throw new CloudError(400, 'Nada para atualizar');
     const { rows } = await db.query(`UPDATE wa_accounts SET ${sets.join(', ')} WHERE id = $1 RETURNING ${COLS}`, vals);
     entry.account = rows[0];
+    if (newToken !== null || newPnid !== null || patch.waba_id !== undefined) return accounts.check(entry.account.id);
     broadcastStatus(entry);
     return statusOf(entry);
   },
