@@ -81,6 +81,8 @@ app.get(['/', '/index.html', '/reports.html', '/settings.html', '/contacts.html'
   res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(publicDir, file));
 });
+// Página pública exigida pela Meta para publicar o app do número oficial
+app.get('/privacidade', (req, res) => res.sendFile(path.join(publicDir, 'privacidade.html')));
 // no-cache = o navegador revalida a cada carregamento (304 quando nada mudou), evitando CSS/JS antigos após deploy
 app.use(express.static(publicDir, { index: false, etag: true, setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 
