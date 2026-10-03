@@ -262,6 +262,16 @@ router.post('/accounts/:id/logout', requireAdmin, requireMulti, async (req, res,
   }
 });
 
+/** Diagnóstico do número oficial (pergunta à Meta). */
+router.get('/accounts/:id/diagnose', requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await require('../services/wa-cloud').accounts.diagnose(parseId(req.params.id), `${String(req.get('x-forwarded-proto') || req.protocol).split(',')[0]}://${req.get('host')}`));
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
 router.post('/accounts/:id/reconnect', requireAdmin, requireMulti, async (req, res, next) => {
   try {
     await whatsapp.reconnect(parseId(req.params.id));

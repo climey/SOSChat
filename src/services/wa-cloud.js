@@ -166,7 +166,7 @@ function makeClient(creds) {
     return true;
   }
 
-  return { isConfigured, info, subscribeApp, sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, storeInboundMedia };
+  return { isConfigured, info, subscribeApp, get: (path) => graphRequest(path), sendText, editMessage, deleteMessage, sendMedia, sendReaction, setBlocked, markAsRead, fetchMedia, storeInboundMedia };
 }
 
 /** Valida a assinatura X-Hub-Signature-256 do webhook (HMAC-SHA256 com o App Secret). */
@@ -297,6 +297,61 @@ const accounts = {
     if (newToken !== null || newPnid !== null || patch.waba_id !== undefined) return accounts.check(entry.account.id);
     broadcastStatus(entry);
     return statusOf(entry);
+  },
+  /**
+   * Diagnóstico para quando as mensagens não chegam: como o número está na Meta, quais apps estão inscritos
+   * na conta do WhatsApp e se o webhook deste app está ativo, no endereço certo e com o campo "messages".
+   * Devolve { checks: [{ ok, label, detail }], ... } com textos prontos para a tela.
+   */
+  async diagnose(id, origin) {
+    const entry = registry.get(Number(id));
+    if (!entry) throw new CloudError(404, 'Número não encontrado');
+    const a = entry.account;
+    const api = entry.api;
+    const checks = [];
+    const add = (ok, label, detail = '') => checks.push({ ok, label, detail });
+    const expectedUrl = `${String(origin || config.appUrl).replace(/\/$/, '')}/webhook/whatsapp`;
+
+    let number = null;
+    try {
+      number = await api.get(`${a.phone_number_id}?fields=display_phone_number,verified_name,platform_type,status,code_verification_status,quality_rating`);
+      add(number.platform_type === 'CLOUD_API', 'Número na API de nuvem da Meta', `tipo: ${number.platform_type || '?'} · situação: ${number.status || '?'} · verificação: ${number.code_verification_status || '?'}`);
+    } catch (err) { add(false, 'Consultar o número na Meta', err.message); }
+
+    let app = null;
+    try { app = await api.get('app'); add(true, 'App do token', `${app.name} (ID ${app.id})`); }
+    catch (err) { add(false, 'Descobrir o app do token', err.message); }
+
+    if (!a.waba_id) add(false, 'Conta do WhatsApp (WABA ID)', 'O número foi cadastrado sem a Identificação da conta do WhatsApp Business. Remova e cadastre de novo com ela.');
+    else {
+      try {
+        const d = await api.get(`${a.waba_id}/subscribed_apps`);
+        const apps = (d.data || []).map((x) => ({ id: x.whatsapp_business_api_data?.id, name: x.whatsapp_business_api_data?.name, override: x.override_callback_uri || null }));
+        const mine = app && apps.find((x) => String(x.id) === String(app.id));
+        add(Boolean(mine), 'Este app está inscrito na conta do WhatsApp', `apps que recebem as mensagens da conta: ${apps.map((x) => `${x.name || x.id}${x.override ? ` (endereço próprio: ${x.override})` : ''}`).join(', ') || 'nenhum'}`);
+        if (mine && mine.override && mine.override !== expectedUrl) add(false, 'Endereço do webhook na inscrição', `a inscrição manda para ${mine.override}, e não para ${expectedUrl}`);
+      } catch (err) { add(false, 'Consultar os apps inscritos na conta do WhatsApp', err.message); }
+    }
+
+    if (app && wa.appSecret) {
+      try {
+        const res = await fetch(`${GRAPH}/${wa.apiVersion}/${app.id}/subscriptions?access_token=${encodeURIComponent(`${app.id}|${wa.appSecret}`)}`);
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(explainGraphError(d?.error?.code, d?.error?.message || `HTTP ${res.status}`));
+        const sub = (d.data || []).find((x) => x.object === 'whatsapp_business_account');
+        if (!sub) add(false, 'Webhook do app para WhatsApp', 'O app não tem webhook de WhatsApp configurado (Configuração → Webhook).');
+        else {
+          const fields = (sub.fields || []).map((f) => (typeof f === 'string' ? f : f.name));
+          add(sub.callback_url === expectedUrl, 'Endereço do webhook do app', `${sub.callback_url}${sub.callback_url === expectedUrl ? '' : ` (o certo é ${expectedUrl})`}`);
+          add(sub.active !== false, 'Webhook do app ativo', sub.active === false ? 'a Meta desativou o webhook (muitas falhas seguidas)' : '');
+          add(fields.includes('messages'), 'Campo "messages" assinado no webhook', `campos assinados: ${fields.join(', ') || 'nenhum'}`);
+        }
+      } catch (err) { add(false, 'Consultar o webhook do app', err.message); }
+    } else if (!wa.appSecret) add(false, 'Chave secreta do app no servidor', 'WA_APP_SECRET não está definida no Railway.');
+
+    const w = require('./webhook-stats').forPhoneNumberId(a.phone_number_id);
+    add(Boolean(w.last_at), 'Mensagem real recebida pelo SOS Chat (desde o último reinício)', w.last_at ? new Date(w.last_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : 'nenhuma ainda');
+    return { checks, expected_url: expectedUrl, number, app };
   },
   async remove(id) {
     const entry = registry.get(Number(id));

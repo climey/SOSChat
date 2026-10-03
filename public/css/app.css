@@ -307,6 +307,11 @@ table.table tr:last-child td { border-bottom: none; }
 .wa-account .info { flex: 1; min-width: 0; }
 .wa-account .title { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .wa-account .phone { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.wa-diagnose { margin-top: 10px; display: grid; gap: 6px; font-size: 12px; }
+.wa-diagnose > div { display: grid; gap: 1px; }
+.wa-diagnose .ok b { color: var(--green); }
+.wa-diagnose .bad b { color: #ff6b6b; }
+.wa-diagnose span { color: var(--muted); word-break: break-word; }
 .wa-account .err { font-size: 12px; color: #ff6b6b; margin-top: 6px; }
 .wa-account .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .wa-account .qr { text-align: center; flex-shrink: 0; }

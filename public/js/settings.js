@@ -172,6 +172,7 @@
             <button class="btn btn-sm" data-act="rename">Renomear</button>
             <button class="btn btn-sm" data-act="reconnect">Testar conexão</button>
             <button class="btn btn-sm" data-act="token">Trocar token</button>
+            <button class="btn btn-sm" data-act="diagnose">Diagnóstico</button>
             <button class="btn btn-sm btn-ghost" data-act="remove">Remover</button>
           </div>` : ''}
         </div>
@@ -354,6 +355,16 @@
           const me = (st.accounts || []).find((a) => String(a.id) === id);
           toast(me?.lastError ? `A Meta recusou: ${me.lastError}` : 'Conexão com a Meta OK', Boolean(me?.lastError));
         } else toast('Reconectando…');
+      } else if (btn.dataset.act === 'diagnose') {
+        btn.disabled = true;
+        const box = card.querySelector('.wa-diagnose') || card.querySelector('.info').appendChild(Object.assign(document.createElement('div'), { className: 'wa-diagnose' }));
+        box.textContent = 'Perguntando à Meta…';
+        try {
+          const d = await api('GET', `/api/whatsapp/accounts/${id}/diagnose`);
+          box.innerHTML = d.checks.map((c) => `<div class="${c.ok ? 'ok' : 'bad'}"><b>${c.ok ? '✓' : '✗'} ${esc(c.label)}</b>${c.detail ? `<span>${esc(c.detail)}</span>` : ''}</div>`).join('');
+        } catch (err) { box.textContent = err.message; }
+        finally { btn.disabled = false; }
+        return;
       } else if (btn.dataset.act === 'token') {
         const token = prompt('Novo token de acesso permanente da Meta:');
         if (token === null || !token.trim()) return;
