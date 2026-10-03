@@ -2,6 +2,7 @@ const express = require('express');
 const config = require('../config');
 const whatsapp = require('../services/whatsapp');
 const inbound = require('../services/inbound');
+const webhookStats = require('../services/webhook-stats');
 
 const router = express.Router();
 
@@ -21,8 +22,10 @@ router.post('/whatsapp', async (req, res) => {
   const signature = req.get('X-Hub-Signature-256');
   if (!whatsapp.verifySignature(req.rawBody || Buffer.alloc(0), signature)) {
     console.warn('[webhook] assinatura inválida');
+    webhookStats.noteRejected();
     return res.sendStatus(401);
   }
+  webhookStats.noteAccepted(req.body);
   // Responde rápido para a Meta não reenviar; processa em seguida
   res.sendStatus(200);
   try {

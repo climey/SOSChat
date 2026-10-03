@@ -202,6 +202,7 @@ function statusOf(entry) {
     status: a.last_error ? 'error' : (entry.api.isConfigured() ? 'connected' : 'mock'),
     hasQr: false, lastError: a.last_error || null, since: a.checked_at,
     phone_number_id: a.phone_number_id, waba_id: a.waba_id || null, verified_name: a.verified_name || null,
+    webhook: require('./webhook-stats').forPhoneNumberId(a.phone_number_id),
   };
 }
 function broadcastStatus(entry) {

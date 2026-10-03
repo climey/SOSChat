@@ -142,6 +142,18 @@
   let waTimer = null;
   let waAccounts = [];
 
+  /** Se as mensagens da Meta estão chegando (desde o último reinício do servidor). */
+  function webhookLine(w) {
+    if (!w) return '';
+    const when = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const out = [];
+    const rejectedLast = w.rejected && (!w.last_at || w.last_rejected_at > w.last_at);
+    if (rejectedLast) out.push(`<div class="err">A Meta mandou ${w.rejected} aviso(s) e o SOS Chat recusou (último às ${esc(when(w.last_rejected_at))}). A chave WA_APP_SECRET no Railway não confere com a "Chave secreta do aplicativo" do app na Meta.</div>`);
+    if (w.last_at) out.push(`<div class="phone">Última mensagem recebida da Meta: ${esc(when(w.last_at))}</div>`);
+    else if (!rejectedLast) out.push(`<div class="phone">Nenhuma mensagem recebida da Meta desde o último reinício${w.test_at ? `. O teste do painel da Meta chegou às ${esc(when(w.test_at))}: o webhook funciona. Se as mensagens reais não chegam, falta publicar o app na Meta.` : '.'}</div>`);
+    return out.join('');
+  }
+
   function accountCard(a, isAdmin, multi) {
     const [cls, label] = WA_LABELS[a.status] || ['resolved', a.status];
     const cloud = a.provider === 'cloud';
@@ -152,6 +164,7 @@
           <div class="title">${esc(a.name)} <span class="chip-soft">API oficial</span> <span class="status-pill ${cls}">${esc(label)}</span></div>
           <div class="phone">${a.phone ? esc(a.phone) : 'Telefone aparece após validar'}${a.verified_name ? ` · ${esc(a.verified_name)}` : ''} · ID ${esc(a.phone_number_id || '')}</div>
           ${a.lastError ? `<div class="err">${esc(a.lastError)}</div>` : ''}
+          ${webhookLine(a.webhook)}
           ${isAdmin
             ? `<label class="wa-autotag">Etiqueta automática nas conversas novas <select class="select" data-autotag="${a.id}"><option value="">Nenhuma</option>${allTags.map((t) => `<option value="${t.id}" ${a.auto_tag_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>`
             : (a.auto_tag_id ? `<div class="wa-autotag">Etiqueta automática: <b>${esc((allTags.find((t) => t.id === a.auto_tag_id) || {}).name || '')}</b></div>` : '')}
